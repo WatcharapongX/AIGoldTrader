@@ -1,0 +1,41 @@
+# ===== Secrets / Environment =====
+.env
+.env.*
+!.env.example
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ===== Node / Next.js =====
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+
+# ===== Build / artifacts =====
+dist/
+build/
+*.log
+
+# ===== IDE / OS =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ===== Local data =====
+*.sqlite
+*.sqlite3
+data/local/
