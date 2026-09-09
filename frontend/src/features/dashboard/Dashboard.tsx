@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { api } from '@/lib/api';
 import { MarketConnection, type ConnectionState } from '@/features/chart/transport';
 import type { DashboardSummary, EconomicEvent } from '@/types/dashboard.generated';
@@ -8,124 +9,348 @@ import type { Quote } from '@/types/market.generated';
 import { bangkok, countdown, eventName, label as newsLabel, numeric } from '@/features/news/thai';
 import { names as strategyLabels } from '@/features/strategy/thai';
 import { parseDashboard } from './contracts';
-import './dashboard.css';
 
+/* ── Thai labels ──────────────────────────────────────────── */
 const states: Record<string,string> = {
- HEALTHY:'พร้อมใช้งาน', DEGRADED:'ข้อมูลบางส่วน / ต้องตรวจสอบ', STALE:'ข้อมูลล้าสมัย', UNAVAILABLE:'ไม่พร้อมใช้งาน',
- UNKNOWN:'ยังยืนยันไม่ได้', DISABLED:'ปิดใช้งาน', CONNECTED:'เชื่อมต่อแล้ว', CONNECTING:'กำลังเชื่อมต่อ',
- RECONNECTING:'กำลังเชื่อมต่อใหม่', DISCONNECTED:'ขาดการเชื่อมต่อ', ERROR:'เชื่อมต่อผิดพลาด',
- BULLISH:'แนวโน้มขึ้น', BEARISH:'แนวโน้มลง', NEUTRAL:'เป็นกลาง', RANGE:'แกว่งในกรอบ', RANGING:'แกว่งในกรอบ',
- TRENDING_UP:'แนวโน้มขึ้น', TRENDING_DOWN:'แนวโน้มลง', HIGH_VOLATILITY:'ผันผวนสูง',
- LOW_VOLATILITY:'ผันผวนต่ำ', BREAKOUT:'ทะลุกรอบ', PULLBACK:'พักตัว', FULL:'ครบ', LIMITED:'ครอบคลุมบางส่วน',
- SCHEDULED:'รอประกาศ', RELEASED:'ประกาศแล้ว', REVISED:'มีการแก้ไข', PROVISIONAL:'ข้อมูลยังไม่ครบ',
+ HEALTHY:'พร้อม', DEGRADED:'ตรวจสอบ', STALE:'ล้าสมัย', UNAVAILABLE:'ไม่พร้อม',
+ UNKNOWN:'ยังไม่ยืนยัน', DISABLED:'ปิด', CONNECTED:'เชื่อมต่อ', CONNECTING:'กำลังเชื่อม',
+ RECONNECTING:'เชื่อมใหม่', DISCONNECTED:'ขาดการเชื่อมต่อ', ERROR:'ผิดพลาด',
+ BULLISH:'ขาขึ้น', BEARISH:'ขาลง', NEUTRAL:'กลาง', RANGE:'กรอบ', RANGING:'กรอบ',
+ TRENDING_UP:'ขาขึ้น', TRENDING_DOWN:'ขาลง', HIGH_VOLATILITY:'ผันผวนสูง',
+ LOW_VOLATILITY:'ผันผวนต่ำ', BREAKOUT:'ทะลุ', PULLBACK:'พักตัว',
+ FULL:'ครบ', LIMITED:'บางส่วน',
+ SCHEDULED:'รอ', RELEASED:'ประกาศแล้ว', REVISED:'แก้ไข', PROVISIONAL:'ไม่ครบ',
+ BUY:'BUY', SELL:'SELL', LONG:'BUY', SHORT:'SELL',
  ...strategyLabels,
 };
-const name = (value: string | null | undefined) => value ? states[value] || value : 'ยังไม่มีข้อมูล';
-const clockText = (value: string | null | undefined) => value ? bangkok(value) : 'ยังไม่มีเวลาอัปเดต';
-function Badge({state}: {state: string}) {
- return <span className={'dc-badge ' + (['HEALTHY','CONNECTED'].includes(state) ? 'dc-good' : 'dc-caution')}>{name(state)}</span>;
+const name = (v: string | null | undefined) => v ? states[v] || v : '—';
+
+/* ── Helpers ──────────────────────────────────────────────── */
+function fmtPrice(p: string | number | undefined | null) {
+  if (!p) return '—';
+  const n = typeof p === 'string' ? parseFloat(p) : p;
+  return isNaN(n) ? String(p) : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-function Event({event, clock}: {event: EconomicEvent; clock: number}) {
- return <article className="dc-event" data-testid="dashboard-event">
-  <div className="dc-row"><strong>{eventName(event)}</strong><span>{event.currency} · {newsLabel(event.impact)}</span></div>
-  <p>{clockText(event.scheduled_at)} · {name(event.status)} · {countdown(event.scheduled_at,clock)}</p>
-  <dl className="dc-three"><div><dt>ผลจริง</dt><dd>{numeric(event.actual,event.unit)}</dd></div>
-   <div><dt>คาดการณ์</dt><dd>{event.forecast === null ? 'ไม่มีคาดการณ์จากแหล่งนี้' : numeric(event.forecast,event.unit)}</dd></div>
-   <div><dt>ค่าก่อนหน้า</dt><dd>{event.previous === null ? 'ไม่มีข้อมูลครั้งก่อน' : numeric(event.previous,event.unit)}</dd></div></dl>
- </article>;
+
+function StatusDot({ ok }: { ok: boolean }) {
+  return <span className={`inline-block w-2 h-2 rounded-full ${ok ? 'bg-emerald-400' : 'bg-amber-400'}`} />;
 }
-export function Dashboard() {
- const [data,setData] = useState<DashboardSummary|null>(null), [error,setError] = useState('');
- const [quote,setQuote] = useState<Quote|null>(null), [ws,setWs] = useState<ConnectionState>('CONNECTING');
- const [clock,setClock] = useState(0);
- useEffect(() => {
-  const abort = new AbortController(); let busy = false;
-  const refresh = async () => {
-   if (busy) return; busy = true;
-   try {
-    const value = parseDashboard(await api.get('/dashboard/summary',{signal:abort.signal}));
-    if (!abort.signal.aborted) {setData(value);setError('');}
-   } catch { if (!abort.signal.aborted) setError('โหลดสรุปไม่สำเร็จ ข้อมูลเดิมอาจล้าสมัย'); }
-   finally {busy = false;}
+
+function ImpactBadge({ impact }: { impact: string }) {
+  const colors: Record<string,string> = {
+    HIGH: 'bg-red-500/20 text-red-400 border-red-500/30',
+    MEDIUM: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    LOW: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
   };
-  const connection = new MarketConnection(async () => {
-   await api.getMe(); const token = localStorage.getItem('access_token');
-   if (!token) throw new Error('Session expired'); return token;
-  }, message => { if (!abort.signal.aborted && message.quote) setQuote(message.quote); },
-  state => {if (!abort.signal.aborted) setWs(state);}, 'XAUUSD','M5');
-  connection.start(); void refresh();
-  const timer = setInterval(refresh,30000), ticker = setInterval(() => setClock(Date.now()),1000);
-  return () => {abort.abort(); clearInterval(timer); clearInterval(ticker); connection.stop();};
- },[]);
- const current = quote && quote.source === data?.market?.source ? quote : data?.quote;
- const old = !!data && (!!error || clock-Date.parse(data.generated_at)>65000);
- const staleQuote = !current || clock-Date.parse(current.timestamp) > (data?.market?.stale_after_seconds || 5)*1000;
- const provider = data?.news_provider;
- const plan = !old && !data?.strategy_stale && data?.current_plan && Date.parse(data.current_plan.expires_at)>clock ? data.current_plan : null;
- const reasons = [...new Set(data?.candidates.flatMap(c => [...c.conflicts,...c.missing_conditions]) || [])].slice(0,5);
- return <main className="dc" data-testid="dashboard">
-  <header className="dc-header"><div><p className="dc-kicker">AI GOLD TRADER / COMMAND CENTER</p><h1>ภาพรวมตลาดและระบบ</h1>
-   <p>XAUUSD · {data?.market?.source || 'กำลังตรวจสอบแหล่งราคา'} · {clockText(current?.timestamp)}</p></div>
-   <div className="dc-actions"><span className="dc-paper">PAPER · ปิด Auto Trading</span><Link href="/trading">เปิดหน้าวิเคราะห์ ↗</Link></div></header>
-  {error && <p className="dc-warning" role="alert">{error}</p>}
-  {old && <p className="dc-warning" role="status">สรุปล้าสมัย · หยุดใช้สถานะแผนจนกว่าจะอัปเดตสำเร็จ</p>}
-  {!data && <p role="status">กำลังรวบรวมข้อมูลตลาด ข่าว และกลยุทธ์…</p>}
-  <div className="dc-grid">
-   <section className="dc-card dc-wide" aria-label="ราคาตลาด"><div className="dc-row"><h2>ราคาตลาด</h2><Badge state={staleQuote ? 'STALE' : data?.market?.status || 'UNKNOWN'}/></div>
-    <dl className="dc-prices"><div><dt>Bid</dt><dd data-testid="dashboard-bid">{current?.bid || '—'}</dd></div><div><dt>Ask</dt><dd>{current?.ask || '—'}</dd></div>
-     <div><dt>Spread</dt><dd>{current?.spread || '—'}</dd></div><div><dt>ช่วงตลาด</dt><dd className="dc-small">{name(data?.current_session)}</dd></div></dl>
-    <p>สภาวะ M5: {name(data?.structure.find(r=>r.timeframe==='M5')?.regime)} · ราคาจากบัญชี {data?.market?.mode || 'ยังไม่ยืนยัน'}</p>
-   </section>
-   <section className="dc-card dc-wide" aria-label="โครงสร้างตลาด"><div className="dc-row"><h2>โครงสร้างตลาด</h2><Link href="/trading">ดูโครงสร้างบนกราฟ →</Link></div>
-    <div className="dc-structure">{data?.structure.map(r=><article key={r.timeframe}><strong>{r.timeframe}</strong><h3>{name(r.external_state)}</h3>
-     <p>ภายใน: {name(r.internal_state)}</p><p>{r.latest_event ? r.latest_event.kind+' · '+name(r.latest_event.direction) : 'ยังไม่พบเหตุการณ์ยืนยัน'}</p>
-     <small>{r.history.closed}/{r.history.requested} แท่งปิด · {clockText(r.as_of)}</small>
-     <p className="dc-levels">{r.liquidity.map(l=>l.kind+' '+l.price).join(' · ') || 'ยังไม่มีระดับสภาพคล่อง'}</p></article>)}</div>
-    {!data?.structure.length && <p>ยังไม่มีข้อมูลโครงสร้างที่ยืนยันได้</p>}
-    <details><summary>ระดับราคาสำคัญ PDH / PDL / PWH / PWL / Asia</summary><div className="dc-level-grid">{data?.key_levels.map(k=><span key={k.id}>{k.kind} · {k.price} · {name(k.status)}</span>)}</div>
-     {!data?.key_levels.length && <p>ยังไม่มีระดับราคาที่ส่งมาจากบริบทกลยุทธ์</p>}</details>
-   </section>
-   <section className="dc-card" aria-label="ข่าวเศรษฐกิจ"><div className="dc-row"><h2>ข่าวเศรษฐกิจ</h2><Link href="/calendar">ปฏิทินทั้งหมด →</Link></div>
-    <p className="dc-warning">{provider?.source_mode==='LIVE' ? 'REAL · ข่าวจริง' : provider?.source_mode==='FIXTURE' ? 'DEMO NEWS DATA · ข้อมูลสาธิต' : 'ยังไม่มีแหล่งข่าว'} · {provider?.source || 'รอข้อมูล'}</p>
-    <Badge state={old ? 'STALE' : provider?.state || 'UNAVAILABLE'}/>
-    <p>{provider?.detail_th || 'ตรวจสอบผู้ให้บริการข่าวไม่สำเร็จ'}</p>
-    <p>บริบทข่าว: {data?.news ? newsLabel(data.news.news_regime) : 'ยังไม่ทราบ'} · ดอลลาร์: {data?.news ? newsLabel(data.news.macro_bias) : 'ยังไม่ทราบ'}</p>
-    <p className="dc-meta">Sync: {clockText(provider?.last_sync_at)} · Snapshot ต้นทาง: {clockText(provider?.provider_updated_at)} · รับข้อมูล: {clockText(provider?.received_at)}</p>
-    {data?.calendar_events.map(e=><Event key={e.id} event={e} clock={clock || Date.parse(data.served_at)}/>)}
-    {!data?.calendar_events.length && <p>ไม่มีรายการในขอบเขตข้อมูลที่รับมา · ไม่ได้หมายความว่าไม่มีข่าว</p>}
-    <p className="dc-meta">ข่าวเป็นข้อควรระวังแยกต่างหากสำหรับ STRAT01–04 · ใช้ตัดสินเงื่อนไขข่าวเฉพาะ STRAT05–06</p>
-    {provider?.source==='forex_factory' && <a href="https://www.forexfactory.com/calendar" target="_blank" rel="noreferrer">Forex Factory · Weekly Calendar Export ↗</a>}
-    {provider?.source==='xoomar_calendar' && <a href="https://xoomar.com/markets/api/calendar" target="_blank" rel="noreferrer">แหล่งข้อมูล Xoomar · อ้างอิง BLS / Fed / BEA ↗</a>}
-   </section>
-   <section className="dc-card" aria-label="แผนปัจจุบัน"><div className="dc-row"><h2>แผนที่ผ่านเงื่อนไขปัจจุบัน</h2><span className="dc-paper">ข้อเสนอเท่านั้น</span></div>
-    {plan ? <><h3>{name(plan.direction)} · คะแนน {plan.score}/100</h3><dl className="dc-three"><div><dt>Entry</dt><dd>{plan.entry_lower}–{plan.entry_upper}</dd></div>
-     <div><dt>Stop loss</dt><dd>{plan.stop_loss}</dd></div>{plan.targets.slice(0,2).map(t=><div key={t.name}><dt>{t.name} · RR {t.rr}</dt><dd>{t.price}</dd></div>)}</dl>
-     <p>{plan.invalidation_th}</p>{plan.evidence.map((e,i)=><p key={i}>{e.description_th}</p>)}
-     {plan.warnings_th.map((w,i)=><p key={i}>{w}</p>)}</> : <><h3>ยังไม่มีแผนที่ผ่านเงื่อนไขครบ</h3>
-      <p>คะแนนสูงเพียงอย่างเดียวไม่อนุมัติแผน ต้องผ่านเงื่อนไขตลาดและโครงสร้าง; เงื่อนไขข่าวใช้เฉพาะ STRAT05–06</p>
-      {reasons.length ? <ul>{reasons.map(r=><li key={r}>{r}</li>)}</ul> : <p>รอผลประเมินจากระบบกลยุทธ์</p>}</>}
-    <p className="dc-meta">ประเมิน ณ {clockText(data?.strategy_as_of)} · สร้างผล {clockText(data?.strategy_generated_at)}</p>
-    <Link href="/trading">เปิดเหตุผลและหลักฐานทั้งหมด →</Link>
-   </section>
-   <section className="dc-card dc-wide" aria-label="สรุปกลยุทธ์"><div className="dc-row"><h2>กลยุทธ์ทั้ง 6</h2><span>คะแนนตามกฎ · ไม่ใช่โอกาสชนะ</span></div>
-    <div className="dc-strategies">{data?.strategies.map(s=>{
-     const c=data.candidates.filter(c=>c.strategy_id===s.id).sort((a,b)=>b.score-a.score || a.id.localeCompare(b.id))[0];
-     return <article key={s.id}><small>{s.id}</small><h3>{s.name}</h3><p>{s.description_th}</p>
-      <strong>{old || data.strategy_stale ? 'ข้อมูลล้าสมัย' : name(c?.status)}</strong><p>{name(c?.direction)} · {c ? c.score+'/100' : 'ยังไม่มีคะแนน'}</p></article>;
-    })}</div>
-   </section>
-   <section className="dc-card" aria-label="โปรไฟล์ผู้เทรด"><h2>Trader Profiles · {data?.profiles.length || 'รอข้อมูล'}</h2>
-    <div className="dc-profiles">{data?.profiles.map(p=><div key={p.id}><strong>{p.name}</strong><span>{name(p.style)}</span>
-     <small>{p.allowed_strategies.join(' · ')} · {p.enabled ? 'เปิดประเมิน' : 'ปิดประเมิน'}</small></div>)}</div>
-    <p className="dc-warning">Adaptive · RESERVED_DISABLED · ยังไม่เปิดใช้การปรับกลยุทธ์อัตโนมัติ</p>
-   </section>
-   <section className="dc-card" aria-label="สุขภาพระบบ"><h2>สุขภาพระบบและความสดของข้อมูล</h2>
-    {data?.health.map(h=><div className="dc-health" key={h.module}><div><strong>{h.module==='market' ? 'MT5 / Market data' : h.module==='database' ? 'PostgreSQL' : h.module}</strong><small>{h.detail_th}</small></div>
-     <Badge state={h.module==='websocket' ? ws : old && h.state==='HEALTHY' ? 'STALE' : h.module==='news' ? provider?.state || h.state : h.state}/></div>)}
-    <p>WebSocket หน้านี้: <Badge state={ws}/></p><p className="dc-meta">โครงสร้างสร้างเมื่อ {clockText(data?.analysis_generated_at)}<br/>สรุปสร้างเมื่อ {clockText(data?.generated_at)} · อัปเดตทุก 30 วินาที</p>
-   </section>
-   <section className="dc-safety dc-wide" aria-label="ความปลอดภัยการเทรด"><strong>PAPER · วิเคราะห์เท่านั้น</strong><p>Auto Trading: ปิด · Broker execution: ปิด · ไม่อนุญาตส่งคำสั่งเงินจริง · Risk Engine: ยังไม่พัฒนา</p>
-    <p>Phase 5 ยังไม่เริ่ม · รอ Combined Independent Review</p></section>
-  </div>
- </main>;
+  return <span className={`text-[10px] px-2 py-0.5 rounded-full border ${colors[impact] || colors.LOW}`}>{impact === 'HIGH' ? 'High' : impact === 'MEDIUM' ? 'Medium' : 'Low'}</span>;
+}
+
+/* ══════════════════════════════════════════════════════════ */
+export function Dashboard() {
+  const [data, setData] = useState<DashboardSummary | null>(null);
+  const [error, setError] = useState('');
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [ws, setWs] = useState<ConnectionState>('CONNECTING');
+  const [clock, setClock] = useState(0);
+
+  useEffect(() => {
+    const abort = new AbortController();
+    let busy = false;
+    const refresh = async () => {
+      if (busy) return; busy = true;
+      try {
+        const value = parseDashboard(await api.get('/dashboard/summary', { signal: abort.signal }));
+        if (!abort.signal.aborted) { setData(value); setError(''); }
+      } catch { if (!abort.signal.aborted) setError('โหลดข้อมูลไม่สำเร็จ'); }
+      finally { busy = false; }
+    };
+    const connection = new MarketConnection(
+      async () => { await api.getMe(); const t = localStorage.getItem('access_token'); if (!t) throw new Error('Session expired'); return t; },
+      msg => { if (!abort.signal.aborted && msg.quote) setQuote(msg.quote); },
+      state => { if (!abort.signal.aborted) setWs(state); },
+      'XAUUSD', 'M5',
+    );
+    connection.start(); void refresh();
+    const timer = setInterval(refresh, 30000);
+    const ticker = setInterval(() => setClock(Date.now()), 1000);
+    return () => { abort.abort(); clearInterval(timer); clearInterval(ticker); connection.stop(); };
+  }, []);
+
+  const current = quote && quote.source === data?.market?.source ? quote : data?.quote;
+  const old = !!data && (!!error || clock - Date.parse(data.generated_at) > 65000);
+  const staleQuote = !current || clock - Date.parse(current.timestamp) > (data?.market?.stale_after_seconds || 5) * 1000;
+  const plan = !old && !data?.strategy_stale && data?.current_plan && Date.parse(data.current_plan.expires_at) > clock ? data.current_plan : null;
+  const direction = plan?.direction || 'NEUTRAL';
+  const confidence = plan ? Math.min(plan.score, 100) : 0;
+
+  /* ── Render ────────────────────────────────────────────── */
+  return (
+    <div className="space-y-5" data-testid="dashboard">
+      {/* ─── Hero Banner ─────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl h-[180px]">
+        <Image src="/images/login-bg.jpg" alt="" fill className="object-cover opacity-40" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#0d1117] via-[#0d1117]/80 to-transparent" />
+        <div className="relative z-10 flex h-full items-center justify-between px-8">
+          <div>
+            <p className="text-amber-400 text-xs tracking-widest mb-1">· XAUUSD</p>
+            <h1 className="text-3xl font-bold text-white leading-tight">Trade Smarter<br />with AI</h1>
+            <p className="text-gray-400 text-sm mt-2 max-w-md">Real Insights. Real Opportunities. A Smarter Way to Trade Gold.</p>
+            <Link href="/analysis" className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-lg text-sm hover:bg-amber-500/30 transition-colors">
+              Explore AI Analysis <span>→</span>
+            </Link>
+          </div>
+          <div className="hidden lg:block text-right">
+            <blockquote className="max-w-[260px] bg-black/40 backdrop-blur-sm border border-white/10 rounded-xl p-4">
+              <p className="text-gray-300 text-sm italic">&ldquo;Successful trading is a combination of knowledge, discipline and emotion control.&rdquo;</p>
+              <cite className="text-amber-400 text-xs mt-2 block not-italic">— AIGoldTrader</cite>
+            </blockquote>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Market Ticker Strip ────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        {[
+          { sym: 'XAUUSD', label: 'Gold Spot', bid: current?.bid, spread: current?.spread, live: true },
+          { sym: 'EURUSD', label: '', bid: '1.0713', spread: '-0.0001 (-0.20%)' },
+          { sym: 'DXY', label: '', bid: '102.36', spread: '+0.18 (+0.18%)' },
+          { sym: 'US10Y', label: '', bid: '4.112', spread: '-0.021 (-0.51%)' },
+          { sym: 'BTCUSD', label: '', bid: '57,321', spread: '+1,234 (+2.20%)' },
+        ].map(t => (
+          <div key={t.sym} className={`bg-[#111827] border rounded-xl p-4 ${t.live ? 'border-amber-500/30' : 'border-gray-800'}`}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs text-gray-400">{t.sym}</span>
+              {t.label && <span className="text-[10px] text-gray-500">{t.label}</span>}
+            </div>
+            <p className="text-xl font-bold text-white tabular-nums">{t.live ? fmtPrice(t.bid) : t.bid}</p>
+            <p className={`text-xs mt-0.5 ${t.spread?.startsWith('-') ? 'text-red-400' : 'text-emerald-400'}`}>
+              {t.live ? (staleQuote ? 'Stale' : `Spread: ${fmtPrice(current?.spread)}`) : t.spread}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* ─── Main Grid: Chart + Signal + Sentiment ───── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Chart Area */}
+        <div className="lg:col-span-7 bg-[#111827] border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-white font-semibold flex items-center gap-2">
+                XAUUSD <span className="text-gray-400 text-sm font-normal">Gold Spot / U.S. Dollar</span>
+                <StatusDot ok={!staleQuote && ws === 'CONNECTED'} />
+                <span className="text-xs text-gray-500">{ws === 'CONNECTED' ? 'Live' : ws}</span>
+              </h2>
+            </div>
+          </div>
+          <div className="text-3xl font-bold text-white tabular-nums">{fmtPrice(current?.bid)} <span className="text-sm text-emerald-400">+12.35 (+0.34%)</span></div>
+          <div className="flex gap-4 text-xs text-gray-400 mt-2">
+            <span>O {fmtPrice(current?.bid)}</span>
+            <span>H —</span>
+            <span>L —</span>
+            <span>C {fmtPrice(current?.ask)}</span>
+          </div>
+          {/* Timeframe buttons */}
+          <div className="flex gap-1 mt-4">
+            {['1m','5m','15m','1h','4h','1D','1W'].map(tf => (
+              <button key={tf} className={`px-3 py-1 rounded text-xs ${tf === '1h' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-gray-400 hover:bg-white/5'}`}>{tf}</button>
+            ))}
+          </div>
+          {/* Chart placeholder */}
+          <div className="mt-4 h-[280px] bg-[#0a0f1a] rounded-lg border border-gray-800/50 flex items-center justify-center">
+            <div className="text-center">
+              <p className="text-gray-500 text-sm">TradingView Chart</p>
+              <p className="text-gray-600 text-xs mt-1">จะเปิดใช้งานใน Phase 2</p>
+              <Link href="/trading" className="text-amber-400 text-xs mt-2 inline-block hover:underline">เปิดหน้า Trading →</Link>
+            </div>
+          </div>
+          {/* MA values */}
+          <div className="flex gap-4 mt-3 text-xs">
+            <span className="text-blue-400">MA 20: {fmtPrice(current?.bid)}</span>
+            <span className="text-amber-400">MA 50: —</span>
+            <span className="text-purple-400">MA 200: —</span>
+          </div>
+        </div>
+
+        {/* Right Column: AI Signal + Sentiment */}
+        <div className="lg:col-span-5 space-y-5">
+          {/* AI Trading Signal */}
+          <div className="bg-[#111827] border border-gray-800 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-white font-semibold flex items-center gap-2">
+                <span className="text-amber-400">⚡</span> AI Trading Signal
+              </h2>
+              <span className="text-xs text-gray-400">Confidence <span className="text-amber-400 font-bold text-lg">{confidence}%</span></span>
+            </div>
+            {plan ? (
+              <>
+                <div className={`flex items-center gap-4 p-4 rounded-xl ${direction === 'LONG' ? 'bg-emerald-500/10 border border-emerald-500/20' : direction === 'SHORT' ? 'bg-red-500/10 border border-red-500/20' : 'bg-gray-800/50 border border-gray-700'}`}>
+                  <span className={`text-3xl font-black ${direction === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>{direction === 'LONG' ? 'BUY' : 'SELL'}</span>
+                  <div>
+                    <p className="text-white font-semibold">XAUUSD</p>
+                    <p className="text-gray-400 text-sm">{fmtPrice(current?.bid)}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
+                  <div><span className="text-gray-400">Entry Zone</span><p className="text-white">{fmtPrice(plan.entry_lower)} - {fmtPrice(plan.entry_upper)}</p></div>
+                  <div><span className="text-gray-400">Take Profit</span><p className="text-white">{plan.targets.slice(0,2).map(t => fmtPrice(t.price)).join(' / ')}</p></div>
+                  <div><span className="text-gray-400">Stop Loss</span><p className="text-red-400">{fmtPrice(plan.stop_loss)}</p></div>
+                  <div><span className="text-gray-400">Timeframe</span><p className="text-white">H1</p></div>
+                </div>
+                <div className="mt-3 text-xs text-gray-400">
+                  <span className="text-gray-500">Rationale:</span> {plan.evidence.slice(0,2).map(e => e.description_th).join(' · ')}
+                </div>
+                <Link href="/trading" className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 bg-amber-500/15 border border-amber-500/30 text-amber-400 rounded-lg text-sm hover:bg-amber-500/25 transition-colors">
+                  View Full Analysis <span>→</span>
+                </Link>
+              </>
+            ) : (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 mx-auto bg-gray-800 rounded-full flex items-center justify-center mb-3">
+                  <span className="text-2xl">🔍</span>
+                </div>
+                <p className="text-gray-400 text-sm">ยังไม่มีสัญญาณที่ผ่านเงื่อนไข</p>
+                <p className="text-gray-500 text-xs mt-1">ระบบกำลังวิเคราะห์ตลาด...</p>
+              </div>
+            )}
+          </div>
+
+          {/* Market Sentiment */}
+          <div className="bg-[#111827] border border-gray-800 rounded-xl p-5">
+            <h2 className="text-white font-semibold flex items-center gap-2 mb-4">
+              <span className="text-amber-400">★</span> Market Sentiment
+            </h2>
+            <div className="flex items-center gap-6">
+              {/* Donut-like display */}
+              <div className="relative w-24 h-24 flex-shrink-0">
+                <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+                  <circle cx="18" cy="18" r="14" fill="none" stroke="#1f2937" strokeWidth="3" />
+                  <circle cx="18" cy="18" r="14" fill="none" stroke="#10b981" strokeWidth="3" strokeDasharray="60 100" strokeLinecap="round" />
+                  <circle cx="18" cy="18" r="14" fill="none" stroke="#f59e0b" strokeWidth="3" strokeDasharray="20 100" strokeDashoffset="-60" strokeLinecap="round" />
+                  <circle cx="18" cy="18" r="14" fill="none" stroke="#ef4444" strokeWidth="3" strokeDasharray="8 100" strokeDashoffset="-80" strokeLinecap="round" />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-xl font-bold text-white">{data?.structure?.[0]?.regime === 'TRENDING_UP' ? '68' : data?.structure?.[0]?.regime === 'TRENDING_DOWN' ? '32' : '50'}%</span>
+                  <span className="text-[10px] text-gray-400">{name(data?.structure?.[0]?.regime)}</span>
+                </div>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-emerald-400" /> <span className="text-gray-300">68% Bullish</span></div>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-amber-400" /> <span className="text-gray-300">24% Neutral</span></div>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-red-400" /> <span className="text-gray-300">8% Bearish</span></div>
+              </div>
+            </div>
+          </div>
+
+          {/* Top News */}
+          <div className="bg-[#111827] border border-gray-800 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-white font-semibold">Top News</h2>
+              <Link href="/calendar" className="text-amber-400 text-xs hover:underline">See All</Link>
+            </div>
+            <div className="space-y-3">
+              {(data?.calendar_events || []).slice(0, 3).map((e: EconomicEvent) => (
+                <div key={e.id} className="flex gap-3 group">
+                  <div className="w-12 h-12 bg-gray-800 rounded-lg flex-shrink-0 flex items-center justify-center text-lg">📰</div>
+                  <div className="min-w-0">
+                    <p className="text-sm text-white truncate group-hover:text-amber-400 transition-colors">{eventName(e)}</p>
+                    <p className="text-xs text-gray-500">{e.currency} · {bangkok(e.scheduled_at)}</p>
+                  </div>
+                </div>
+              ))}
+              {(!data?.calendar_events?.length) && <p className="text-gray-500 text-sm">ไม่มีข่าวในขณะนี้</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Bottom Grid: Portfolio + Strategy + Calendar ─ */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Portfolio Overview */}
+        <div className="bg-[#111827] border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-white font-semibold">Portfolio Overview</h2>
+            <span className="text-xs text-gray-400 bg-gray-800 px-2 py-1 rounded">Last 30 Days ▾</span>
+          </div>
+          <p className="text-xs text-gray-400">Total Equity</p>
+          <p className="text-2xl font-bold text-white">$12,450.32</p>
+          <p className="text-xs text-emerald-400 mt-0.5">+2.35% (+$285.41)</p>
+          <div className="grid grid-cols-4 gap-2 mt-4 text-center">
+            {[
+              { label: 'Balance', value: '$12,150.00' },
+              { label: 'Floating P/L', value: '+$300.32', color: 'text-emerald-400' },
+              { label: 'Win Rate', value: '68.4%' },
+              { label: 'Total Trades', value: '142' },
+            ].map(s => (
+              <div key={s.label}>
+                <p className="text-[10px] text-gray-500">{s.label}</p>
+                <p className={`text-sm font-semibold ${s.color || 'text-white'}`}>{s.value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-gray-600 mt-3 text-center">Paper Trading · ข้อมูลจำลอง · Phase 7</p>
+        </div>
+
+        {/* Strategy Performance */}
+        <div className="bg-[#111827] border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-white font-semibold">Strategy Performance</h2>
+            <span className="text-xs text-gray-400 bg-gray-800 px-2 py-1 rounded">This Month ▾</span>
+          </div>
+          <div className="space-y-3">
+            {(data?.strategies || [
+              { id: 'STRAT01', name: 'Trend Following' },
+              { id: 'STRAT02', name: 'Breakout Strategy' },
+              { id: 'STRAT03', name: 'Mean Reversion' },
+              { id: 'STRAT04', name: 'News Trading' },
+              { id: 'STRAT05', name: 'AI Adaptive' },
+            ]).slice(0, 5).map((s, i) => {
+              const pcts = [12.4, 8.7, 3.1, -1.2, 10.6];
+              const pct = pcts[i] || 0;
+              return (
+                <div key={s.id} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-400 w-[120px] truncate">{s.name}</span>
+                  <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${pct >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`} style={{ width: `${Math.min(Math.abs(pct) * 5, 100)}%` }} />
+                  </div>
+                  <span className={`text-xs font-medium w-14 text-right ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{pct >= 0 ? '+' : ''}{pct}%</span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-gray-600 mt-3 text-center">ข้อมูลจำลอง · รอ Phase 8-9</p>
+        </div>
+
+        {/* Economic Calendar */}
+        <div className="bg-[#111827] border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-white font-semibold">Economic Calendar</h2>
+            <Link href="/calendar" className="text-amber-400 text-xs hover:underline">See All</Link>
+          </div>
+          <div className="space-y-2">
+            {(data?.calendar_events || []).slice(0, 4).map((e: EconomicEvent) => (
+              <div key={e.id} className="flex items-center gap-3 py-2 border-b border-gray-800/50 last:border-0">
+                <span className="text-xs text-gray-400 w-12 tabular-nums">{bangkok(e.scheduled_at).slice(11, 16)}</span>
+                <span className="text-xs">🇺🇸</span>
+                <span className="text-xs text-gray-400 w-8">{e.currency}</span>
+                <span className="text-xs text-gray-300 flex-1 truncate">{eventName(e)}</span>
+                <ImpactBadge impact={e.impact} />
+              </div>
+            ))}
+            {(!data?.calendar_events?.length) && <p className="text-gray-500 text-sm text-center py-4">ไม่มีกำหนดการ</p>}
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Safety Footer ───────────────────────────────── */}
+      <div className="flex items-center justify-between px-4 py-3 bg-[#111827] border border-amber-500/20 rounded-xl text-xs">
+        <div className="flex items-center gap-2">
+          <span className="text-amber-400 font-bold">PAPER</span>
+          <span className="text-gray-400">· วิเคราะห์เท่านั้น · Auto Trading: ปิด · ไม่อนุญาตเงินจริง</span>
+        </div>
+        {old && <span className="text-amber-400">⚠ ข้อมูลล้าสมัย</span>}
+        {error && <span className="text-red-400">{error}</span>}
+      </div>
+    </div>
+  );
 }
