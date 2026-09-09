@@ -14,7 +14,7 @@ class RefreshSession(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
-    refresh_token_hash: Mapped[str] = mapped_column(String(128), unique=True)
+    refresh_token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ip: Mapped[str | None] = mapped_column(String(45), nullable=True)

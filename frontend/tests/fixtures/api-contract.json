@@ -1,0 +1,267 @@
+{
+  "schemas": {
+    "MeResponse": {
+      "properties": {
+        "id": {
+          "type": "string",
+          "title": "Id"
+        },
+        "email": {
+          "type": "string",
+          "title": "Email"
+        },
+        "role": {
+          "$ref": "#/components/schemas/Role"
+        },
+        "is_active": {
+          "type": "boolean",
+          "title": "Is Active"
+        }
+      },
+      "type": "object",
+      "required": [
+        "id",
+        "email",
+        "role",
+        "is_active"
+      ],
+      "title": "MeResponse"
+    },
+    "TokenPair": {
+      "properties": {
+        "access_token": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S+$",
+          "title": "Access Token"
+        },
+        "refresh_token": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S+$",
+          "title": "Refresh Token"
+        },
+        "token_type": {
+          "type": "string",
+          "const": "bearer",
+          "title": "Token Type"
+        },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$",
+          "format": "date-time",
+          "title": "Expires At"
+        }
+      },
+      "type": "object",
+      "required": [
+        "access_token",
+        "refresh_token",
+        "token_type",
+        "expires_at"
+      ],
+      "title": "TokenPair"
+    },
+    "HealthResponse": {
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "ok",
+          "title": "Status"
+        },
+        "app": {
+          "type": "string",
+          "title": "App"
+        },
+        "env": {
+          "type": "string",
+          "title": "Env"
+        },
+        "trading_mode": {
+          "type": "string",
+          "title": "Trading Mode"
+        },
+        "live_auto_trading": {
+          "type": "boolean",
+          "title": "Live Auto Trading"
+        },
+        "uptime_seconds": {
+          "type": "number",
+          "title": "Uptime Seconds"
+        }
+      },
+      "type": "object",
+      "required": [
+        "status",
+        "app",
+        "env",
+        "trading_mode",
+        "live_auto_trading",
+        "uptime_seconds"
+      ],
+      "title": "HealthResponse"
+    },
+    "ReadyResponse": {
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "not_ready"
+          ],
+          "title": "Status"
+        },
+        "checks": {
+          "$ref": "#/components/schemas/ReadyChecks"
+        },
+        "redis_enabled": {
+          "type": "boolean",
+          "title": "Redis Enabled"
+        }
+      },
+      "type": "object",
+      "required": [
+        "status",
+        "checks",
+        "redis_enabled"
+      ],
+      "title": "ReadyResponse"
+    },
+    "ReadyChecks": {
+      "properties": {
+        "database": {
+          "type": "boolean",
+          "title": "Database"
+        },
+        "redis": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Redis"
+        }
+      },
+      "type": "object",
+      "required": [
+        "database",
+        "redis"
+      ],
+      "title": "ReadyChecks"
+    },
+    "Role": {
+      "type": "string",
+      "enum": [
+        "ADMIN",
+        "TRADER",
+        "VIEWER"
+      ],
+      "title": "Role"
+    }
+  },
+  "responses": {
+    "/api/auth/me": {
+      "get": {
+        "200": {
+          "description": "Successful Response",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeResponse"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "200": {
+          "description": "Successful Response",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenPair"
+              }
+            }
+          }
+        },
+        "422": {
+          "description": "Validation Error",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "200": {
+          "description": "Successful Response",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenPair"
+              }
+            }
+          }
+        },
+        "422": {
+          "description": "Validation Error",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/healthz": {
+      "get": {
+        "200": {
+          "description": "Successful Response",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HealthResponse"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/readyz": {
+      "get": {
+        "200": {
+          "description": "Successful Response",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadyResponse"
+              }
+            }
+          }
+        },
+        "503": {
+          "description": "Service Unavailable",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadyResponse"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

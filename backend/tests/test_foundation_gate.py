@@ -15,7 +15,11 @@ def test_migration_upgrade_downgrade_upgrade(tmp_path):
     env = {**os.environ, "DATABASE_URL_OVERRIDE": f"sqlite+aiosqlite:///{database.as_posix()}"}
     backend = Path(__file__).resolve().parents[1]
     engine = create_engine(f"sqlite:///{database.as_posix()}")
-    expected = {"users", "sessions", "accounts", "symbols", "audit_logs", "system_events"}
+    expected = {
+        "users", "sessions", "accounts", "symbols", "audit_logs", "system_events",
+        "ticks", "candles", "economic_events", "economic_event_revisions",
+        "trader_profiles", "strategy_evaluations", "trade_candidates", "candidate_transitions",
+    }
     try:
         for target in ("head", "base", "head"):
             action = "downgrade" if target == "base" else "upgrade"

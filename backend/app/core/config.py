@@ -1,15 +1,28 @@
 """Application settings — ทุกค่ามาจาก Environment Variables (ห้าม hardcode: G-06)."""
 
+from decimal import Decimal
 from functools import lru_cache
+from ipaddress import ip_network
+from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
 
+from app.services.analysis.domain import AnalysisConfig
+from app.services.news.domain import NewsConfig
+from app.services.strategy.domain import StrategyConfig
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    strategy_config: StrategyConfig = Field(default_factory=StrategyConfig)
+
+    news_calendar_provider: Literal["fixture", "unavailable", "xoomar", "forex_factory"] = "unavailable"
+    news_real_poll_seconds: int = Field(default=300, ge=60, le=3600)
+    news_config: NewsConfig = Field(default_factory=NewsConfig)
 
     # App
     app_name: str = "ai-trading-platform"
@@ -25,7 +38,10 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
     cors_origins: str = "http://localhost:3000"
-    rate_limit_auth_per_minute: int = 10
+    rate_limit_auth_per_minute: int = Field(default=10, ge=1, le=1000)
+    rate_limit_max_keys: int = Field(default=10000, ge=2, le=100000)
+    trust_proxy: bool = False
+    trusted_proxy_cidrs: str = ""
     rate_limit_api_per_minute: int = 120
 
     # Database
@@ -43,12 +59,47 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
 
+    # Phase 2 native single-instance market data; provider credentials never enter the browser.
+    market_data_provider: Literal["simulated", "mt5"] = "simulated"
+    market_stale_seconds: int = Field(default=5, ge=2, le=300)
+    market_max_jump_ratio: Decimal = Field(default=Decimal("0.05"), gt=0, le=1)
+    market_max_spread: Decimal = Field(default=Decimal("10"), gt=0)
+
+    # Read-only MT5 IPC uses an already authenticated terminal session.
+    mt5_terminal_path: str = Field(default="", repr=False)
+    mt5_symbol_xauusd: str = Field(default="", max_length=64)
+    mt5_feed_id: str = Field(default="", pattern=r"^[a-z0-9_]{0,16}$")
+    mt5_expected_server: str = Field(default="", repr=False)
+    mt5_expected_login: int | None = Field(default=None, repr=False)
+    mt5_account_mode: Literal["DEMO", "LIVE"] = "DEMO"
+    mt5_server_timezone: str = "UTC"
+    mt5_future_tolerance_seconds: int = Field(default=2, ge=0, le=10)
+    mt5_poll_seconds: float = Field(default=1, ge=1, le=10)
+    mt5_timeout_ms: int = Field(default=10000, ge=1000, le=30000)
+    # Real tick archival is explicitly disabled until an operator retention policy exists.
+    market_archive_real_ticks: bool = False
+
+    # Phase 3 deterministic parameters; optional ANALYSIS_CONFIG JSON, no credentials.
+    analysis_config: AnalysisConfig = Field(default_factory=AnalysisConfig)
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"
 
     # Test override (unit tests run on SQLite via this URL)
     database_url_override: str | None = Field(default=None, repr=False)
+
+    @model_validator(mode="after")
+    def validate_proxy_boundary(self):
+        networks = [value.strip() for value in self.trusted_proxy_cidrs.split(",") if value.strip()]
+        if self.trust_proxy and not networks:
+            raise ValueError("TRUST_PROXY requires explicit TRUSTED_PROXY_CIDRS")
+        try:
+            if any(ip_network(value, strict=False).prefixlen == 0 for value in networks):
+                raise ValueError("Unrestricted proxy trust is forbidden")
+        except ValueError:
+            raise ValueError("TRUSTED_PROXY_CIDRS must contain bounded IP networks") from None
+        return self
 
     @field_validator("trading_mode")
     @classmethod

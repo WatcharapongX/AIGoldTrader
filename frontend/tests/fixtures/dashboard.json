@@ -1,0 +1,1985 @@
+{
+  "generated_at": "2026-09-09T13:14:48.510599Z",
+  "served_at": "2026-09-09T13:14:48.511890Z",
+  "refresh_seconds": 30,
+  "symbol": "XAUUSD",
+  "trading_mode": "PAPER",
+  "live_auto_trading": false,
+  "broker_execution": "DISABLED",
+  "risk_engine": "NOT_IMPLEMENTED",
+  "market": {
+    "source": "mt5_demo_iux",
+    "mode": "DEMO",
+    "status": "CONNECTED",
+    "last_quote": "2026-09-09T13:14:51.239000Z",
+    "server_time": "2026-09-09T13:14:48.512882Z",
+    "stale_after_seconds": 5,
+    "detail": "Real market data / DEMO connection; PAPER execution disabled; PARTIAL HISTORY: fewer than 300 bars available for some timeframes",
+    "subscriptions": 1,
+    "history_counts": {
+      "M1": 300,
+      "M3": 300,
+      "M5": 300,
+      "M15": 300,
+      "M30": 300,
+      "H1": 300,
+      "H4": 300,
+      "D1": 300,
+      "W1": 231
+    },
+    "history_complete": false,
+    "digits": 2,
+    "tick_size": "0.01",
+    "provider_symbol": "XAUUSD",
+    "market_state": "OPEN",
+    "last_candle": "2026-09-09T13:14:00Z",
+    "volume_kind": "tick_count"
+  },
+  "quote": {
+    "symbol": "XAUUSD",
+    "timestamp": "2026-09-09T13:14:51.239000Z",
+    "bid": "4412.76",
+    "ask": "4412.80",
+    "volume": "0",
+    "source": "mt5_demo_iux",
+    "mode": "DEMO",
+    "spread": "0.04",
+    "status": "CONNECTED"
+  },
+  "structure": [
+    {
+      "timeframe": "H4",
+      "input_id": "fe0854483aa27be0113839e2",
+      "as_of": "2026-09-09T12:00:00Z",
+      "internal_state": "BEARISH",
+      "external_state": "BEARISH",
+      "regime": "PULLBACK",
+      "history": {
+        "requested": 300,
+        "returned": 299,
+        "closed": 299,
+        "status": "PARTIAL"
+      },
+      "latest_event": {
+        "id": "BOS-5f4c9150cc412d7325a1",
+        "scope": "INTERNAL",
+        "kind": "BOS",
+        "direction": "BEARISH",
+        "price": "4381.16000",
+        "swing_id": "SWING-b85cd2d8388c67dc75e4",
+        "swing_time": "2026-09-07T08:00:00Z",
+        "occurred_at": "2026-09-08T16:00:00Z",
+        "confirmed_at": "2026-09-08T20:00:00Z",
+        "displacement": false,
+        "parent_event_id": null,
+        "confirmation": "CONFIRMED"
+      },
+      "liquidity": [
+        {
+          "id": "SESSION_HIGH-a90f8f8bb5589ca966ad",
+          "kind": "SESSION_HIGH",
+          "side": "HIGH",
+          "price": "4443.03000",
+          "created_at": "2026-09-08T00:00:00Z",
+          "confirmed_at": "2026-09-08T08:00:00Z",
+          "source_ids": [
+            "ASIA:2026-09-08T00:00:00+00:00"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "PDH-907bc1fd72dddc5d0d10",
+          "kind": "PDH",
+          "side": "HIGH",
+          "price": "4443.03000",
+          "created_at": "2026-09-08T00:00:00Z",
+          "confirmed_at": "2026-09-09T00:00:00Z",
+          "source_ids": [
+            "PD:2026-09-08T00:00:00+00:00"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "LIQUIDITY-4b92b40758e443831f00",
+          "kind": "BSL",
+          "side": "HIGH",
+          "price": "4443.03000",
+          "created_at": "2026-09-08T04:00:00Z",
+          "confirmed_at": "2026-09-09T04:00:00Z",
+          "source_ids": [
+            "SWING-62ab6335fef1111c30de"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "SESSION_LOW-d80733161be89477904d",
+          "kind": "SESSION_LOW",
+          "side": "LOW",
+          "price": "4341.38000",
+          "created_at": "2026-09-09T00:00:00Z",
+          "confirmed_at": "2026-09-09T08:00:00Z",
+          "source_ids": [
+            "ASIA:2026-09-09T00:00:00+00:00"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        }
+      ]
+    },
+    {
+      "timeframe": "H1",
+      "input_id": "27038f5457c6e8ef676b46fa",
+      "as_of": "2026-09-09T13:00:00Z",
+      "internal_state": "BULLISH",
+      "external_state": "BEARISH",
+      "regime": "RANGING",
+      "history": {
+        "requested": 300,
+        "returned": 299,
+        "closed": 299,
+        "status": "PARTIAL"
+      },
+      "latest_event": {
+        "id": "CHOCH-7f38c84143d6b9f44133",
+        "scope": "INTERNAL",
+        "kind": "CHOCH",
+        "direction": "BULLISH",
+        "price": "4384.50000",
+        "swing_id": "SWING-cb2ad55c94caa13525b3",
+        "swing_time": "2026-09-09T02:00:00Z",
+        "occurred_at": "2026-09-09T05:00:00Z",
+        "confirmed_at": "2026-09-09T06:00:00Z",
+        "displacement": false,
+        "parent_event_id": null,
+        "confirmation": "CONFIRMED"
+      },
+      "liquidity": [
+        {
+          "id": "LIQUIDITY-b14761b04368dcc21622",
+          "kind": "BSL",
+          "side": "HIGH",
+          "price": "4443.03000",
+          "created_at": "2026-09-08T04:00:00Z",
+          "confirmed_at": "2026-09-08T10:00:00Z",
+          "source_ids": [
+            "SWING-317ed47d1a2ee8bbd99f"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "PDH-7b880a17a86d739ce5dd",
+          "kind": "PDH",
+          "side": "HIGH",
+          "price": "4443.03000",
+          "created_at": "2026-09-08T00:00:00Z",
+          "confirmed_at": "2026-09-09T00:00:00Z",
+          "source_ids": [
+            "PD:2026-09-08T00:00:00+00:00"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "LIQUIDITY-de511b5d55d36a0f6bb0",
+          "kind": "SSL",
+          "side": "LOW",
+          "price": "4341.38000",
+          "created_at": "2026-09-09T00:00:00Z",
+          "confirmed_at": "2026-09-09T06:00:00Z",
+          "source_ids": [
+            "SWING-fc0368922cdcf9f5a6ce"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "SESSION_LOW-92a92df811698b228c36",
+          "kind": "SESSION_LOW",
+          "side": "LOW",
+          "price": "4341.38000",
+          "created_at": "2026-09-09T00:00:00Z",
+          "confirmed_at": "2026-09-09T08:00:00Z",
+          "source_ids": [
+            "ASIA:2026-09-09T00:00:00+00:00"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        }
+      ]
+    },
+    {
+      "timeframe": "M15",
+      "input_id": "71464ab44c64c263834270eb",
+      "as_of": "2026-09-09T13:00:00Z",
+      "internal_state": "BULLISH",
+      "external_state": "BULLISH",
+      "regime": "RANGING",
+      "history": {
+        "requested": 300,
+        "returned": 299,
+        "closed": 299,
+        "status": "PARTIAL"
+      },
+      "latest_event": {
+        "id": "BOS-d6a0b88425c18b4382e0",
+        "scope": "INTERNAL",
+        "kind": "BOS",
+        "direction": "BULLISH",
+        "price": "4384.50000",
+        "swing_id": "SWING-786644a6c7c3b716a7e0",
+        "swing_time": "2026-09-09T02:45:00Z",
+        "occurred_at": "2026-09-09T05:00:00Z",
+        "confirmed_at": "2026-09-09T05:15:00Z",
+        "displacement": false,
+        "parent_event_id": null,
+        "confirmation": "CONFIRMED"
+      },
+      "liquidity": [
+        {
+          "id": "LIQUIDITY-a1723842569ec43bf9e2",
+          "kind": "SSL",
+          "side": "LOW",
+          "price": "4341.38000",
+          "created_at": "2026-09-09T00:15:00Z",
+          "confirmed_at": "2026-09-09T01:45:00Z",
+          "source_ids": [
+            "SWING-6166438777303c29578a"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "LIQUIDITY-7ba1964b4242410abf04",
+          "kind": "SSL",
+          "side": "LOW",
+          "price": "4370.70000",
+          "created_at": "2026-09-09T04:00:00Z",
+          "confirmed_at": "2026-09-09T05:30:00Z",
+          "source_ids": [
+            "SWING-26a4139068e08ce10ad2"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "SESSION_LOW-7b964e35c1e88b414d87",
+          "kind": "SESSION_LOW",
+          "side": "LOW",
+          "price": "4341.38000",
+          "created_at": "2026-09-09T00:00:00Z",
+          "confirmed_at": "2026-09-09T08:00:00Z",
+          "source_ids": [
+            "ASIA:2026-09-09T00:00:00+00:00"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "LIQUIDITY-e19c6379520d20707ea5",
+          "kind": "SSL",
+          "side": "LOW",
+          "price": "4386.31000",
+          "created_at": "2026-09-09T10:00:00Z",
+          "confirmed_at": "2026-09-09T11:30:00Z",
+          "source_ids": [
+            "SWING-d0a7900514b1accfcc5e"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        }
+      ]
+    },
+    {
+      "timeframe": "M5",
+      "input_id": "c648f1be57368b978a6e2f4b",
+      "as_of": "2026-09-09T13:10:00Z",
+      "internal_state": "NEUTRAL",
+      "external_state": "BULLISH",
+      "regime": "RANGING",
+      "history": {
+        "requested": 300,
+        "returned": 299,
+        "closed": 299,
+        "status": "PARTIAL"
+      },
+      "latest_event": {
+        "id": "CHOCH-69be2db888b682ee545d",
+        "scope": "INTERNAL",
+        "kind": "CHOCH",
+        "direction": "BEARISH",
+        "price": "4403.47000",
+        "swing_id": "SWING-890e8651d6fc284658bd",
+        "swing_time": "2026-09-09T11:45:00Z",
+        "occurred_at": "2026-09-09T12:05:00Z",
+        "confirmed_at": "2026-09-09T12:10:00Z",
+        "displacement": false,
+        "parent_event_id": null,
+        "confirmation": "CONFIRMED"
+      },
+      "liquidity": [
+        {
+          "id": "SESSION_LOW-362a8b11dff93e468419",
+          "kind": "SESSION_LOW",
+          "side": "LOW",
+          "price": "4341.38000",
+          "created_at": "2026-09-09T00:00:00Z",
+          "confirmed_at": "2026-09-09T08:00:00Z",
+          "source_ids": [
+            "ASIA:2026-09-09T00:00:00+00:00"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "LIQUIDITY-cb8eb99e78708934a09b",
+          "kind": "SSL",
+          "side": "LOW",
+          "price": "4386.31000",
+          "created_at": "2026-09-09T10:00:00Z",
+          "confirmed_at": "2026-09-09T10:30:00Z",
+          "source_ids": [
+            "SWING-3f4e6fbd859b33812452"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "LIQUIDITY-648fb970accd0a010082",
+          "kind": "BSL",
+          "side": "HIGH",
+          "price": "4415.35000",
+          "created_at": "2026-09-09T11:50:00Z",
+          "confirmed_at": "2026-09-09T12:20:00Z",
+          "source_ids": [
+            "SWING-65f2a9f8f232f4dab987"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        },
+        {
+          "id": "LIQUIDITY-59e103b8a154df127533",
+          "kind": "SSL",
+          "side": "LOW",
+          "price": "4390.95000",
+          "created_at": "2026-09-09T12:40:00Z",
+          "confirmed_at": "2026-09-09T13:10:00Z",
+          "source_ids": [
+            "SWING-5d98047f8bbd23e2e09c"
+          ],
+          "status": "ACTIVE",
+          "swept_at": null,
+          "sweep_price": null,
+          "ended_at": null
+        }
+      ]
+    }
+  ],
+  "analysis_generated_at": "2026-09-09T13:14:48.510599Z",
+  "current_session": "OVERLAP",
+  "key_levels": [
+    {
+      "id": "4bab4700d1168f4d5f35b2c13a659993d2d7965362bf6a09101d87ac59da8201",
+      "symbol": "XAUUSD",
+      "timeframe": "M5",
+      "kind": "ASIA_HIGH",
+      "price": "4428.96000",
+      "upper": null,
+      "origin": "2026-09-08T00:00:00Z",
+      "confirmed_at": null,
+      "valid_from": "2026-09-09T13:14:00Z",
+      "status": "PROVISIONAL",
+      "source_ids": [
+        "71a1c6369a0bc548cbfb38c2099d9ffe188a62a9b12a09833a0730327e6a9d5d"
+      ],
+      "input_id": "e0a1f1f2f02de32b0e0dbc97411cf68a93fabcf3043db2baa9d3f96a7f1ba967"
+    },
+    {
+      "id": "295504ab5f0d919597269deb2c851205255c0e70f2da586f10f38224d1904293",
+      "symbol": "XAUUSD",
+      "timeframe": "M5",
+      "kind": "ASIA_LOW",
+      "price": "4390.21000",
+      "upper": null,
+      "origin": "2026-09-08T00:00:00Z",
+      "confirmed_at": null,
+      "valid_from": "2026-09-09T13:14:00Z",
+      "status": "PROVISIONAL",
+      "source_ids": [
+        "71a1c6369a0bc548cbfb38c2099d9ffe188a62a9b12a09833a0730327e6a9d5d"
+      ],
+      "input_id": "e0a1f1f2f02de32b0e0dbc97411cf68a93fabcf3043db2baa9d3f96a7f1ba967"
+    },
+    {
+      "id": "e5fe3c4ab42b35b9b5251fbf1bc3b7aca51c441066da277d9852b1f0528026e6",
+      "symbol": "XAUUSD",
+      "timeframe": "M30",
+      "kind": "SESSION_LOW",
+      "price": "4341.38000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "CONFIRMED",
+      "source_ids": [
+        "SESSION_LOW-d732bd1db0170c509ac9"
+      ],
+      "input_id": "6fe5b0ccee20dd40ca0ac2ea"
+    },
+    {
+      "id": "92e373f5c8a917f84a7784222895263c1ec0863b9840cbf0a26c0c576e3a0aa1",
+      "symbol": "XAUUSD",
+      "timeframe": "H1",
+      "kind": "SESSION_LOW",
+      "price": "4341.38000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "CONFIRMED",
+      "source_ids": [
+        "SESSION_LOW-92a92df811698b228c36"
+      ],
+      "input_id": "27038f5457c6e8ef676b46fa"
+    },
+    {
+      "id": "837187119f89e5d375b926f4e3947c54397d94c974c1d319c2e70386e671b196",
+      "symbol": "XAUUSD",
+      "timeframe": "M5",
+      "kind": "ASIA_HIGH",
+      "price": "4412.87000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "CONFIRMED",
+      "source_ids": [
+        "565e1ce7fcf1a74b805b5db4145c0b3164888316b13ec35e64692f740b436b59"
+      ],
+      "input_id": "130acd2f164fd574b121a3b4aefa3f224a6bdb0daf3acab3e1fe0421a7e5baa4"
+    },
+    {
+      "id": "72a25335559cb6acae49906a0ce8e21ae61ab417bd1d9a5c8a7060370b7bd8d9",
+      "symbol": "XAUUSD",
+      "timeframe": "M5",
+      "kind": "SESSION_LOW",
+      "price": "4341.38000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "CONFIRMED",
+      "source_ids": [
+        "SESSION_LOW-362a8b11dff93e468419"
+      ],
+      "input_id": "c9a2203444ddaf13735d352b"
+    },
+    {
+      "id": "657853f5f305c0ef827d66b0ee3c4c530b0ac5a8969f6219a4078795ff7d2f9a",
+      "symbol": "XAUUSD",
+      "timeframe": "M3",
+      "kind": "SESSION_LOW",
+      "price": "4341.38000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "CONFIRMED",
+      "source_ids": [
+        "SESSION_LOW-6efc9d7ff552de1b4ba0"
+      ],
+      "input_id": "c6e1f415a0feadeb8fdc1458"
+    },
+    {
+      "id": "42797cb515c3482fa68f618928e5bd7c398e57f003b9af1dd4b8cda9b6e60e0e",
+      "symbol": "XAUUSD",
+      "timeframe": "M5",
+      "kind": "SESSION_HIGH",
+      "price": "4412.87000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "INVALIDATED",
+      "source_ids": [
+        "SESSION_HIGH-d2d407d3d3ebcbd5773b"
+      ],
+      "input_id": "c9a2203444ddaf13735d352b"
+    },
+    {
+      "id": "3ac666f44e41ae2263bb880505116acc4dcd51142a9b2b93d643bd4489fb7a6b",
+      "symbol": "XAUUSD",
+      "timeframe": "H1",
+      "kind": "SESSION_HIGH",
+      "price": "4412.87000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "SWEPT",
+      "source_ids": [
+        "SESSION_HIGH-46f1b77e1608dbb9ef2f"
+      ],
+      "input_id": "27038f5457c6e8ef676b46fa"
+    },
+    {
+      "id": "35015ac23d1756874b40f5979f9a663293c35e8c06c83146d0a33c4943a80712",
+      "symbol": "XAUUSD",
+      "timeframe": "H4",
+      "kind": "SESSION_HIGH",
+      "price": "4412.87000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "SWEPT",
+      "source_ids": [
+        "SESSION_HIGH-2a06fcad15d3941af96f"
+      ],
+      "input_id": "fe0854483aa27be0113839e2"
+    },
+    {
+      "id": "34c0ed85877f283fd0a4c086986d77f6fe7e89ee2c26d80cb29f603d43079f15",
+      "symbol": "XAUUSD",
+      "timeframe": "M15",
+      "kind": "SESSION_LOW",
+      "price": "4341.38000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "CONFIRMED",
+      "source_ids": [
+        "SESSION_LOW-7b964e35c1e88b414d87"
+      ],
+      "input_id": "71464ab44c64c263834270eb"
+    },
+    {
+      "id": "339e0ac343ddee96acde8eec555cf06f484eec986ef1f71b03b23c9c425ddc1f",
+      "symbol": "XAUUSD",
+      "timeframe": "M15",
+      "kind": "SESSION_HIGH",
+      "price": "4412.87000",
+      "upper": null,
+      "origin": "2026-09-09T00:00:00Z",
+      "confirmed_at": "2026-09-09T08:00:00Z",
+      "valid_from": "2026-09-09T08:00:00Z",
+      "status": "SWEPT",
+      "source_ids": [
+        "SESSION_HIGH-a66b3c984ba6ef0b7a84"
+      ],
+      "input_id": "71464ab44c64c263834270eb"
+    }
+  ],
+  "news": {
+    "symbol": "XAUUSD",
+    "as_of": "2026-09-09T13:14:45Z",
+    "market_as_of": "2026-09-09T13:14:00Z",
+    "news_engine_version": "news-1.0.0",
+    "config_id": "f992ae3fd0549b5b",
+    "fingerprint": "4e56f081fe8061f939ec9e6794d5fd33ba9e173614a5fd5adb4196ca51187663",
+    "source": "xoomar_calendar",
+    "source_mode": "LIVE",
+    "calendar_state": "CALENDAR_UNAVAILABLE",
+    "view": "current",
+    "events": [],
+    "xauusd_relevance": {},
+    "upcoming_events": [],
+    "active_group": null,
+    "active_event_id": null,
+    "news_regime": "UNKNOWN",
+    "macro_bias": "UNKNOWN",
+    "macro_strength": "UNKNOWN",
+    "multiple_event_risk": false,
+    "reaction_windows": [],
+    "reaction_state": "REACTION_UNAVAILABLE",
+    "spread_state": "UNAVAILABLE",
+    "baseline_spread": null,
+    "current_spread": null,
+    "spread_ratio": null,
+    "volatility_state": "UNAVAILABLE",
+    "structure_confirmation": {
+      "status": "WAITING",
+      "upstream_input_id": "c648f1be57368b978a6e2f4b",
+      "upstream_config_id": "426cdfc052d61287",
+      "upstream_algorithm_version": "structure-1.0.0",
+      "upstream_as_of": "2026-09-09T13:10:00Z",
+      "upstream_window_start": "2026-09-08T11:15:00Z",
+      "absence_means": "NOT_INCLUDED_UNKNOWN",
+      "references": {}
+    },
+    "trade_policy_state": "RESTRICTED",
+    "strategy_eligibility": {
+      "TREND_CONTINUATION": "BLOCKED",
+      "MEAN_REVERSION": "BLOCKED",
+      "BREAKOUT": "BLOCKED",
+      "NEWS_MOMENTUM": "WAITING",
+      "NEWS_REVERSAL": "WAITING"
+    },
+    "reason_codes": [
+      "CALENDAR_UNAVAILABLE"
+    ],
+    "market_source": "mt5_demo_iux",
+    "release_status": "NO_EVENT",
+    "data_quality": "UNAVAILABLE",
+    "generated_at": "2026-09-09T13:14:46.224403Z",
+    "served_at": "2026-09-09T13:14:46.224403Z",
+    "cache_age_seconds": 0.0
+  },
+  "news_provider": {
+    "source": "xoomar_calendar",
+    "source_mode": "LIVE",
+    "state": "DEGRADED",
+    "connected": true,
+    "coverage": "LIMITED",
+    "calendar_usable_for_trading": false,
+    "provider_updated_at": "2026-09-09T13:14:48.279000Z",
+    "received_at": "2026-09-09T13:14:44.695267Z",
+    "snapshot_clock_skew_seconds": 3.583733,
+    "last_sync_at": "2026-09-09T13:14:44.730373Z",
+    "next_poll_at": "2026-09-09T13:19:44.729890Z",
+    "event_count": 4,
+    "failures": 0,
+    "poll_seconds": 300,
+    "reason_code": "LIMITED_COVERAGE",
+    "detail_th": "ข้อมูลจริงครอบคลุมบางส่วน ไม่มีคาดการณ์ และผลประกาศอาจช้าถึงหนึ่งชั่วโมง จึงยังใช้อนุมัติกลยุทธ์ไม่ได้"
+  },
+  "calendar_events": [
+    {
+      "id": "55a34bba-3670-5086-b20a-8ed7e558b07d",
+      "provider_event_id": "NFP",
+      "occurrence_key": "August 2026",
+      "event_name": "Non-Farm Payrolls",
+      "event_code": "NFP",
+      "group_id": "2d553ada-820c-53f6-bdb2-a44d20152b12",
+      "country": "US",
+      "currency": "USD",
+      "category": "EMPLOYMENT",
+      "impact": "HIGH",
+      "scheduled_at": "2026-09-04T12:30:00Z",
+      "actual": "162.0000",
+      "forecast": null,
+      "previous": "21.0000",
+      "revised_previous": null,
+      "previous_before_revision": null,
+      "unit": "THOUSANDS",
+      "status": "RELEASED",
+      "source": "xoomar_calendar",
+      "source_mode": "LIVE",
+      "updated_at": "2026-09-09T13:14:44.695267Z",
+      "available_at": "2026-09-09T13:14:44.695267Z",
+      "released_at": "2026-09-09T13:14:44.695267Z",
+      "revision_version": 1,
+      "direction_rule": "HIGHER_IS_POSITIVE",
+      "field_provenance": {},
+      "field_conflicts": []
+    },
+    {
+      "id": "80b14b78-653b-58cf-87ba-2ae99a0aa6a1",
+      "provider_event_id": "CPI",
+      "occurrence_key": "August 2026",
+      "event_name": "Consumer Price Index (YoY)",
+      "event_code": "CPI",
+      "group_id": "80b14b78-653b-58cf-87ba-2ae99a0aa6a1",
+      "country": "US",
+      "currency": "USD",
+      "category": "INFLATION",
+      "impact": "HIGH",
+      "scheduled_at": "2026-09-11T12:30:00Z",
+      "actual": null,
+      "forecast": null,
+      "previous": null,
+      "revised_previous": null,
+      "previous_before_revision": null,
+      "unit": "PERCENT",
+      "status": "SCHEDULED",
+      "source": "xoomar_calendar",
+      "source_mode": "LIVE",
+      "updated_at": "2026-09-09T13:14:44.695267Z",
+      "available_at": "2026-09-09T13:14:44.695267Z",
+      "released_at": null,
+      "revision_version": 1,
+      "direction_rule": "CONTEXT_DEPENDENT",
+      "field_provenance": {},
+      "field_conflicts": []
+    },
+    {
+      "id": "6ce9718d-1b15-55f6-a266-56c43de904b6",
+      "provider_event_id": "FOMC_RATE",
+      "occurrence_key": "September 2026 meeting",
+      "event_name": "FOMC Rate Decision",
+      "event_code": "FOMC_RATE",
+      "group_id": "6ce9718d-1b15-55f6-a266-56c43de904b6",
+      "country": "US",
+      "currency": "USD",
+      "category": "CENTRAL_BANK",
+      "impact": "HIGH",
+      "scheduled_at": "2026-09-16T18:00:00Z",
+      "actual": null,
+      "forecast": null,
+      "previous": null,
+      "revised_previous": null,
+      "previous_before_revision": null,
+      "unit": "RATE",
+      "status": "SCHEDULED",
+      "source": "xoomar_calendar",
+      "source_mode": "LIVE",
+      "updated_at": "2026-09-09T13:14:44.695267Z",
+      "available_at": "2026-09-09T13:14:44.695267Z",
+      "released_at": null,
+      "revision_version": 1,
+      "direction_rule": "CONTEXT_DEPENDENT",
+      "field_provenance": {},
+      "field_conflicts": []
+    },
+    {
+      "id": "08890912-0107-58cb-92a8-eaf74dec44c7",
+      "provider_event_id": "NFP",
+      "occurrence_key": "September 2026",
+      "event_name": "Non-Farm Payrolls",
+      "event_code": "NFP",
+      "group_id": "17a5da07-5118-5bc8-9dfe-62cc64117ce2",
+      "country": "US",
+      "currency": "USD",
+      "category": "EMPLOYMENT",
+      "impact": "HIGH",
+      "scheduled_at": "2026-10-02T12:30:00Z",
+      "actual": null,
+      "forecast": null,
+      "previous": null,
+      "revised_previous": null,
+      "previous_before_revision": null,
+      "unit": "THOUSANDS",
+      "status": "SCHEDULED",
+      "source": "xoomar_calendar",
+      "source_mode": "LIVE",
+      "updated_at": "2026-09-09T13:14:44.695267Z",
+      "available_at": "2026-09-09T13:14:44.695267Z",
+      "released_at": null,
+      "revision_version": 1,
+      "direction_rule": "HIGHER_IS_POSITIVE",
+      "field_provenance": {},
+      "field_conflicts": []
+    }
+  ],
+  "strategies": [
+    {
+      "id": "STRAT01",
+      "name": "SMC Liquidity Reversal",
+      "version": "strategy-1.0.1",
+      "category": "SMC_LIQUIDITY",
+      "styles": [
+        "SCALP",
+        "DAY_TRADE",
+        "SWING",
+        "RUN_TREND"
+      ],
+      "required_context": [
+        "HTF",
+        "SWEEP",
+        "MSS_CHOCH",
+        "FVG_OB",
+        "RETEST",
+        "NEWS"
+      ],
+      "minimum_bars": 60,
+      "description_th": "กวาดสภาพคล่อง กลับเข้าระดับเดิม เปลี่ยนโครงสร้าง และย่อทดสอบโซน"
+    },
+    {
+      "id": "STRAT02",
+      "name": "Trend Pullback",
+      "version": "strategy-1.0.1",
+      "category": "TREND_PULLBACK",
+      "styles": [
+        "SCALP",
+        "DAY_TRADE",
+        "SWING",
+        "RUN_TREND"
+      ],
+      "required_context": [
+        "HTF_TREND",
+        "BOS",
+        "PULLBACK_ZONE",
+        "LTF_CONFIRMATION",
+        "NEWS"
+      ],
+      "minimum_bars": 60,
+      "description_th": "ตามแนวโน้มใหญ่ รอย่อเข้าโซนและยืนยันโครงสร้างกรอบเล็ก"
+    },
+    {
+      "id": "STRAT03",
+      "name": "Breakout Retest",
+      "version": "strategy-1.0.1",
+      "category": "BREAKOUT_PATTERN",
+      "styles": [
+        "SCALP",
+        "DAY_TRADE",
+        "SWING",
+        "RUN_TREND"
+      ],
+      "required_context": [
+        "CONFIRMED_PATTERN",
+        "CLOSE_BREAK",
+        "DISPLACEMENT",
+        "RETEST",
+        "STRUCTURE",
+        "NEWS"
+      ],
+      "minimum_bars": 60,
+      "description_th": "ราคาปิดทะลุกรอบหรือรูปแบบ ตามด้วยการกลับทดสอบและยืนยันโครงสร้าง"
+    },
+    {
+      "id": "STRAT04",
+      "name": "Range Mean Reversion",
+      "version": "strategy-1.0.1",
+      "category": "MEAN_REVERSION",
+      "styles": [
+        "SCALP",
+        "DAY_TRADE",
+        "SWING",
+        "RUN_TREND"
+      ],
+      "required_context": [
+        "RANGING",
+        "BOUNDARIES",
+        "REJECTION",
+        "STRUCTURE",
+        "NEWS"
+      ],
+      "minimum_bars": 60,
+      "description_th": "กลับเข้ากรอบจากขอบราคา ใช้ได้เมื่อไม่มีแนวโน้มแรง"
+    },
+    {
+      "id": "STRAT05",
+      "name": "Post-News Momentum",
+      "version": "strategy-1.0.1",
+      "category": "NEWS_MOMENTUM",
+      "styles": [
+        "SCALP",
+        "DAY_TRADE",
+        "SWING",
+        "RUN_TREND"
+      ],
+      "required_context": [
+        "RELEASED_ACTUAL",
+        "MACRO_ALIGNMENT",
+        "REACTION",
+        "SPREAD",
+        "STRUCTURE"
+      ],
+      "minimum_bars": 60,
+      "description_th": "ติดตามแรงหลังประกาศจริง เมื่อข่าว ราคา และโครงสร้างสอดคล้องกัน"
+    },
+    {
+      "id": "STRAT06",
+      "name": "Post-News Liquidity Reversal",
+      "version": "strategy-1.0.1",
+      "category": "NEWS_REVERSAL",
+      "styles": [
+        "SCALP",
+        "DAY_TRADE",
+        "SWING",
+        "RUN_TREND"
+      ],
+      "required_context": [
+        "HIGH_IMPACT_RELEASE",
+        "SWEEP_RECLAIM",
+        "MSS_CHOCH",
+        "SPREAD"
+      ],
+      "minimum_bars": 60,
+      "description_th": "หลังข่าวแรง รอกวาดราคาและกลับเข้าระดับเดิมพร้อมยืนยันการกลับตัว"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "research",
+      "name": "Strategy Lab",
+      "description_th": "โปรไฟล์วิเคราะห์แยกผล ไม่ส่งคำสั่งซื้อขาย",
+      "style": "DAY_TRADE",
+      "enabled": true,
+      "allowed_strategies": [
+        "STRAT01",
+        "STRAT02",
+        "STRAT03",
+        "STRAT04",
+        "STRAT05",
+        "STRAT06"
+      ],
+      "timeframe_map": {
+        "style": "DAY_TRADE",
+        "context": "H4",
+        "bias": "H1",
+        "setup": "M15",
+        "trigger": "M5",
+        "minimum_bars": 60
+      },
+      "config_id": "f9c201b2a40dd9f809f667884eb891c9729211f5a05ebdf0f3ad1afd83ceba08",
+      "candidate_policy": "ALL_EXPLAINED",
+      "execution_mode": "ANALYSIS_ONLY",
+      "created_at": "2026-09-09T00:00:00Z",
+      "updated_at": "2026-09-09T00:00:00Z"
+    },
+    {
+      "id": "smc",
+      "name": "SMC Specialist",
+      "description_th": "โปรไฟล์วิเคราะห์แยกผล ไม่ส่งคำสั่งซื้อขาย",
+      "style": "SCALP",
+      "enabled": true,
+      "allowed_strategies": [
+        "STRAT01"
+      ],
+      "timeframe_map": {
+        "style": "SCALP",
+        "context": "H1",
+        "bias": "M15",
+        "setup": "M5",
+        "trigger": "M1",
+        "minimum_bars": 60
+      },
+      "config_id": "f9c201b2a40dd9f809f667884eb891c9729211f5a05ebdf0f3ad1afd83ceba08",
+      "candidate_policy": "ALL_EXPLAINED",
+      "execution_mode": "ANALYSIS_ONLY",
+      "created_at": "2026-09-09T00:00:00Z",
+      "updated_at": "2026-09-09T00:00:00Z"
+    },
+    {
+      "id": "trend",
+      "name": "Trend Runner",
+      "description_th": "โปรไฟล์วิเคราะห์แยกผล ไม่ส่งคำสั่งซื้อขาย",
+      "style": "RUN_TREND",
+      "enabled": true,
+      "allowed_strategies": [
+        "STRAT02"
+      ],
+      "timeframe_map": {
+        "style": "RUN_TREND",
+        "context": "D1",
+        "bias": "H4",
+        "setup": "H1",
+        "trigger": "M15",
+        "minimum_bars": 60
+      },
+      "config_id": "f9c201b2a40dd9f809f667884eb891c9729211f5a05ebdf0f3ad1afd83ceba08",
+      "candidate_policy": "ALL_EXPLAINED",
+      "execution_mode": "ANALYSIS_ONLY",
+      "created_at": "2026-09-09T00:00:00Z",
+      "updated_at": "2026-09-09T00:00:00Z"
+    },
+    {
+      "id": "liquidity",
+      "name": "Liquidity Specialist",
+      "description_th": "โปรไฟล์วิเคราะห์แยกผล ไม่ส่งคำสั่งซื้อขาย",
+      "style": "SWING",
+      "enabled": true,
+      "allowed_strategies": [
+        "STRAT01"
+      ],
+      "timeframe_map": {
+        "style": "SWING",
+        "context": "W1",
+        "bias": "D1",
+        "setup": "H4",
+        "trigger": "H1",
+        "minimum_bars": 60
+      },
+      "config_id": "f9c201b2a40dd9f809f667884eb891c9729211f5a05ebdf0f3ad1afd83ceba08",
+      "candidate_policy": "ALL_EXPLAINED",
+      "execution_mode": "ANALYSIS_ONLY",
+      "created_at": "2026-09-09T00:00:00Z",
+      "updated_at": "2026-09-09T00:00:00Z"
+    },
+    {
+      "id": "breakout",
+      "name": "Breakout Trader",
+      "description_th": "โปรไฟล์วิเคราะห์แยกผล ไม่ส่งคำสั่งซื้อขาย",
+      "style": "DAY_TRADE",
+      "enabled": true,
+      "allowed_strategies": [
+        "STRAT03"
+      ],
+      "timeframe_map": {
+        "style": "DAY_TRADE",
+        "context": "H4",
+        "bias": "H1",
+        "setup": "M15",
+        "trigger": "M5",
+        "minimum_bars": 60
+      },
+      "config_id": "f9c201b2a40dd9f809f667884eb891c9729211f5a05ebdf0f3ad1afd83ceba08",
+      "candidate_policy": "ALL_EXPLAINED",
+      "execution_mode": "ANALYSIS_ONLY",
+      "created_at": "2026-09-09T00:00:00Z",
+      "updated_at": "2026-09-09T00:00:00Z"
+    },
+    {
+      "id": "range",
+      "name": "Range Trader",
+      "description_th": "โปรไฟล์วิเคราะห์แยกผล ไม่ส่งคำสั่งซื้อขาย",
+      "style": "SCALP",
+      "enabled": true,
+      "allowed_strategies": [
+        "STRAT04"
+      ],
+      "timeframe_map": {
+        "style": "SCALP",
+        "context": "H1",
+        "bias": "M15",
+        "setup": "M5",
+        "trigger": "M1",
+        "minimum_bars": 60
+      },
+      "config_id": "f9c201b2a40dd9f809f667884eb891c9729211f5a05ebdf0f3ad1afd83ceba08",
+      "candidate_policy": "ALL_EXPLAINED",
+      "execution_mode": "ANALYSIS_ONLY",
+      "created_at": "2026-09-09T00:00:00Z",
+      "updated_at": "2026-09-09T00:00:00Z"
+    },
+    {
+      "id": "news",
+      "name": "News Trader",
+      "description_th": "โปรไฟล์วิเคราะห์แยกผล ไม่ส่งคำสั่งซื้อขาย",
+      "style": "DAY_TRADE",
+      "enabled": true,
+      "allowed_strategies": [
+        "STRAT05",
+        "STRAT06"
+      ],
+      "timeframe_map": {
+        "style": "DAY_TRADE",
+        "context": "H4",
+        "bias": "H1",
+        "setup": "M15",
+        "trigger": "M5",
+        "minimum_bars": 60
+      },
+      "config_id": "f9c201b2a40dd9f809f667884eb891c9729211f5a05ebdf0f3ad1afd83ceba08",
+      "candidate_policy": "ALL_EXPLAINED",
+      "execution_mode": "ANALYSIS_ONLY",
+      "created_at": "2026-09-09T00:00:00Z",
+      "updated_at": "2026-09-09T00:00:00Z"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "3bde509641c8f679ce2040e821afa24d94e1ac247d7986d60bd378a698848c58",
+      "profile_id": "news",
+      "strategy_id": "STRAT05",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "SHORT",
+      "status": "BLOCKED_CONTEXT",
+      "score": 10,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T13:10:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "HTF",
+          "description_th": "โครงสร้างกรอบใหญ่สอดคล้องกัน",
+          "source_ids": [
+            "fe0854483aa27be0113839e2",
+            "27038f5457c6e8ef676b46fa"
+          ],
+          "confirmed_at": null,
+          "weight": 15
+        },
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "CHOCH-69be2db888b682ee545d"
+          ],
+          "confirmed_at": "2026-09-09T12:10:00Z",
+          "weight": 25
+        },
+        {
+          "code": "LIQUIDITY",
+          "description_th": "กวาดสภาพคล่องและราคาปิดกลับเข้าระดับเดิม",
+          "source_ids": [
+            "LIQUIDITY-51668552e83d95ee6ee3"
+          ],
+          "confirmed_at": "2026-09-09T12:00:00Z",
+          "weight": 20
+        },
+        {
+          "code": "KEY_LEVEL",
+          "description_th": "ราคาทดสอบและปฏิเสธโซนเชิงโครงสร้าง",
+          "source_ids": [
+            "FVG-ee0429d909e345a3e54a"
+          ],
+          "confirmed_at": "2026-09-04T13:00:00Z",
+          "weight": 10
+        }
+      ],
+      "missing_conditions": [
+        "หลักฐานโครงสร้างเกินอายุตามจำนวนแท่งที่กำหนด",
+        "รอผลข่าวจริง ทิศทางข่าว/ราคา โครงสร้าง และส่วนต่างราคาที่ตรวจสอบได้"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "a0b341017ccee5f2d030354024cdda93e022bd672bf6ec72446b2d212098622c",
+      "profile_id": "research",
+      "strategy_id": "STRAT02",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "SHORT",
+      "status": "BLOCKED_CONTEXT",
+      "score": 10,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T13:10:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "HTF",
+          "description_th": "โครงสร้างกรอบใหญ่สอดคล้องกัน",
+          "source_ids": [
+            "fe0854483aa27be0113839e2",
+            "27038f5457c6e8ef676b46fa"
+          ],
+          "confirmed_at": null,
+          "weight": 15
+        },
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "CHOCH-69be2db888b682ee545d"
+          ],
+          "confirmed_at": "2026-09-09T12:10:00Z",
+          "weight": 25
+        },
+        {
+          "code": "LIQUIDITY",
+          "description_th": "กวาดสภาพคล่องและราคาปิดกลับเข้าระดับเดิม",
+          "source_ids": [
+            "LIQUIDITY-51668552e83d95ee6ee3"
+          ],
+          "confirmed_at": "2026-09-09T12:00:00Z",
+          "weight": 20
+        },
+        {
+          "code": "KEY_LEVEL",
+          "description_th": "ราคาทดสอบและปฏิเสธโซนเชิงโครงสร้าง",
+          "source_ids": [
+            "FVG-ee0429d909e345a3e54a"
+          ],
+          "confirmed_at": "2026-09-04T13:00:00Z",
+          "weight": 10
+        }
+      ],
+      "missing_conditions": [
+        "หลักฐานโครงสร้างเกินอายุตามจำนวนแท่งที่กำหนด",
+        "สภาวะราคาไม่ใช่แนวโน้มหรือการย่อ"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "2d1509d003c012339ff35eb7710bc2a588b5df4332371fe737428f6a5f64ef3a",
+      "profile_id": "research",
+      "strategy_id": "STRAT05",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "SHORT",
+      "status": "BLOCKED_CONTEXT",
+      "score": 10,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T13:10:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "HTF",
+          "description_th": "โครงสร้างกรอบใหญ่สอดคล้องกัน",
+          "source_ids": [
+            "fe0854483aa27be0113839e2",
+            "27038f5457c6e8ef676b46fa"
+          ],
+          "confirmed_at": null,
+          "weight": 15
+        },
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "CHOCH-69be2db888b682ee545d"
+          ],
+          "confirmed_at": "2026-09-09T12:10:00Z",
+          "weight": 25
+        },
+        {
+          "code": "LIQUIDITY",
+          "description_th": "กวาดสภาพคล่องและราคาปิดกลับเข้าระดับเดิม",
+          "source_ids": [
+            "LIQUIDITY-51668552e83d95ee6ee3"
+          ],
+          "confirmed_at": "2026-09-09T12:00:00Z",
+          "weight": 20
+        },
+        {
+          "code": "KEY_LEVEL",
+          "description_th": "ราคาทดสอบและปฏิเสธโซนเชิงโครงสร้าง",
+          "source_ids": [
+            "FVG-ee0429d909e345a3e54a"
+          ],
+          "confirmed_at": "2026-09-04T13:00:00Z",
+          "weight": 10
+        }
+      ],
+      "missing_conditions": [
+        "หลักฐานโครงสร้างเกินอายุตามจำนวนแท่งที่กำหนด",
+        "รอผลข่าวจริง ทิศทางข่าว/ราคา โครงสร้าง และส่วนต่างราคาที่ตรวจสอบได้"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "7b5203b6d7202ae270b1b997481f966c3fcd3b35d7b2316038d6142d5a734160",
+      "profile_id": "breakout",
+      "strategy_id": "STRAT03",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T12:50:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "BOS-30323da267861dc3567c"
+          ],
+          "confirmed_at": "2026-09-09T11:50:00Z",
+          "weight": 25
+        },
+        {
+          "code": "INDICATOR",
+          "description_th": "RSI สนับสนุนทิศทาง เป็นหลักฐานประกอบเท่านั้น",
+          "source_ids": [
+            "c9a2203444ddaf13735d352b"
+          ],
+          "confirmed_at": null,
+          "weight": 5
+        }
+      ],
+      "missing_conditions": [
+        "รอความสอดคล้องของโครงสร้างกรอบใหญ่",
+        "หลักฐานโครงสร้างเกินอายุตามจำนวนแท่งที่กำหนด",
+        "รอรูปแบบยืนยัน ราคาปิดทะลุด้วยแรง และกลับทดสอบหลังยืนยัน"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้",
+        "โครงสร้างกรอบใหญ่ขัดแย้งกับทิศทางที่พิจารณา"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "fa04bf59ac2e1d210165a0b539ca4c11bf4f423e4ae52265b83fdc3c58750c48",
+      "profile_id": "liquidity",
+      "strategy_id": "STRAT01",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T18:00:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "CHOCH-7f38c84143d6b9f44133"
+          ],
+          "confirmed_at": "2026-09-09T06:00:00Z",
+          "weight": 25
+        },
+        {
+          "code": "LIQUIDITY",
+          "description_th": "กวาดสภาพคล่องและราคาปิดกลับเข้าระดับเดิม",
+          "source_ids": [
+            "PDL-b502485db8d67c3a48fc"
+          ],
+          "confirmed_at": "2026-09-09T04:00:00Z",
+          "weight": 20
+        },
+        {
+          "code": "INDICATOR",
+          "description_th": "RSI สนับสนุนทิศทาง เป็นหลักฐานประกอบเท่านั้น",
+          "source_ids": [
+            "27038f5457c6e8ef676b46fa"
+          ],
+          "confirmed_at": null,
+          "weight": 5
+        }
+      ],
+      "missing_conditions": [
+        "รอความสอดคล้องของโครงสร้างกรอบใหญ่",
+        "รอการกลับทดสอบและปฏิเสธ FVG/OB ที่ยังใช้ได้"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "ac559639ef8fb131f2c84dc28f8d70e90fe0d9c4463dcc8e9b726c70e5650475",
+      "profile_id": "news",
+      "strategy_id": "STRAT06",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T13:10:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "HTF",
+          "description_th": "โครงสร้างกรอบใหญ่สอดคล้องกัน",
+          "source_ids": [
+            "fe0854483aa27be0113839e2",
+            "27038f5457c6e8ef676b46fa"
+          ],
+          "confirmed_at": null,
+          "weight": 15
+        },
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "CHOCH-69be2db888b682ee545d"
+          ],
+          "confirmed_at": "2026-09-09T12:10:00Z",
+          "weight": 25
+        },
+        {
+          "code": "LIQUIDITY",
+          "description_th": "กวาดสภาพคล่องและราคาปิดกลับเข้าระดับเดิม",
+          "source_ids": [
+            "LIQUIDITY-51668552e83d95ee6ee3"
+          ],
+          "confirmed_at": "2026-09-09T12:00:00Z",
+          "weight": 20
+        }
+      ],
+      "missing_conditions": [
+        "หลักฐานโครงสร้างเกินอายุตามจำนวนแท่งที่กำหนด",
+        "รอการกลับทดสอบและปฏิเสธ FVG/OB ที่ยังใช้ได้",
+        "รอผลข่าวจริง ทิศทางข่าว/ราคา โครงสร้าง และส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข่าวผลกระทบสูงที่ประกาศแล้ว"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "66805b5e508548f971d6e8ac7b2b311e5a1280d667a0866a78f27d9c363ee8ce",
+      "profile_id": "range",
+      "strategy_id": "STRAT04",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T13:26:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "INDICATOR",
+          "description_th": "RSI สนับสนุนทิศทาง เป็นหลักฐานประกอบเท่านั้น",
+          "source_ids": [
+            "b16c21c3a7106788ff4ba4ee"
+          ],
+          "confirmed_at": null,
+          "weight": 5
+        }
+      ],
+      "missing_conditions": [
+        "ยังไม่มีโครงสร้างยืนยันกรอบเล็ก",
+        "รอปฏิเสธขอบกรอบและเปลี่ยนโครงสร้าง"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้",
+        "โครงสร้างกรอบใหญ่ขัดแย้งกับทิศทางที่พิจารณา"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "f96a7c8997fe724ea90cc341e92036890691c3847fcacaf9e0d0e2f673f9be68",
+      "profile_id": "research",
+      "strategy_id": "STRAT01",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T12:50:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "BOS-30323da267861dc3567c"
+          ],
+          "confirmed_at": "2026-09-09T11:50:00Z",
+          "weight": 25
+        },
+        {
+          "code": "INDICATOR",
+          "description_th": "RSI สนับสนุนทิศทาง เป็นหลักฐานประกอบเท่านั้น",
+          "source_ids": [
+            "c9a2203444ddaf13735d352b"
+          ],
+          "confirmed_at": null,
+          "weight": 5
+        }
+      ],
+      "missing_conditions": [
+        "รอความสอดคล้องของโครงสร้างกรอบใหญ่",
+        "หลักฐานโครงสร้างเกินอายุตามจำนวนแท่งที่กำหนด",
+        "รอกวาดสภาพคล่อง กลับเข้าระดับ และ CHOCH/MSS ตามลำดับ",
+        "รอการกลับทดสอบและปฏิเสธ FVG/OB ที่ยังใช้ได้"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้",
+        "โครงสร้างกรอบใหญ่ขัดแย้งกับทิศทางที่พิจารณา"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "d4e78755b7fb73c6b99aac4791b183ad17dba0d121c1a3b2fc8a90fcd85adf50",
+      "profile_id": "research",
+      "strategy_id": "STRAT03",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T12:50:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "BOS-30323da267861dc3567c"
+          ],
+          "confirmed_at": "2026-09-09T11:50:00Z",
+          "weight": 25
+        },
+        {
+          "code": "INDICATOR",
+          "description_th": "RSI สนับสนุนทิศทาง เป็นหลักฐานประกอบเท่านั้น",
+          "source_ids": [
+            "c9a2203444ddaf13735d352b"
+          ],
+          "confirmed_at": null,
+          "weight": 5
+        }
+      ],
+      "missing_conditions": [
+        "รอความสอดคล้องของโครงสร้างกรอบใหญ่",
+        "หลักฐานโครงสร้างเกินอายุตามจำนวนแท่งที่กำหนด",
+        "รอรูปแบบยืนยัน ราคาปิดทะลุด้วยแรง และกลับทดสอบหลังยืนยัน"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้",
+        "โครงสร้างกรอบใหญ่ขัดแย้งกับทิศทางที่พิจารณา"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "fa7cfc3d32342ffb4c777cb2f083ad9d83f42d3c91efae8e177cebf0ed324e26",
+      "profile_id": "research",
+      "strategy_id": "STRAT04",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T12:50:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "BOS-30323da267861dc3567c"
+          ],
+          "confirmed_at": "2026-09-09T11:50:00Z",
+          "weight": 25
+        },
+        {
+          "code": "INDICATOR",
+          "description_th": "RSI สนับสนุนทิศทาง เป็นหลักฐานประกอบเท่านั้น",
+          "source_ids": [
+            "c9a2203444ddaf13735d352b"
+          ],
+          "confirmed_at": null,
+          "weight": 5
+        }
+      ],
+      "missing_conditions": [
+        "หลักฐานโครงสร้างเกินอายุตามจำนวนแท่งที่กำหนด",
+        "รอปฏิเสธขอบกรอบและเปลี่ยนโครงสร้าง"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้",
+        "โครงสร้างกรอบใหญ่ขัดแย้งกับทิศทางที่พิจารณา"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "e2cfabb698a201c20ec4ed135cf685a4313c9c4b65cbd6b5ed6a2a46e66d5724",
+      "profile_id": "research",
+      "strategy_id": "STRAT06",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T12:50:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "STRUCTURE",
+          "description_th": "พบโครงสร้างยืนยันกรอบเล็ก",
+          "source_ids": [
+            "BOS-30323da267861dc3567c"
+          ],
+          "confirmed_at": "2026-09-09T11:50:00Z",
+          "weight": 25
+        },
+        {
+          "code": "INDICATOR",
+          "description_th": "RSI สนับสนุนทิศทาง เป็นหลักฐานประกอบเท่านั้น",
+          "source_ids": [
+            "c9a2203444ddaf13735d352b"
+          ],
+          "confirmed_at": null,
+          "weight": 5
+        }
+      ],
+      "missing_conditions": [
+        "รอความสอดคล้องของโครงสร้างกรอบใหญ่",
+        "หลักฐานโครงสร้างเกินอายุตามจำนวนแท่งที่กำหนด",
+        "รอกวาดสภาพคล่อง กลับเข้าระดับ และ CHOCH/MSS ตามลำดับ",
+        "รอการกลับทดสอบและปฏิเสธ FVG/OB ที่ยังใช้ได้",
+        "รอผลข่าวจริง ทิศทางข่าว/ราคา โครงสร้าง และส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข่าวผลกระทบสูงที่ประกาศแล้ว"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้",
+        "โครงสร้างกรอบใหญ่ขัดแย้งกับทิศทางที่พิจารณา"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "c85ec70716704315e26e919a0a3e44b0dac3462a3352ff904aaab84dcbec1f2d",
+      "profile_id": "smc",
+      "strategy_id": "STRAT01",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T13:26:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "INDICATOR",
+          "description_th": "RSI สนับสนุนทิศทาง เป็นหลักฐานประกอบเท่านั้น",
+          "source_ids": [
+            "b16c21c3a7106788ff4ba4ee"
+          ],
+          "confirmed_at": null,
+          "weight": 5
+        }
+      ],
+      "missing_conditions": [
+        "รอความสอดคล้องของโครงสร้างกรอบใหญ่",
+        "ยังไม่มีโครงสร้างยืนยันกรอบเล็ก",
+        "รอกวาดสภาพคล่อง กลับเข้าระดับ และ CHOCH/MSS ตามลำดับ",
+        "รอการกลับทดสอบและปฏิเสธ FVG/OB ที่ยังใช้ได้"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้",
+        "โครงสร้างกรอบใหญ่ขัดแย้งกับทิศทางที่พิจารณา"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    },
+    {
+      "id": "4903722190daae5b76e9ca89ebb238f778c05918c2c20af8a091ba7c057f2605",
+      "profile_id": "trend",
+      "strategy_id": "STRAT02",
+      "strategy_version": "strategy-1.0.1",
+      "symbol": "XAUUSD",
+      "direction": "NO_TRADE",
+      "status": "BLOCKED_CONTEXT",
+      "score": 0,
+      "detected_at": "2026-09-09T13:14:00Z",
+      "confirmed_at": null,
+      "expires_at": "2026-09-09T16:14:00Z",
+      "context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+      "upstream_ids": [
+        "b16c21c3a7106788ff4ba4ee",
+        "c6e1f415a0feadeb8fdc1458",
+        "c9a2203444ddaf13735d352b",
+        "71464ab44c64c263834270eb",
+        "6fe5b0ccee20dd40ca0ac2ea",
+        "27038f5457c6e8ef676b46fa",
+        "fe0854483aa27be0113839e2",
+        "8a6e720dd3fdc7c6c7b6dbac",
+        "a959d60dff5b2766a63709c2",
+        "233e51f97d9a73bc208e1111977c49812a20add8e1a0c2239a040f9b84f5f5d5"
+      ],
+      "news_provenance": null,
+      "evidence": [
+        {
+          "code": "INDICATOR",
+          "description_th": "RSI สนับสนุนทิศทาง เป็นหลักฐานประกอบเท่านั้น",
+          "source_ids": [
+            "71464ab44c64c263834270eb"
+          ],
+          "confirmed_at": null,
+          "weight": 5
+        }
+      ],
+      "missing_conditions": [
+        "รอความสอดคล้องของโครงสร้างกรอบใหญ่",
+        "ยังไม่มีโครงสร้างยืนยันกรอบเล็ก",
+        "รอการกลับทดสอบและปฏิเสธ FVG/OB ที่ยังใช้ได้",
+        "สภาวะราคาไม่ใช่แนวโน้มหรือการย่อ"
+      ],
+      "conflicts": [
+        "ข่าวจริงยังไม่พร้อม: ข่าวทดสอบหรือข้อมูลที่ไม่ครบใช้ยืนยัน Setup จริงไม่ได้",
+        "บริบทข่าวยังไม่อนุญาตกลยุทธ์นี้",
+        "ยังไม่มีข้อมูลส่วนต่างราคาที่ตรวจสอบได้",
+        "ยังไม่มีข้อมูลความผันผวนที่ตรวจสอบได้",
+        "โครงสร้างกรอบใหญ่ขัดแย้งกับทิศทางที่พิจารณา"
+      ],
+      "invalidation_th": "ใช้การยืนยันจากข้อมูลต้นทาง จุดหยุดเชิงโครงสร้าง และเวลาหมดอายุ; การหายจาก snapshot ไม่ใช่การยกเลิก",
+      "plan": null
+    }
+  ],
+  "strategy_market_context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+  "strategy_context_id": "ad8c40ffb669b459f3b84f15017c8e8d08e2865b092832384b4b1f4cd598f2d9",
+  "strategy_generated_at": "2026-09-09T13:14:47.985597Z",
+  "strategy_as_of": "2026-09-09T13:14:00Z",
+  "strategy_stale": false,
+  "current_plan": null,
+  "adaptive_status": "RESERVED_DISABLED",
+  "health": [
+    {
+      "module": "backend",
+      "state": "HEALTHY",
+      "detail_th": "API ตอบสนอง"
+    },
+    {
+      "module": "database",
+      "state": "HEALTHY",
+      "detail_th": "PostgreSQL"
+    },
+    {
+      "module": "market",
+      "state": "HEALTHY",
+      "detail_th": "ตรวจจาก provider ราคาจริงและเวลา quote"
+    },
+    {
+      "module": "news",
+      "state": "DEGRADED",
+      "detail_th": "ข้อมูลจริงครอบคลุมบางส่วน ไม่มีคาดการณ์ และผลประกาศอาจช้าถึงหนึ่งชั่วโมง จึงยังใช้อนุมัติกลยุทธ์ไม่ได้"
+    },
+    {
+      "module": "analysis",
+      "state": "HEALTHY",
+      "detail_th": "โครงสร้างจากแท่งปิด H4/H1/M15/M5"
+    },
+    {
+      "module": "strategy",
+      "state": "HEALTHY",
+      "detail_th": "สถานะการคำนวณ ไม่ใช่สิทธิ์ส่งคำสั่งซื้อขาย"
+    },
+    {
+      "module": "websocket",
+      "state": "UNKNOWN",
+      "detail_th": "ตรวจการเชื่อมต่อจากหน้านี้"
+    },
+    {
+      "module": "broker_execution",
+      "state": "DISABLED",
+      "detail_th": "ไม่มีการส่งคำสั่ง"
+    }
+  ]
+}

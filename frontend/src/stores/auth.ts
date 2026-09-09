@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, clearSession } from '@/lib/api';
+import { ApiContractError } from '@/lib/contracts';
 import type { User } from '@/types';
 
 interface AuthState {
@@ -67,8 +68,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const user = await api.getMe();
       set({ user, isAuthenticated: true, isLoading: false });
-    } catch {
-      clearSession();
+    } catch (error) {
+      if (!(error instanceof ApiContractError)) clearSession();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },

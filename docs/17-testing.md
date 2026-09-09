@@ -1,6 +1,6 @@
 # 17 — Testing
 
-Phase 1, updated 2026-09-08. Evidence: [phase-1-gate.md](phase-1-gate.md).
+Phase 1, updated 2026-09-09. Evidence: [phase-1-gate.md](phase-1-gate.md).
 All default checks run on native Windows without Docker, WSL, PostgreSQL or Redis services.
 
 ## Database-independent checks
@@ -43,7 +43,7 @@ $env:TEST_DATABASE_DISPOSABLE = "true"
 .\.venv\Scripts\python.exe -m pytest -m integration -rs
 ~~~
 
-The test creates a unique phase1_gate_<uuid> schema, restricts migration search_path to it,
+Each test creates a unique phase1_gate_<uuid> schema, restricts migration search_path to it,
 runs upgrade → downgrade → upgrade, verifies six tables, seeds a test user and exercises real
 PostgreSQL-backed API login/me/refresh/logout plus the LOGIN audit record.
 It drops only that schema in a finally block; no existing schemas or application tables are dropped.
@@ -59,7 +59,7 @@ Plain pytest runs unit/API tests and shows the integration skip explicitly.
 
 With native PostgreSQL configured:
 
-1. Run the isolated integration test above.
+1. Run the isolated integration suite above, including corrective roundtrip and alembic check. Any skip/missing PostgreSQL evidence blocks the Phase 1 gate.
 2. Run migration/seed against your development DB, start API and frontend via [18-devops.md](18-devops.md).
 3. Log in through the browser; verify dashboard, assets, reload/session recovery and logout.
 4. Verify the actual LOGIN audit record and record the evidence before checking TASK-020.
@@ -87,5 +87,95 @@ The script uses the real UI controls and backend; it does not mock login or invo
 It covers wrong password, authenticated shell, reload, server token refresh, logout and protected-route recovery.
 Gate result: PASS, zero browser runtime errors and failed asset responses.
 
-Final backend command python -m pytest --show-capture=no --tb=short: 36 passed, no skips.
-Final frontend unit suite: 6 passed. Full evidence: [phase-1-gate.md](phase-1-gate.md).
+Historical initial gate: backend 36 passed. Independent review then found P1-001; current results are in phase-1-gate.md.
+Historical initial frontend unit suite: 6 passed. Full evidence: [phase-1-gate.md](phase-1-gate.md).
+
+## Required PostgreSQL schema consistency gate — P1-001
+
+A Phase Gate or CI acceptance run must execute the integration suite against a real, explicitly disposable
+TEST_DATABASE_URL separate from DEV; skipped integration tests do not qualify as PASS.
+No CI provider is configured in this repository; the pytest integration wrapper is the executable gate
+for the current native workflow and for a future CI PostgreSQL service.
+
+The shared fixture creates only its own random schema and cleans it in finally. The tests verify:
+
+- Fresh base → head → base → head, including all tables, JSONB/nullability/defaults, PK/FK and unique indexes.
+- Populated 0001_initial → 0002_phase1_schema_alignment → 0001_initial → latest with semantic row equality.
+- Nested objects/arrays, Unicode, booleans, numbers, empty objects, JSON null and SQL NULL.
+- Existing users/sessions, unique refresh-token rejection, symbol defaults, audit/event data preservation.
+- Real alembic check after fresh and re-upgrade: No new upgrade operations detected.
+- Deliberately introduced JSON type drift and unique-index/constraint drift both make alembic check fail;
+  repairing each drift restores PASS. This prevents a wrapper that silently accepts every outcome.
+- Subprocess output is inspected for connection URLs/passwords and the signing key without printing them.
+
+Run from backend, after configuring ignored local environment values:
+
+~~~powershell
+.\.venv\Scripts\python.exe -m pytest -m integration --show-capture=no --tb=short -rs
+~~~
+
+For an existing identified DEV database, capture semantic fingerprints and validate JSON compatibility first,
+then run the following (never downgrade DEV for verification):
+
+~~~powershell
+.\.venv\Scripts\python.exe -m alembic current
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m alembic check
+~~~
+
+The last command must report No new upgrade operations detected. Compare preserved rows immediately after
+upgrade, before browser/auth smoke can legitimately update users/sessions and append new audit records.
+Rollback/re-upgrade verification is performed only by the isolated TEST suite.
+Alembic check compares the same metadata operations as autogeneration; it is not a substitute for explicit
+data/default/constraint assertions. See [Alembic check documentation](https://alembic.sqlalchemy.org/en/latest/autogenerate.html#running-alembic-check-to-test-for-new-upgrade-operations).
+
+## Phase 1.1 hardening regression
+
+Current hardening evidence is in [phase-1.1-gate.md](phase-1.1-gate.md). Phase 1 has passed independent re-review;
+P2-001/002/003 are the only targeted findings. Phase 2 still must not start in this session.
+
+Run backend ruff/mypy/build/full pytest and the real PostgreSQL integration gate above. Additional commands:
+
+~~~powershell
+.\.venv\Scripts\python.exe -m scripts.export_api_contract --check
+.\.venv\Scripts\python.exe -m pytest tests/test_hardening.py --show-capture=no --tb=short
+.\.venv\Scripts\python.exe -m alembic check
+~~~
+
+Hardening tests cover spoofed XFF on the same peer, account changes, normalized accounts across peers,
+trusted/untrusted proxy boundaries, invalid network config, limiter expiration/cleanup/capacity, max-length
+correlation headers, overlong/invalid/control-character replacements and request-context reset.
+Real PostgreSQL tests log in with 64/65-character and injection headers, verify persisted audit IDs, then force
+a database parameter conversion error. Both JSON and console logs must retain diagnostic context without the
+random sensitive parameter, password or signing key. Schema drift gate must remain PASS.
+
+Frontend npm.cmd test runs original auth/store/client tests plus OpenAPI-derived contract fixtures, missing/wrong
+field mutations, role/readiness checks, actual endpoint parser boundaries and invalid-token storage rejection.
+The backend checks generated TypeScript and fixture freshness; frontend build/typecheck checks returned parser
+types against generated interfaces. To intentionally update contracts, run python -m scripts.export_api_contract
+from backend and review the artifacts; no new generator dependency is needed.
+
+Native acceptance uses Uvicorn --no-proxy-headers. Verify real HTTP XFF spoofing receives 429 after the configured
+budget, health/readiness report PAPER/live=false/Redis disabled, and run the existing Chromium login/reload/
+refresh/logout/protected-route script. Preserve active user processes; stop only owned verification servers.
+
+
+## Phase 2 market and visual gate (2026-09-09)
+
+Run the full backend/frontend suites including test_market_data.py, integration/test_market_live.py
+and market.test.cjs. Existing HARD-R01/R02/R03 tests remain in the gate.
+Run e2e/market-screen.cjs using the same private credential path/Playwright setup as native-login.cjs.
+Visual acceptance must cover all nine timeframes, actual quote updates, persistent canvas lifecycle,
+reconnect/reload and desktop/tablet/mobile. No simulated quote may be labeled live.
+The gate report is docs/phase-2-gate.md; independent combined review is still required.
+
+## Phase 3.5 causal economic acceptance
+Golden tests cover numeric semantics, NFP mixed/revisions, CPI/context-dependent releases,
+FOMC nonnumeric, timeline/overlaps, point-in-time prefix equality, reaction coverage/future lifecycle,
+repository dedupe/reschedule and PostgreSQL migration preservation.
+News browser uses existing private E2E_CREDENTIALS_PATH, never inline passwords:
+frontend/tests/e2e/news-screen.cjs. Replay news and actual IUX price evidence remain distinct.
+See [phase-3.5-gate.md](phase-3.5-gate.md).
+
+## Phase 4 acceptance
+Strategy tests cover immutable/causal contexts, indicators/DST/patterns, six LONG/SHORT playbook contract goldens, hard blocks, geometry, lifecycle, PostgreSQL and auth. Frontend adds generated-schema semantic validation and three-mode responsive browser acceptance. See [Phase 4 gate](phase-4-gate.md) for exact results and partial conditions.

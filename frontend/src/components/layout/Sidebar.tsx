@@ -30,17 +30,18 @@ export function Sidebar() {
 
   return (
     <div
-      className={`bg-gray-900 text-white h-screen flex flex-col transition-all duration-300 border-r border-gray-800 ${
-        collapsed ? 'w-16' : 'w-64'
+      className={`shrink-0 bg-gray-900 text-white h-screen flex flex-col transition-all duration-300 border-r border-gray-800 ${
+        collapsed ? 'w-16' : 'w-16 lg:w-56'
       }`}
     >
       <div className="flex items-center justify-between p-4 border-b border-gray-800 h-16">
         {!collapsed && (
-          <div className="font-bold text-xl tracking-tight text-amber-500 whitespace-nowrap">
+          <div className="hidden lg:block font-bold text-xl tracking-tight text-amber-500 whitespace-nowrap">
             AI Gold Trader
           </div>
         )}
         <button
+          aria-label="Toggle navigation labels"
           onClick={() => setCollapsed(!collapsed)}
           className="p-1.5 rounded-md hover:bg-gray-800 text-gray-400 focus:outline-none"
         >
@@ -55,16 +56,17 @@ export function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              aria-label={item.label}
               className={`flex items-center px-4 py-2.5 transition-colors ${
                 isActive
                   ? 'bg-amber-500/10 text-amber-500 border-r-2 border-amber-500'
                   : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
               }`}
-              title={collapsed ? item.label : undefined}
+              title={item.label}
             >
               <span className="text-xl leading-none">{item.icon}</span>
               {!collapsed && (
-                <span className="ml-3 font-medium whitespace-nowrap">
+                <span className="hidden lg:block ml-3 font-medium whitespace-nowrap">
                   {item.label}
                 </span>
               )}
@@ -76,7 +78,7 @@ export function Sidebar() {
       <div className="p-4 border-t border-gray-800">
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
           {!collapsed && (
-            <div className="flex items-center">
+            <div className="hidden lg:flex items-center">
               <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-sm font-bold">
                 U
               </div>

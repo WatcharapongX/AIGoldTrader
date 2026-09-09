@@ -1,0 +1,477 @@
+{
+  "symbol": "XAUUSD",
+  "timeframe": "M1",
+  "source": "simulated",
+  "algorithm_version": "structure-1.0.0",
+  "config_id": "9b48fbfd7f177237",
+  "input_id": "a45fc4402ddb230cbfe0c09f",
+  "window_start": "2026-08-03T00:00:00Z",
+  "history": {
+    "requested": 300,
+    "returned": 9,
+    "closed": 9,
+    "status": "PARTIAL"
+  },
+  "as_of": "2026-08-03T00:09:00Z",
+  "modules": {
+    "internal_structure": {
+      "status": "PARTIAL_HISTORY",
+      "minimum_bars_required": 3,
+      "available_bars": 9,
+      "reason": "Available closed history analyzed; no fabricated backfill"
+    },
+    "external_structure": {
+      "status": "PARTIAL_HISTORY",
+      "minimum_bars_required": 3,
+      "available_bars": 9,
+      "reason": "Available closed history analyzed; no fabricated backfill"
+    },
+    "liquidity": {
+      "status": "PARTIAL_HISTORY",
+      "minimum_bars_required": 3,
+      "available_bars": 9,
+      "reason": "Available closed history analyzed; no fabricated backfill"
+    },
+    "fvg": {
+      "status": "NO_STRUCTURE",
+      "minimum_bars_required": 3,
+      "available_bars": 9,
+      "reason": "No confirmed feature under these rules"
+    },
+    "order_blocks": {
+      "status": "PARTIAL_HISTORY",
+      "minimum_bars_required": 4,
+      "available_bars": 9,
+      "reason": "Available closed history analyzed; no fabricated backfill"
+    },
+    "indicators": {
+      "status": "PARTIAL_HISTORY",
+      "minimum_bars_required": 4,
+      "available_bars": 9,
+      "reason": "Available closed history analyzed; no fabricated backfill"
+    },
+    "sessions": {
+      "status": "NO_STRUCTURE",
+      "minimum_bars_required": 2,
+      "available_bars": 9,
+      "reason": "No confirmed feature under these rules"
+    },
+    "regime": {
+      "status": "PARTIAL_HISTORY",
+      "minimum_bars_required": 4,
+      "available_bars": 9,
+      "reason": "Available closed history analyzed; no fabricated backfill"
+    }
+  },
+  "internal_state": "BEARISH",
+  "external_state": "BEARISH",
+  "swings": [
+    {
+      "id": "SWING-e587a93829e066d7b5a6",
+      "scope": "INTERNAL",
+      "kind": "HIGH",
+      "label": "SH",
+      "price": "105",
+      "swing_time": "2026-08-03T00:01:00Z",
+      "confirmed_at": "2026-08-03T00:03:00Z",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "SWING-9373614b90cb0b3b9fac",
+      "scope": "EXTERNAL",
+      "kind": "HIGH",
+      "label": "SH",
+      "price": "105",
+      "swing_time": "2026-08-03T00:01:00Z",
+      "confirmed_at": "2026-08-03T00:03:00Z",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "SWING-c410ac4ad019d4f285f3",
+      "scope": "INTERNAL",
+      "kind": "LOW",
+      "label": "SL",
+      "price": "100",
+      "swing_time": "2026-08-03T00:02:00Z",
+      "confirmed_at": "2026-08-03T00:04:00Z",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "SWING-cb61615e9e0b208a21b8",
+      "scope": "EXTERNAL",
+      "kind": "LOW",
+      "label": "SL",
+      "price": "100",
+      "swing_time": "2026-08-03T00:02:00Z",
+      "confirmed_at": "2026-08-03T00:04:00Z",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "SWING-3c3d30fb8786d0b537c2",
+      "scope": "INTERNAL",
+      "kind": "HIGH",
+      "label": "HH",
+      "price": "107",
+      "swing_time": "2026-08-03T00:03:00Z",
+      "confirmed_at": "2026-08-03T00:05:00Z",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "SWING-80738b9e4f3b6c4b50f8",
+      "scope": "EXTERNAL",
+      "kind": "HIGH",
+      "label": "HH",
+      "price": "107",
+      "swing_time": "2026-08-03T00:03:00Z",
+      "confirmed_at": "2026-08-03T00:05:00Z",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "SWING-85f409f69cb763fcd40e",
+      "scope": "INTERNAL",
+      "kind": "LOW",
+      "label": "HL",
+      "price": "102",
+      "swing_time": "2026-08-03T00:04:00Z",
+      "confirmed_at": "2026-08-03T00:06:00Z",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "SWING-a6418c697cda53fca909",
+      "scope": "EXTERNAL",
+      "kind": "LOW",
+      "label": "HL",
+      "price": "102",
+      "swing_time": "2026-08-03T00:04:00Z",
+      "confirmed_at": "2026-08-03T00:06:00Z",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "SWING-8f9ad3212a1f48cd9bc3",
+      "scope": "INTERNAL",
+      "kind": "HIGH",
+      "label": "HH",
+      "price": "109",
+      "swing_time": "2026-08-03T00:05:00Z",
+      "confirmed_at": "2026-08-03T00:07:00Z",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "SWING-ebc81cc9c286f5d54a38",
+      "scope": "EXTERNAL",
+      "kind": "HIGH",
+      "label": "HH",
+      "price": "109",
+      "swing_time": "2026-08-03T00:05:00Z",
+      "confirmed_at": "2026-08-03T00:07:00Z",
+      "confirmation": "CONFIRMED"
+    }
+  ],
+  "events": [
+    {
+      "id": "BOS-131c7110aacb54c17717",
+      "scope": "INTERNAL",
+      "kind": "BOS",
+      "direction": "BULLISH",
+      "price": "107",
+      "swing_id": "SWING-3c3d30fb8786d0b537c2",
+      "swing_time": "2026-08-03T00:03:00Z",
+      "occurred_at": "2026-08-03T00:05:00Z",
+      "confirmed_at": "2026-08-03T00:06:00Z",
+      "displacement": false,
+      "parent_event_id": null,
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "BOS-acdc86071ec75a3b93a5",
+      "scope": "EXTERNAL",
+      "kind": "BOS",
+      "direction": "BULLISH",
+      "price": "107",
+      "swing_id": "SWING-80738b9e4f3b6c4b50f8",
+      "swing_time": "2026-08-03T00:03:00Z",
+      "occurred_at": "2026-08-03T00:05:00Z",
+      "confirmed_at": "2026-08-03T00:06:00Z",
+      "displacement": false,
+      "parent_event_id": null,
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "BOS-3d41c59857bd3862ff4f",
+      "scope": "INTERNAL",
+      "kind": "BOS",
+      "direction": "BULLISH",
+      "price": "109",
+      "swing_id": "SWING-8f9ad3212a1f48cd9bc3",
+      "swing_time": "2026-08-03T00:05:00Z",
+      "occurred_at": "2026-08-03T00:07:00Z",
+      "confirmed_at": "2026-08-03T00:08:00Z",
+      "displacement": true,
+      "parent_event_id": null,
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "BOS-2b6df5ba4e2685e4b73d",
+      "scope": "EXTERNAL",
+      "kind": "BOS",
+      "direction": "BULLISH",
+      "price": "109",
+      "swing_id": "SWING-ebc81cc9c286f5d54a38",
+      "swing_time": "2026-08-03T00:05:00Z",
+      "occurred_at": "2026-08-03T00:07:00Z",
+      "confirmed_at": "2026-08-03T00:08:00Z",
+      "displacement": true,
+      "parent_event_id": null,
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "CHOCH-986b29cb46de16b3454f",
+      "scope": "INTERNAL",
+      "kind": "CHOCH",
+      "direction": "BEARISH",
+      "price": "102",
+      "swing_id": "SWING-85f409f69cb763fcd40e",
+      "swing_time": "2026-08-03T00:04:00Z",
+      "occurred_at": "2026-08-03T00:08:00Z",
+      "confirmed_at": "2026-08-03T00:09:00Z",
+      "displacement": true,
+      "parent_event_id": null,
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "MSS-33f5bd2bc0d7ecd63e25",
+      "scope": "INTERNAL",
+      "kind": "MSS",
+      "direction": "BEARISH",
+      "price": "102",
+      "swing_id": "SWING-85f409f69cb763fcd40e",
+      "swing_time": "2026-08-03T00:04:00Z",
+      "occurred_at": "2026-08-03T00:08:00Z",
+      "confirmed_at": "2026-08-03T00:09:00Z",
+      "displacement": true,
+      "parent_event_id": "CHOCH-986b29cb46de16b3454f",
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "CHOCH-5f543d8612af4608809d",
+      "scope": "EXTERNAL",
+      "kind": "CHOCH",
+      "direction": "BEARISH",
+      "price": "102",
+      "swing_id": "SWING-a6418c697cda53fca909",
+      "swing_time": "2026-08-03T00:04:00Z",
+      "occurred_at": "2026-08-03T00:08:00Z",
+      "confirmed_at": "2026-08-03T00:09:00Z",
+      "displacement": true,
+      "parent_event_id": null,
+      "confirmation": "CONFIRMED"
+    },
+    {
+      "id": "MSS-4bc3e6a978bd1e2a9aaf",
+      "scope": "EXTERNAL",
+      "kind": "MSS",
+      "direction": "BEARISH",
+      "price": "102",
+      "swing_id": "SWING-a6418c697cda53fca909",
+      "swing_time": "2026-08-03T00:04:00Z",
+      "occurred_at": "2026-08-03T00:08:00Z",
+      "confirmed_at": "2026-08-03T00:09:00Z",
+      "displacement": true,
+      "parent_event_id": "CHOCH-5f543d8612af4608809d",
+      "confirmation": "CONFIRMED"
+    }
+  ],
+  "liquidity": [
+    {
+      "id": "LIQUIDITY-486382408eff0a2facea",
+      "kind": "BSL",
+      "side": "HIGH",
+      "price": "105",
+      "created_at": "2026-08-03T00:01:00Z",
+      "confirmed_at": "2026-08-03T00:03:00Z",
+      "source_ids": [
+        "SWING-9373614b90cb0b3b9fac"
+      ],
+      "status": "INVALIDATED",
+      "swept_at": null,
+      "sweep_price": null,
+      "ended_at": "2026-08-03T00:04:00Z"
+    },
+    {
+      "id": "LIQUIDITY-1fa7616fc3852ef05995",
+      "kind": "SSL",
+      "side": "LOW",
+      "price": "100",
+      "created_at": "2026-08-03T00:02:00Z",
+      "confirmed_at": "2026-08-03T00:04:00Z",
+      "source_ids": [
+        "SWING-cb61615e9e0b208a21b8"
+      ],
+      "status": "INVALIDATED",
+      "swept_at": null,
+      "sweep_price": null,
+      "ended_at": "2026-08-03T00:09:00Z"
+    },
+    {
+      "id": "LIQUIDITY-1b69e4c04f0c4ab26575",
+      "kind": "BSL",
+      "side": "HIGH",
+      "price": "107",
+      "created_at": "2026-08-03T00:03:00Z",
+      "confirmed_at": "2026-08-03T00:05:00Z",
+      "source_ids": [
+        "SWING-80738b9e4f3b6c4b50f8"
+      ],
+      "status": "INVALIDATED",
+      "swept_at": null,
+      "sweep_price": null,
+      "ended_at": "2026-08-03T00:06:00Z"
+    },
+    {
+      "id": "LIQUIDITY-a73ef66aacfafee1b8ec",
+      "kind": "SSL",
+      "side": "LOW",
+      "price": "102",
+      "created_at": "2026-08-03T00:04:00Z",
+      "confirmed_at": "2026-08-03T00:06:00Z",
+      "source_ids": [
+        "SWING-a6418c697cda53fca909"
+      ],
+      "status": "INVALIDATED",
+      "swept_at": null,
+      "sweep_price": null,
+      "ended_at": "2026-08-03T00:09:00Z"
+    },
+    {
+      "id": "LIQUIDITY-afc8e831c6d90298899f",
+      "kind": "BSL",
+      "side": "HIGH",
+      "price": "109",
+      "created_at": "2026-08-03T00:05:00Z",
+      "confirmed_at": "2026-08-03T00:07:00Z",
+      "source_ids": [
+        "SWING-ebc81cc9c286f5d54a38"
+      ],
+      "status": "INVALIDATED",
+      "swept_at": null,
+      "sweep_price": null,
+      "ended_at": "2026-08-03T00:08:00Z"
+    }
+  ],
+  "zones": [
+    {
+      "id": "OB-9865d07c75250501ece1",
+      "kind": "OB",
+      "direction": "BULLISH",
+      "lower_bound": "104",
+      "upper_bound": "106.2",
+      "occurred_at": "2026-08-03T00:06:00Z",
+      "confirmed_at": "2026-08-03T00:08:00Z",
+      "status": "INVALIDATED",
+      "source_event_id": "BOS-3d41c59857bd3862ff4f",
+      "fill_fraction": "0",
+      "ended_at": "2026-08-03T00:09:00Z"
+    },
+    {
+      "id": "BREAKER-85fe628214ec515bfd7f",
+      "kind": "BREAKER",
+      "direction": "BEARISH",
+      "lower_bound": "104",
+      "upper_bound": "106.2",
+      "occurred_at": "2026-08-03T00:08:00Z",
+      "confirmed_at": "2026-08-03T00:09:00Z",
+      "status": "ACTIVE",
+      "source_event_id": "OB-9865d07c75250501ece1",
+      "fill_fraction": "0",
+      "ended_at": null
+    },
+    {
+      "id": "OB-ccfed091a610ea190a7f",
+      "kind": "OB",
+      "direction": "BEARISH",
+      "lower_bound": "104",
+      "upper_bound": "113.2",
+      "occurred_at": "2026-08-03T00:07:00Z",
+      "confirmed_at": "2026-08-03T00:09:00Z",
+      "status": "ACTIVE",
+      "source_event_id": "MSS-33f5bd2bc0d7ecd63e25",
+      "fill_fraction": "0",
+      "ended_at": null
+    }
+  ],
+  "dealing_range": {
+    "lower_bound": "102",
+    "equilibrium": "105.50000000",
+    "upper_bound": "109",
+    "origin_time": "2026-08-03T00:04:00Z",
+    "confirmed_at": "2026-08-03T00:07:00Z",
+    "direction": "BULLISH",
+    "swing_ids": [
+      "SWING-a6418c697cda53fca909",
+      "SWING-ebc81cc9c286f5d54a38"
+    ],
+    "location": "DISCOUNT",
+    "retracement_62": "104.66000000",
+    "retracement_79": "103.47000000"
+  },
+  "indicators": {
+    "ATR": {
+      "value": "13.56406250",
+      "minimum_bars_required": 3,
+      "status": "READY"
+    },
+    "RSI": {
+      "value": "19.50912524",
+      "minimum_bars_required": 3,
+      "status": "READY"
+    },
+    "ADX": {
+      "value": "43.99056104",
+      "minimum_bars_required": 4,
+      "status": "READY"
+    },
+    "EMA": {
+      "value": "101.58854167",
+      "minimum_bars_required": 3,
+      "status": "READY"
+    },
+    "SMA": {
+      "value": "104.00000000",
+      "minimum_bars_required": 3,
+      "status": "READY"
+    },
+    "BOLLINGER_UPPER": {
+      "value": "119.57776193",
+      "minimum_bars_required": 3,
+      "status": "READY"
+    },
+    "BOLLINGER_LOWER": {
+      "value": "88.42223807",
+      "minimum_bars_required": 3,
+      "status": "READY"
+    },
+    "VOLUME_AVERAGE": {
+      "value": "10.00000000",
+      "minimum_bars_required": 3,
+      "status": "READY"
+    }
+  },
+  "sessions": [],
+  "current_sessions": [
+    "ASIA"
+  ],
+  "regime": "HIGH_VOLATILITY",
+  "news_context": "UNKNOWN",
+  "confluence_counts": {
+    "BULLISH": 0,
+    "BEARISH": 2
+  },
+  "retention": {
+    "mode": "BOUNDED_SNAPSHOT",
+    "absence_means": "NOT_INCLUDED_UNKNOWN",
+    "absence_is_invalidation": false
+  },
+  "generated_at": "2026-08-03T00:10:00Z",
+  "served_at": "2026-08-03T00:10:01Z",
+  "cache_age_seconds": 1
+}

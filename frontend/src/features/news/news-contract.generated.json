@@ -1,0 +1,1272 @@
+{
+  "schemas": {
+    "EconomicEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "provider_event_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Provider Event Id",
+          "type": "string"
+        },
+        "occurrence_key": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Occurrence Key",
+          "type": "string"
+        },
+        "event_name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Event Name",
+          "type": "string"
+        },
+        "event_code": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Event Code",
+          "type": "string"
+        },
+        "group_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Group Id",
+          "type": "string"
+        },
+        "country": {
+          "pattern": "^[A-Z]{2}$",
+          "title": "Country",
+          "type": "string"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "EMPLOYMENT",
+            "INFLATION",
+            "CENTRAL_BANK",
+            "GROWTH",
+            "CONSUMER",
+            "MANUFACTURING",
+            "SERVICES",
+            "HOUSING",
+            "LABOR",
+            "OTHER"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "impact": {
+          "enum": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "HOLIDAY",
+            "NON_ECONOMIC",
+            "UNKNOWN"
+          ],
+          "title": "Impact",
+          "type": "string"
+        },
+        "scheduled_at": {
+          "format": "date-time",
+          "title": "Scheduled At",
+          "type": "string"
+        },
+        "actual": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actual"
+        },
+        "forecast": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Forecast"
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Previous"
+        },
+        "revised_previous": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revised Previous"
+        },
+        "previous_before_revision": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Previous Before Revision"
+        },
+        "unit": {
+          "enum": [
+            "PERCENT",
+            "THOUSANDS",
+            "INDEX",
+            "RATE",
+            "NUMBER",
+            "NON_NUMERIC"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "SCHEDULED",
+            "UPCOMING",
+            "RELEASED",
+            "REVISED",
+            "CANCELLED",
+            "DELAYED",
+            "UNKNOWN"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "source": {
+          "pattern": "^[a-z][a-z0-9_]{0,39}$",
+          "title": "Source",
+          "type": "string"
+        },
+        "source_mode": {
+          "enum": [
+            "FIXTURE",
+            "LIVE",
+            "UNAVAILABLE"
+          ],
+          "title": "Source Mode",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "available_at": {
+          "format": "date-time",
+          "title": "Available At",
+          "type": "string"
+        },
+        "released_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Released At"
+        },
+        "revision_version": {
+          "minimum": 1,
+          "title": "Revision Version",
+          "type": "integer"
+        },
+        "direction_rule": {
+          "default": "CONTEXT_DEPENDENT",
+          "enum": [
+            "HIGHER_IS_POSITIVE",
+            "LOWER_IS_POSITIVE",
+            "CONTEXT_DEPENDENT"
+          ],
+          "title": "Direction Rule",
+          "type": "string"
+        },
+        "field_provenance": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "maxProperties": 8,
+          "title": "Field Provenance",
+          "type": "object"
+        },
+        "field_conflicts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Field Conflicts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "provider_event_id",
+        "occurrence_key",
+        "event_name",
+        "event_code",
+        "group_id",
+        "country",
+        "currency",
+        "category",
+        "impact",
+        "scheduled_at",
+        "actual",
+        "forecast",
+        "previous",
+        "unit",
+        "status",
+        "source",
+        "source_mode",
+        "updated_at",
+        "available_at",
+        "revision_version"
+      ],
+      "title": "EconomicEvent",
+      "type": "object"
+    },
+    "CalendarPage": {
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/schemas/EconomicEvent"
+          },
+          "maxItems": 200,
+          "title": "Events",
+          "type": "array"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "source_mode": {
+          "enum": [
+            "FIXTURE",
+            "LIVE",
+            "UNAVAILABLE"
+          ],
+          "title": "Source Mode",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "AVAILABLE",
+            "CALENDAR_UNAVAILABLE"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "events",
+        "source",
+        "source_mode",
+        "state",
+        "as_of",
+        "generated_at",
+        "truncated"
+      ],
+      "title": "CalendarPage",
+      "type": "object"
+    },
+    "EventDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "$ref": "#/schemas/EconomicEvent"
+        },
+        "revisions": {
+          "items": {
+            "$ref": "#/schemas/EconomicEvent"
+          },
+          "maxItems": 100,
+          "title": "Revisions",
+          "type": "array"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "revisions",
+        "as_of"
+      ],
+      "title": "EventDetail",
+      "type": "object"
+    },
+    "EventRelevance": {
+      "additionalProperties": false,
+      "properties": {
+        "affected_currency": {
+          "title": "Affected Currency",
+          "type": "string"
+        },
+        "score": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Score",
+          "type": "integer"
+        },
+        "channels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Channels",
+          "type": "array"
+        }
+      },
+      "required": [
+        "affected_currency",
+        "score",
+        "channels"
+      ],
+      "title": "EventRelevance",
+      "type": "object"
+    },
+    "ReactionWindow": {
+      "additionalProperties": false,
+      "properties": {
+        "seconds": {
+          "title": "Seconds",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "READY",
+            "WAITING",
+            "REACTION_UNAVAILABLE"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "cutoff": {
+          "format": "date-time",
+          "title": "Cutoff",
+          "type": "string"
+        },
+        "price_before": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price Before"
+        },
+        "price_after": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price After"
+        },
+        "return_percent": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Return Percent"
+        },
+        "move_atr": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Move Atr"
+        },
+        "range_atr": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Range Atr"
+        },
+        "tick_activity_ratio": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tick Activity Ratio"
+        },
+        "classification": {
+          "default": "UNCONFIRMED",
+          "enum": [
+            "STRONG_DIRECTIONAL",
+            "WHIPSAW",
+            "LIQUIDITY_SWEEP_REVERSAL",
+            "BREAKOUT",
+            "FAILED_BREAKOUT",
+            "MUTED",
+            "UNCONFIRMED"
+          ],
+          "title": "Classification",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds",
+        "status",
+        "cutoff"
+      ],
+      "title": "ReactionWindow",
+      "type": "object"
+    },
+    "ReleaseGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "group_id": {
+          "title": "Group Id",
+          "type": "string"
+        },
+        "event_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Event Ids",
+          "type": "array"
+        },
+        "alignment": {
+          "enum": [
+            "ALL_ALIGNED",
+            "MOSTLY_ALIGNED",
+            "MIXED",
+            "CONFLICTING",
+            "UNAVAILABLE"
+          ],
+          "title": "Alignment",
+          "type": "string"
+        },
+        "bias": {
+          "enum": [
+            "USD_STRONG_POSITIVE",
+            "USD_POSITIVE",
+            "USD_NEUTRAL",
+            "USD_NEGATIVE",
+            "USD_STRONG_NEGATIVE",
+            "CONFLICTING",
+            "UNKNOWN"
+          ],
+          "title": "Bias",
+          "type": "string"
+        },
+        "score": {
+          "pattern": "^-?\\d+(?:\\.\\d+)?$",
+          "title": "Score",
+          "type": "string"
+        },
+        "completeness": {
+          "enum": [
+            "COMPLETE",
+            "PARTIAL"
+          ],
+          "title": "Completeness",
+          "type": "string"
+        },
+        "surprises": {
+          "items": {
+            "$ref": "#/schemas/Surprise"
+          },
+          "title": "Surprises",
+          "type": "array"
+        }
+      },
+      "required": [
+        "group_id",
+        "event_ids",
+        "alignment",
+        "bias",
+        "score",
+        "completeness",
+        "surprises"
+      ],
+      "title": "ReleaseGroup",
+      "type": "object"
+    },
+    "StructureContext": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "ALIGNED",
+            "CONFLICTING",
+            "WAITING",
+            "STRUCTURE_UNAVAILABLE"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "upstream_input_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Upstream Input Id"
+        },
+        "upstream_config_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Upstream Config Id"
+        },
+        "upstream_algorithm_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Upstream Algorithm Version"
+        },
+        "upstream_as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Upstream As Of"
+        },
+        "upstream_window_start": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Upstream Window Start"
+        },
+        "absence_means": {
+          "const": "NOT_INCLUDED_UNKNOWN",
+          "default": "NOT_INCLUDED_UNKNOWN",
+          "title": "Absence Means",
+          "type": "string"
+        },
+        "references": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "References",
+          "type": "object"
+        }
+      },
+      "required": [
+        "status",
+        "upstream_input_id",
+        "upstream_config_id",
+        "upstream_algorithm_version",
+        "upstream_as_of",
+        "upstream_window_start",
+        "references"
+      ],
+      "title": "StructureContext",
+      "type": "object"
+    },
+    "Surprise": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "raw": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Raw"
+        },
+        "relative": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Relative"
+        },
+        "normalized": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Normalized"
+        },
+        "normalized_method": {
+          "const": "UNAVAILABLE_NO_DISTRIBUTION",
+          "default": "UNAVAILABLE_NO_DISTRIBUTION",
+          "title": "Normalized Method",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "ABOVE",
+            "BELOW",
+            "INLINE",
+            "UNAVAILABLE"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "magnitude": {
+          "enum": [
+            "LARGE",
+            "SMALL",
+            "ZERO",
+            "UNAVAILABLE"
+          ],
+          "title": "Magnitude",
+          "type": "string"
+        },
+        "usd_direction": {
+          "enum": [
+            "POSITIVE",
+            "NEGATIVE",
+            "NEUTRAL",
+            "UNKNOWN"
+          ],
+          "title": "Usd Direction",
+          "type": "string"
+        },
+        "revision_delta": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Revision Delta"
+        },
+        "reason_code": {
+          "title": "Reason Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "raw",
+        "relative",
+        "direction",
+        "magnitude",
+        "usd_direction",
+        "revision_delta",
+        "reason_code"
+      ],
+      "title": "Surprise",
+      "type": "object"
+    },
+    "NewsResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {
+          "const": "XAUUSD",
+          "default": "XAUUSD",
+          "title": "Symbol",
+          "type": "string"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "market_as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Market As Of"
+        },
+        "news_engine_version": {
+          "default": "news-1.2.0",
+          "title": "News Engine Version",
+          "type": "string"
+        },
+        "config_id": {
+          "title": "Config Id",
+          "type": "string"
+        },
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "source_mode": {
+          "enum": [
+            "FIXTURE",
+            "LIVE",
+            "UNAVAILABLE"
+          ],
+          "title": "Source Mode",
+          "type": "string"
+        },
+        "calendar_state": {
+          "enum": [
+            "AVAILABLE",
+            "CALENDAR_UNAVAILABLE"
+          ],
+          "title": "Calendar State",
+          "type": "string"
+        },
+        "view": {
+          "enum": [
+            "current",
+            "pre",
+            "release",
+            "post",
+            "none"
+          ],
+          "title": "View",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/schemas/EconomicEvent"
+          },
+          "maxItems": 200,
+          "title": "Events",
+          "type": "array"
+        },
+        "xauusd_relevance": {
+          "additionalProperties": {
+            "$ref": "#/schemas/EventRelevance"
+          },
+          "title": "Xauusd Relevance",
+          "type": "object"
+        },
+        "upcoming_events": {
+          "items": {
+            "$ref": "#/schemas/EconomicEvent"
+          },
+          "maxItems": 200,
+          "title": "Upcoming Events",
+          "type": "array"
+        },
+        "active_group": {
+          "anyOf": [
+            {
+              "$ref": "#/schemas/ReleaseGroup"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "active_event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Active Event Id"
+        },
+        "news_regime": {
+          "enum": [
+            "NORMAL",
+            "PRE_NEWS",
+            "NEWS_LOCK",
+            "RELEASE",
+            "POST_NEWS_VOLATILITY",
+            "POST_NEWS_CONFIRMATION",
+            "NORMALIZED",
+            "UNKNOWN"
+          ],
+          "title": "News Regime",
+          "type": "string"
+        },
+        "macro_bias": {
+          "enum": [
+            "USD_STRONG_POSITIVE",
+            "USD_POSITIVE",
+            "USD_NEUTRAL",
+            "USD_NEGATIVE",
+            "USD_STRONG_NEGATIVE",
+            "CONFLICTING",
+            "UNKNOWN"
+          ],
+          "title": "Macro Bias",
+          "type": "string"
+        },
+        "macro_strength": {
+          "enum": [
+            "STRONG",
+            "MODERATE",
+            "MIXED",
+            "UNKNOWN"
+          ],
+          "title": "Macro Strength",
+          "type": "string"
+        },
+        "multiple_event_risk": {
+          "title": "Multiple Event Risk",
+          "type": "boolean"
+        },
+        "reaction_windows": {
+          "items": {
+            "$ref": "#/schemas/ReactionWindow"
+          },
+          "title": "Reaction Windows",
+          "type": "array"
+        },
+        "reaction_state": {
+          "title": "Reaction State",
+          "type": "string"
+        },
+        "spread_state": {
+          "enum": [
+            "SPREAD_NORMAL",
+            "SPREAD_ELEVATED",
+            "SPREAD_EXTREME",
+            "UNAVAILABLE"
+          ],
+          "title": "Spread State",
+          "type": "string"
+        },
+        "baseline_spread": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Baseline Spread"
+        },
+        "current_spread": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Current Spread"
+        },
+        "spread_ratio": {
+          "anyOf": [
+            {
+              "pattern": "^-?\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Spread Ratio"
+        },
+        "volatility_state": {
+          "enum": [
+            "NORMAL",
+            "ELEVATED",
+            "EXTREME",
+            "UNAVAILABLE"
+          ],
+          "title": "Volatility State",
+          "type": "string"
+        },
+        "structure_confirmation": {
+          "$ref": "#/schemas/StructureContext"
+        },
+        "trade_policy_state": {
+          "enum": [
+            "INFORMATIONAL",
+            "CAUTION",
+            "RESTRICTED"
+          ],
+          "title": "Trade Policy State",
+          "type": "string"
+        },
+        "strategy_eligibility": {
+          "additionalProperties": {
+            "enum": [
+              "ALLOWED",
+              "CAUTION",
+              "BLOCKED",
+              "WAITING",
+              "ELIGIBLE"
+            ],
+            "type": "string"
+          },
+          "title": "Strategy Eligibility",
+          "type": "object"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "market_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Market Source"
+        },
+        "release_status": {
+          "default": "NO_EVENT",
+          "enum": [
+            "NO_EVENT",
+            "PRE_NEWS",
+            "WAITING_FOR_ACTUAL",
+            "WAITING_FOR_RELEASE",
+            "RELEASED"
+          ],
+          "title": "Release Status",
+          "type": "string"
+        },
+        "data_quality": {
+          "default": "UNAVAILABLE",
+          "enum": [
+            "COMPLETE",
+            "PARTIAL",
+            "CONFLICT",
+            "UNAVAILABLE"
+          ],
+          "title": "Data Quality",
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "served_at": {
+          "format": "date-time",
+          "title": "Served At",
+          "type": "string"
+        },
+        "cache_age_seconds": {
+          "minimum": 0,
+          "title": "Cache Age Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "as_of",
+        "market_as_of",
+        "config_id",
+        "fingerprint",
+        "source",
+        "source_mode",
+        "calendar_state",
+        "view",
+        "events",
+        "xauusd_relevance",
+        "upcoming_events",
+        "active_group",
+        "active_event_id",
+        "news_regime",
+        "macro_bias",
+        "macro_strength",
+        "multiple_event_risk",
+        "reaction_windows",
+        "reaction_state",
+        "spread_state",
+        "baseline_spread",
+        "current_spread",
+        "spread_ratio",
+        "volatility_state",
+        "structure_confirmation",
+        "trade_policy_state",
+        "strategy_eligibility",
+        "reason_codes",
+        "market_source",
+        "generated_at",
+        "served_at",
+        "cache_age_seconds"
+      ],
+      "title": "NewsResponse",
+      "type": "object"
+    },
+    "ProviderHealth": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "source_mode": {
+          "enum": [
+            "FIXTURE",
+            "LIVE",
+            "UNAVAILABLE"
+          ],
+          "title": "Source Mode",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "HEALTHY",
+            "DEGRADED",
+            "STALE",
+            "UNAVAILABLE",
+            "CONFIGURATION_REQUIRED"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "connected": {
+          "title": "Connected",
+          "type": "boolean"
+        },
+        "coverage": {
+          "enum": [
+            "FULL",
+            "LIMITED",
+            "FIXTURE",
+            "NONE"
+          ],
+          "title": "Coverage",
+          "type": "string"
+        },
+        "calendar_usable_for_trading": {
+          "title": "Calendar Usable For Trading",
+          "type": "boolean"
+        },
+        "provider_updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Provider Updated At"
+        },
+        "received_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Received At"
+        },
+        "snapshot_clock_skew_seconds": {
+          "default": 0,
+          "maximum": 10,
+          "minimum": -604800,
+          "title": "Snapshot Clock Skew Seconds",
+          "type": "number"
+        },
+        "last_sync_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Sync At"
+        },
+        "next_poll_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Poll At"
+        },
+        "event_count": {
+          "maximum": 2000,
+          "minimum": 0,
+          "title": "Event Count",
+          "type": "integer"
+        },
+        "failures": {
+          "minimum": 0,
+          "title": "Failures",
+          "type": "integer"
+        },
+        "poll_seconds": {
+          "minimum": 15,
+          "title": "Poll Seconds",
+          "type": "integer"
+        },
+        "reason_code": {
+          "title": "Reason Code",
+          "type": "string"
+        },
+        "detail_th": {
+          "title": "Detail Th",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "source_mode",
+        "state",
+        "connected",
+        "coverage",
+        "calendar_usable_for_trading",
+        "provider_updated_at",
+        "received_at",
+        "last_sync_at",
+        "next_poll_at",
+        "event_count",
+        "failures",
+        "poll_seconds",
+        "reason_code",
+        "detail_th"
+      ],
+      "title": "ProviderHealth",
+      "type": "object"
+    }
+  }
+}

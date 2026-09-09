@@ -2,6 +2,7 @@
 
 import datetime as dt
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -21,9 +22,10 @@ class Symbol(Base):
     name: Mapped[str] = mapped_column(String(20), unique=True, index=True)
     asset_class: Mapped[str] = mapped_column(String(30), default="METAL")
     digits: Mapped[int] = mapped_column(Integer, default=2)
-    contract_size: Mapped[float] = mapped_column(Numeric(18, 4), default=100)
-    tick_value: Mapped[float] = mapped_column(Numeric(18, 6), default=1)
-    min_stop_distance: Mapped[float] = mapped_column(Numeric(18, 5), default=0)
+    contract_size: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=100)
+    tick_value: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=1)
+    min_stop_distance: Mapped[Decimal] = mapped_column(Numeric(18, 5), default=0)
+    default_spread: Mapped[Decimal] = mapped_column(Numeric(18, 5), default=0.30, server_default="0.30")
     session_hours: Mapped[dict] = mapped_column(JsonType, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -10,10 +10,11 @@ from fastapi.responses import JSONResponse
 
 from app.api import api_router
 from app.api.health import router as health_router
+from app.api.market import ws_router
 from app.core.config import get_settings
-from app.core.correlation import get_correlation_id, new_correlation_id, set_correlation_id
+from app.core.correlation import CorrelationMiddleware, get_correlation_id
 from app.core.errors import AppError
-from app.core.logging import setup_logging
+from app.core.logging import safe_exception, setup_logging
 from app.db.session import dispose_engine
 from app.services.redis_client import close_redis
 
@@ -35,6 +36,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if hasattr(app.state, "news"):
+            await app.state.news.stop()
+        if hasattr(app.state, "market"):
+            await app.state.market.stop()
         await close_redis()
         await dispose_engine()
         logger.info("shutdown")
@@ -59,14 +64,6 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Correlation-ID", "Idempotency-Key"],
     )
 
-    @app.middleware("http")
-    async def correlation_middleware(request: Request, call_next):
-        correlation_id = request.headers.get("X-Correlation-ID") or new_correlation_id()
-        set_correlation_id(correlation_id)
-        response = await call_next(request)
-        response.headers["X-Correlation-ID"] = correlation_id
-        return response
-
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content=exc.to_payload())
@@ -90,7 +87,11 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("unhandled error", extra={"path": request.url.path})
+        logger.error("http_request failed (%s)", type(exc).__name__, extra={
+            "operation": "http_request", "method": request.method,
+            "route": getattr(request.scope.get("route"), "path", "unmatched"),
+            **safe_exception(exc),
+        })
         return JSONResponse(
             status_code=500,
             content={
@@ -103,7 +104,9 @@ def create_app() -> FastAPI:
             },
         )
 
+    app.add_middleware(CorrelationMiddleware, on_error=unhandled_error_handler)
     app.include_router(api_router)
+    app.include_router(ws_router)
     app.include_router(health_router, include_in_schema=False)
     return app
 

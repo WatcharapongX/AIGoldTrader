@@ -40,21 +40,21 @@ async function main() {
     assert.equal(loginResponse.status(), 200);
     results.login_correlation_id = loginResponse.headers()['x-correlation-id'];
     await page.waitForURL(url => url.pathname === '/dashboard');
-    await page.getByText('Market data not connected', { exact: true }).waitFor();
+    await page.getByText('Market workspace · PAPER', { exact: true }).waitFor();
     assert.ok(await page.evaluate(() => Boolean(localStorage.getItem('access_token') && localStorage.getItem('refresh_token'))));
     assert.ok((await page.context().cookies()).some(c => c.name === 'access_token'));
     results.login_authenticated_shell = 'PASS';
     await page.screenshot({ path: path.join(output, 'dashboard.png'), fullPage: true });
     stage = 'session_reload';
     await page.reload();
-    await page.getByText('Market data not connected', { exact: true }).waitFor();
+    await page.getByText('Market workspace · PAPER', { exact: true }).waitFor();
     results.session_reload = 'PASS';
     stage = 'token_refresh';
     await page.evaluate(() => localStorage.setItem('access_token', 'expired-test-access-token'));
     const refresh = page.waitForResponse(r => r.url().endsWith('/api/auth/refresh'));
     await page.reload();
     assert.equal((await refresh).status(), 200);
-    await page.getByText('Market data not connected', { exact: true }).waitFor();
+    await page.getByText('Market workspace · PAPER', { exact: true }).waitFor();
     results.token_refresh = 'PASS';
     stage = 'logout';
     // Click the real UI control: do not call the store or endpoint to bypass it.

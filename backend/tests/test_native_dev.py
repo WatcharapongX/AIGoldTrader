@@ -118,7 +118,9 @@ def test_windows_db_loop_supports_io_watchers():
         from uvicorn import Config
 
         for reload in (False, True):
-            config = Config("app.main:app", loop="app.core.event_loop:new_event_loop", reload=reload)
+            config = Config(
+                "app.main:app", loop="app.core.event_loop:new_event_loop", reload=reload, proxy_headers=False,
+            )
             assert config.get_loop_factory() is new_event_loop
     finally:
         loop.close()

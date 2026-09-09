@@ -3,9 +3,9 @@
 | รายการ | รายละเอียด |
 |---|---|
 | เอกสาร | `implementation_plan.md` — Single Source of Truth สำหรับติดตามความคืบหน้าของโปรเจกต์ |
-| เวอร์ชัน | 1.5 |
+| เวอร์ชัน | 2.5 |
 | วันที่สร้าง | 2026-09-08 |
-| อัปเดตล่าสุด | 2026-09-08 |
+| อัปเดตล่าสุด | 2026-09-10 |
 | Trading Mode เริ่มต้น | `TRADING_MODE=PAPER` — **`LIVE_AUTO_TRADING=false` ตลอดจนกว่าจะได้รับอนุมัติจากผู้ดูแลระบบโดยเจตนา** |
 | Symbol เริ่มต้น | XAUUSD (ออกแบบให้รองรับ Forex หลาย Symbol ในอนาคต) |
 
@@ -30,15 +30,30 @@
 | ✅ COMPLETED | Phase ผ่าน Phase Gate แล้ว |
 | ⛔ BLOCKED | ติด Blocker — ดูหัวข้อ Stop Conditions |
 
+### Current authorization — 2026-09-09
+
+คำสั่งล่าสุดคือ Targeted Forex Factory Integration เฉพาะ STRAT05–06
+ใช้ official weekly JSON สำหรับ Schedule/Forecast/Previous; Actual ที่ไม่มียังคงเป็น null
+STRAT01–04 แยก market safety, candidate identity และ cache ออกจากข่าว
+Xoomar เก็บไว้เป็นทางเลือก ไม่มีการรวม Actual ข้ามแหล่งโดยอัตโนมัติ
+ห้าม Risk Engine, AI decision, order/execution, position management และ Git mutation
+รายงานตรวจรับ: [Forex Factory news strategies](docs/forex-factory-news-strategies.md)
+STOP ก่อน Phase5 รอ COMBINED SOL HIGH REVIEW; จำนวน Phase tasks เดิมไม่เปลี่ยน
+
 ### Progress Summary
 
 | Phase | ชื่อ | Status | Tasks เสร็จ/รวม |
 |---|---|---|---|
 | 0 | Foundation Documents & Architecture | ✅ COMPLETED | 9/9 |
-| 1 | Project Foundation | ✅ COMPLETED (native PostgreSQL + browser gate passed) | 11/11 |
-| 2 | Market Data & Realtime Chart | ⬜ NOT STARTED | 0/9 |
-| 3 | Analysis Engines (Structure / Liquidity / SMC / Regime) | ⬜ NOT STARTED | 0/9 |
-| 4 | Strategy Engine & Signal Engine | ⬜ NOT STARTED | 0/9 |
+| 1 | Project Foundation | ✅ COMPLETED — Independent Re-review PASS WITH MINOR ISSUES; P1-001 verified | 11/11 |
+| 1.1 | Foundation Hardening | Independent Gate PASS reported by user | 3/3 |
+| 2 | Market Data & Realtime Chart | Independent Gate PASS reported by user; historical evidence preserved | 9/9 |
+| 2.5 | Real Market Data | PASS under Safe-Partial Rule reported by user — W1 231/300 retained | 8/9 foundation tasks |
+| 3 | Analysis Engines (Structure / Liquidity / SMC / Regime) | Independent Gate PASS reported by user | 9/9 |
+| 3.5 | Economic Calendar / News / Macro Context | IMPLEMENTATION COMPLETE — PENDING INDEPENDENT REVIEW | 12/12 |
+| 3.5R | Real Economic Calendar | PARTIAL — real keyless subset connected; richer coverage pending | 5/6 |
+| 4 | Strategy / Trader Profile / Setup / Trade Plan | IMPLEMENTATION COMPLETE — PENDING COMBINED SOL HIGH REVIEW | 9/9 |
+| 4.1 | Dashboard Command Center | IMPLEMENTATION COMPLETE — PENDING COMBINED REVIEW | 5/5 |
 | 5 | Risk Engine & Kill Switch | ⬜ NOT STARTED | 0/7 |
 | 6 | AI Analysis Engine (Multi-Agent) | ⬜ NOT STARTED | 0/8 |
 | 7 | Paper Trading & Order Management | ⬜ NOT STARTED | 0/7 |
@@ -49,7 +64,7 @@
 | 12 | Hardening (Security / Performance / Observability) | ⬜ NOT STARTED | 0/6 |
 | 13 | UAT & Regression | ⬜ NOT STARTED | 0/4 |
 | 14 | Production Readiness Review | ⬜ NOT STARTED | 0/3 |
-| | **รวม** | | **20/104** |
+| | **รวม** | | **80/139** (original 104 + 3 hardening + 9 real-data + 12 news + 6 provider + 5 dashboard tasks) |
 
 ---
 
@@ -61,16 +76,29 @@
 - Code เดิม: ไม่มี → เป็น **Greenfield Project** ไม่มี Source of Truth เดิม ไม่ต้องกังวลเรื่อง Rewrite
 - ข้อสรุป: สร้าง Architecture และ Project Structure ใหม่ทั้งหมดตาม Specification นี้
 
-### Current Phase 1 assessment — 2026-09-08 (supersedes the historical empty-workspace assessment above)
+### Current Phase 1 assessment — 2026-09-09
 
-- Source now contains FastAPI auth/audit/health + six-table Alembic foundation, Next.js shell/auth/client and tests.
-- Branch main; all project files remain untracked; no commits and no tracked/staged diff. Existing work preserved.
-- TASK-010..020 are complete. Phase 1 gate passed on native Windows; Phase 2 is not started and requires independent review.
-- Python/Node and dependencies are installed. Native PostgreSQL 18.6 service is running; separate project DEV/TEST databases and restricted roles are configured in ignored backend/.env.
-- Native Windows is the primary local DEV route. Docker/WSL are optional; Redis service and TimescaleDB extension are not Phase 1 prerequisites.
-- DATABASE_URL, disabled Redis, Windows selector loop and explicit PostgreSQL integration tests now support this route.
-- Current verification: backend 36 tests (including real PostgreSQL), frontend 6 tests, lint/typecheck/package/Next build and Chromium login/session/logout pass.
-- Native PostgreSQL migration up/down/up, constraints/transactions, auth/audit and complete browser login evidence verified. See docs/phase-1-gate.md.
+- Source contains FastAPI auth/audit/health + six-table Alembic foundation, Next.js shell/auth/client and tests.
+- Branch main, baseline commit 857e764; P1-001 corrective changes are uncommitted. No commit or push in this round.
+- Initial TASK-020 PASS (36 backend / 6 frontend tests) was invalidated by independent review FAIL:
+  four JSON/JSONB columns and refresh-session uniqueness drift. TASK-020 was reopened before corrective code work.
+- Corrective revision 0002_phase1_schema_alignment follows unchanged 0001_initial. Existing DEV data fingerprints
+  and table/index identities match before/after upgrade; real TEST fresh/rollback/re-upgrade all pass.
+- Canonical refresh-session uniqueness is the existing unique index; ORM now matches it with unique=True, index=True.
+- Real PostgreSQL alembic check passes. The automated integration gate catches both deliberately introduced drift classes.
+- Reverification: backend 37 tests including 2 PostgreSQL integration tests, frontend 6 tests, lint/typecheck/build,
+  native startup/health/readiness, Chromium login/reload/refresh/logout and JSONB audit persistence PASS.
+- TASK-010..020 complete again (11/11; total 20/104). Phase 1 technical gate PASS; Independent Sol High Re-review pending.
+- Phase 2: DO NOT START / NO-GO. P2-001, P2-002, P2-003, P2-R01 and P3-001 remain UNCHANGED.
+- Native PostgreSQL 18.6 remains running; restricted DEV/TEST roles and ignored configuration are preserved.
+  PAPER / live_auto_trading=false / Redis disabled remain in effect. See docs/phase-1-gate.md for the full evidence trail.
+
+### Independent re-review and Phase 1.1 authorization — 2026-09-09
+
+User-provided Independent Re-review result: PASS WITH MINOR ISSUES; P1-001 FIXED AND INDEPENDENTLY VERIFIED.
+Phase 1 is accepted. Although the review grants Phase 2 GO, the current user instruction requires Phase 1.1
+hardening and another Independent Sol High Review first. Phase 2 / TASK-021+: DO NOT START in this session.
+The preceding Phase 1 assessment is the historical pre-re-review state.
 
 ## 2. Gap Analysis (historical Phase 0 baseline)
 
@@ -213,7 +241,7 @@ AI Gold Trader/
 - **Objective:** วางโครงสร้างโปรเจกต์ที่รันได้จริงบน Native Windows — Backend shell + Frontend shell + PostgreSQL + Auth + Logging; Redis/Docker optional
 - **Scope:** Scaffold, Infrastructure, Authentication, Database Migration Framework, Frontend Shell (ไม่รวม Business Logic การเทรด)
 - **Dependencies:** PHASE 0 ✅
-- **Status:** ✅ COMPLETED — TASK-020: native PostgreSQL 18.6 migration/auth/audit, Chromium login/session/logout and final regression passed. See docs/phase-1-gate.md. Stop before Phase 2 for independent review.
+- **Status:** ✅ COMPLETED — P1-001 corrective migration and full reverification PASS. Await Independent Sol High Re-review; Phase 2 DO NOT START. See docs/phase-1-gate.md.
 
 **Tasks:**
 
@@ -227,7 +255,7 @@ AI Gold Trader/
 - [x] TASK-017: Audit Logging Service — audit_logs writer (timestamp, user, action, entity, entity_id, before, after, reason, source, correlation_id) + ทดสอบบันทึกจริง
 - [x] TASK-018: Frontend Auth + API/WS Client — login page, protected routes, auth store (Zustand), typed REST client, WebSocket client พร้อม reconnect
 - [x] TASK-019: Security Baseline — CORS policy, input validation middleware, sensitive data masking ใน log, secret management ผ่าน env เท่านั้น
-- [x] TASK-020: PHASE 1 Gate — Build + Test + Verify + DoD review complete: 36 backend tests including native PostgreSQL migration up/down/up, constraints, transactions, auth/audit; 6 frontend tests; real Chromium login/reload/refresh/logout; lint/typecheck/build pass. See [Phase 1 gate evidence](docs/phase-1-gate.md). Phase 2 not started.
+- [x] TASK-020: PHASE 1 Gate — RE-CLOSED after P1-001: DEV upgrade/data preservation, fresh PostgreSQL migration, rollback/re-upgrade, alembic check and drift regression PASS. Backend 37 tests (2 PostgreSQL), frontend 6 tests, lint/typecheck/build, native HTTP and Chromium auth/audit PASS. [Evidence trail](docs/phase-1-gate.md) preserves initial claim → independent review FAIL → correction → reverification. Phase 2 DO NOT START.
 
 **Files:** `.gitignore`, `README.md`, `.env.example`, `docker-compose.yml`, `backend/**` (core + api + db + models + tests), `frontend/**` (app shell + stores + lib), `docs/18-devops.md` (อัปเดต)
 
@@ -244,24 +272,60 @@ AI Gold Trader/
 ---
 
 
+## PHASE 1.1 — Foundation Hardening
+
+- **Objective:** close confirmed P2-001/002/003 with incremental security and API contract fixes.
+- **Dependencies:** Phase 1 independently accepted (PASS WITH MINOR ISSUES), P1-001 verified.
+- **Status:** Corrective verification PASS / Independent Sol High Re-review PENDING. Independent Review FAIL reopened HARD-R01/R02/R03 before correction; all three are now reproduced, fixed and verified. The original 71/17-test claim remains historical.
+- **Scope:** trusted-proxy/client identity, bounded login budgets, safe correlation/exception logging,
+  authoritative backend response contracts and frontend runtime validation. Redis remains optional.
+- **Excluded:** P2-R01 token storage architecture, P3-001 ordinary failed-login audit, all Phase 2 implementation.
+
+- [x] TASK-H001: P2-001 — direct peer by default; bounded trusted proxy opt-in; client/account budgets;
+  expiry/cleanup/capacity; deterministic spoofing/proxy/account/limiter tests and native server verification.
+- [x] TASK-H002: P2-002 — central safe correlation ID <=64; replacement for invalid headers;
+  PostgreSQL audit/overflow tests; safe error context without SQL/driver parameters in logs.
+- [x] TASK-H003: P2-003 — authoritative backend OpenAPI response models, matching generated TypeScript
+  and validated endpoint responses; contract drift tests; full backend/frontend/browser regression.
+
+**Acceptance:** all targeted security assertions, real PostgreSQL tests, alembic check, lint/typecheck/build,
+full tests and available Chromium smoke PASS. No migration 0001/0002 edits, no trading code or secrets.
+**Corrective evidence (2026-09-09):** backend 93 tests (12 real PostgreSQL), frontend 41 tests;
+all lint/typecheck/build/contract/Alembic checks PASS. Five source-derived Uvicorn launch surfaces
+pass native transport probes; full Docker orchestration/reload supervisor NOT RUN (optional).
+Live correlation/error/concurrent requests and real Chromium login/refresh/recovery/logout plus
+malformed-token rejection PASS. Migration 0001/0002 and accepted resolver fingerprints unchanged.
+0002 remains untracked. Full review history and Git inventory: docs/phase-1.1-gate.md.
+
+**Stop:** Phase 1.1 corrective verification PASS → Independent Sol High Re-review PENDING;
+Phase 2 DO NOT START / NO-GO. No stage, commit or push.
+
+---
+
 ## 7. PHASE 2 — Market Data & Realtime Chart
 
-- **Objective:** ระบบ Market Data ครบวงจร — รับข้อมูลราคา, สร้าง Candles 9 Timeframes, เก็บลง TimescaleDB, ส่งต่อผ่าน WebSocket และแสดง Chart แบบ Realtime
+- **Objective:** ระบบ Market Data ครบวงจร — รับข้อมูลราคา, สร้าง Candles 9 Timeframes, เก็บลง PostgreSQL, ส่งต่อผ่าน WebSocket และแสดง Chart แบบ Realtime
+- **Current authorization (2026-09-09):** User explicitly permits Phase 2 before final Sol review.
+  Phase 1.1 remains pending; historical NO-GO statements above describe the superseded authorization.
+  Phase 2 is provisional until combined independent review. Phase 3 / TASK-030+: DO NOT START.
+- **Native adaptation:** Per current user instructions, native PostgreSQL tables and bounded in-process
+  pub/sub replace mandatory hypertables/Redis in TASK-023/025 for this single-instance DEV milestone.
+  TimescaleDB and distributed Redis integration remain future deployment work, not hidden dependencies.
 - **Scope:** Symbol Management, Market Data Provider (Replay/Demo), Tick→Candle Aggregation, WebSocket API, TradingView Chart (XAUUSD)
 - **Dependencies:** PHASE 1 ✅
-- **Status:** ⬜ NOT STARTED
+- **Status:** IMPLEMENTATION COMPLETE — PENDING COMBINED SOL HIGH REVIEW (provisional; not production approved).
 
 **Tasks:**
 
-- [ ] TASK-021: Symbol Management — CRUD + seed XAUUSD (contract size, digits, spread config, session hours) + `GET /api/symbols`
-- [ ] TASK-022: Market Data Provider Interface — abstract `MarketDataProvider` (connect, subscribe ticks, fetch history) + **ReplayProvider** (เล่นข้อมูลย้อนหลัง/simulated เพื่อพัฒนาโดยไม่ต้องพึ่ง Broker จริง) + provider registry ตาม config
-- [ ] TASK-023: Tick Ingestion Pipeline — รับ tick (bid/ask/spread/volume), ตรวจ stale/abnormal price, เก็บลง `ticks` hypertable, publish ไป Redis pub/sub
-- [ ] TASK-024: Candle Aggregation Engine — สร้าง/อัปเดต candles จาก M1 base: M1, M3, M5, M15, M30, H1, H4, D1, W1 (OHLCV, bid/ask close) + แก้ไข candle ที่ยังไม่ปิด
-- [ ] TASK-025: Candle Persistence & Query — `candles` hypertable + `GET /api/market/candles?symbol&timeframe&from&to` + pagination
-- [ ] TASK-026: Realtime WebSocket — `/ws/market` (subscribe/unsubscribe by symbol+timeframe, push tick + candle update) + heartbeat + reconnect protocol
-- [ ] TASK-027: Frontend Chart — TradingView Lightweight Charts + realtime candle update + Timeframe Selector + Symbol Selector + Bid/Ask/Spread/Market Status bar
-- [ ] TASK-028: Market Data Freshness Monitoring — worker ตรวจอายุข้อมูล + แจ้งเตือน + `system_events` เมื่อ stale/abnormal (ต่อเข้า Kill Switch ใน PHASE 5)
-- [ ] TASK-029: PHASE 2 Gate — Build + Test + Verify + DoD review + รายงานผล + อัปเดต `docs/06-market-data.md`
+- [x] TASK-021: Symbol Management — CRUD + seed XAUUSD (contract size, digits, spread config, session hours) + `GET /api/symbols`
+- [x] TASK-022: Market Data Provider Interface — abstract `MarketDataProvider` (connect, subscribe ticks, fetch history) + **ReplayProvider** (เล่นข้อมูลย้อนหลัง/simulated เพื่อพัฒนาโดยไม่ต้องพึ่ง Broker จริง) + provider registry ตาม config
+- [x] TASK-023: Tick Ingestion Pipeline — รับ tick (bid/ask/spread/volume), ตรวจ stale/abnormal price, เก็บลง `ticks` PostgreSQL table, publish ผ่าน bounded local pub/sub (native adaptation)
+- [x] TASK-024: Candle Aggregation Engine — สร้าง/อัปเดต candles จาก M1 base: M1, M3, M5, M15, M30, H1, H4, D1, W1 (OHLCV, bid/ask close) + แก้ไข candle ที่ยังไม่ปิด
+- [x] TASK-025: Candle Persistence & Query — `candles` PostgreSQL table (native adaptation) + `GET /api/market/candles?symbol&timeframe&from&to` + pagination
+- [x] TASK-026: Realtime WebSocket — `/ws/market` (subscribe/unsubscribe by symbol+timeframe, push tick + candle update) + heartbeat + reconnect protocol
+- [x] TASK-027: Frontend Chart — TradingView Lightweight Charts + realtime candle update + Timeframe Selector + Symbol Selector + Bid/Ask/Spread/Market Status bar
+- [x] TASK-028: Market Data Freshness Monitoring — worker ตรวจอายุข้อมูล + แจ้งเตือน + `system_events` เมื่อ stale/abnormal (ต่อเข้า Kill Switch ใน PHASE 5)
+- [x] TASK-029: PHASE 2 Gate — Build + Test + Verify + DoD review + รายงานผล + อัปเดต `docs/06-market-data.md`
 
 **Files:** `backend/app/services/market_data/**`, `backend/app/api/market.py`, `backend/app/workers/market_data_worker.py`, `frontend/src/features/chart/**`, `docs/06-market-data.md`
 
@@ -273,7 +337,41 @@ AI Gold Trader/
 
 **Testing:** Unit test (aggregation, timeframe bucketing, stale detector), Integration test (tick→candle→DB→WS e2e), Frontend component test (chart render, tf selector)
 
-**Risk:** ไม่มีข้อมูลจริงในช่วงพัฒนา → ReplayProvider + ข้อมูล historical สังเคราะห์; ปริมาณ tick ใหญ่ → batch insert + retention policy ของ TimescaleDB
+**Risk:** ไม่มีข้อมูลจริงในช่วงพัฒนา → ReplayProvider + ข้อมูล historical สังเคราะห์; ปริมาณ tick
+ควบคุมด้วย bounded state, batched candle upserts และ simulated-source retention บน native PostgreSQL.
+TimescaleDB/distributed Redis เป็น future deployment work ตาม native adaptation ข้างต้น.
+
+**Verification (2026-09-09):** backend 127 tests (13 PostgreSQL integration), frontend 61 tests;
+Ruff/mypy/syntax/wheel, lint/typecheck/build, generated contract and Alembic check PASS.
+Chromium valid/invalid auth, refresh/logout, Trading chart/realtime, all nine timeframes,
+canvas lifecycle, reconnect/reload and desktop/tablet/mobile PASS; console errors/assets failures 0.
+Native Windows PostgreSQL 18.6 works with optional Redis/Docker/WSL. 0001/0002 and HARD fixes preserved.
+Full evidence and Git inventory: docs/phase-2-gate.md.
+**Stop:** Phase 3 / TASK-030+ DO NOT START. Phase 1.1 + Phase 2 combined Sol High review PENDING.
+No stage, commit or push.
+
+---
+
+## 7.5. PHASE 2.5 — Real Market Data
+
+Current authorization: user reports Phase2 Independent Gate PASS and requests real
+market data only. No review artifact was supplied in this turn. PAPER, live false,
+read-only MT5, no broker execution and no Phase3 remain mandatory.
+
+- [x] TASK-2.5-01: Provider discovery/config foundation — user-selected IUX Demo; private terminal identity and explicit XAUUSD mapping.
+- [x] TASK-2.5-02: Official MT5 adapter foundation — lifecycle, read-only method allowlist, account/mode checks and error masking.
+- [x] TASK-2.5-03: Symbol/timeframe mapping foundation — metadata precision, explicit IANA server time, canonical UTC boundaries.
+- [x] TASK-2.5-04: Historical adapter foundation — native lower bars, M3 from M1, H4/D1/W1 from H1; report short history honestly.
+- [x] TASK-2.5-05: Realtime provider foundation — bounded shared quote polling and authoritative rates; no per-browser provider connection.
+- [x] TASK-2.5-06: Continuity/storage foundation — source-scoped REST/WS/persistence, replacement OHLC, resnapshot on gaps; minimal nullable-ask migration0004.
+- [x] TASK-2.5-07: Health/reconnect/stale foundation — bounded backoff, freshness, unknown market session and queue bounds.
+- [x] TASK-2.5-08: Trading UI integration — canonical real/demo/simulated labels, precision/tick size, current source and partial-history detail.
+- [ ] TASK-2.5-09: Full real integration/browser acceptance — BLOCKED on at least300 canonical real candles per timeframe; IUX W1 currently231/300.
+
+Task completion above refers to implemented adapter foundation. It does not assert
+the full real-data DoD or Phase2.5 Gate PASS. Acceptance requires all actual market,
+300-history, UI, continuity, security, PostgreSQL and independent review evidence.
+See docs/phase-2.5-gate.md. Phase3/TASK-030+ DO NOT START.
 
 ---
 
@@ -282,21 +380,25 @@ AI Gold Trader/
 - **Objective:** สร้าง Analysis Engines แยก Module ชัดเจน — Market Structure, Liquidity, SMC/ICT, Indicators, Sessions, Market Regime และ Multi-Timeframe Bias Aggregation + แสดงผลบน Chart
 - **Scope:** 5 Engines + Session Engine + MTF Aggregation + Chart Overlays (ยังไม่มี Strategy/Signal)
 - **Dependencies:** PHASE 2 ✅ (ต้องมี candles)
-- **Status:** ⬜ NOT STARTED
+- **Status:** IMPLEMENTATION COMPLETE — PENDING COMBINED SOL HIGH REVIEW
 
 **Tasks:**
 
-- [ ] TASK-030: Market Structure Engine — Swing High/Low (fractal), HH/HL/LH/LL, BOS, CHoCH, MSS + แยก Internal / External Structure + version ผลลัพธ์ต่อ candle
-- [ ] TASK-031: Liquidity Engine — PDH/PDL, PWH/PWL, Asian/London/NY High-Low, Equal High/Low, Buy-side/Sell-side Liquidity, Liquidity Sweep/Grab detection
-- [ ] TASK-032: SMC/ICT Engine — Order Block, Breaker Block, FVG, IFVG, Premium/Discount/Equilibrium, OTE + Confluence Model (เก็บเป็น structured zones)
-- [ ] TASK-033: Indicator Engine — ATR, RSI, EMA/SMA, ADX, Bollinger, Volume avg + framework เพิ่ม indicator ได้
-- [ ] TASK-034: Session Engine — Asian/London/NY sessions (config ได้), overlap detection, current session + ประวัติ session levels
-- [ ] TASK-035: Market Regime Engine — จำแนก TRENDING_UP/TRENDING_DOWN/RANGING/HIGH_VOLATILITY/LOW_VOLATILITY/BREAKOUT/PULLBACK/NEWS_CONDITION/UNKNOWN ต่อ Timeframe
-- [ ] TASK-036: Multi-Timeframe Analysis — Top-Down (D1→H4→H1→M15→M5) แยกวิเคราะห์ต่อ TF + Aggregate เป็น Market Bias + `GET /api/analysis/*`
-- [ ] TASK-037: Chart Overlays — แสดง Structure (BOS/CHoCH/MSS), Liquidity levels, FVG, Order Blocks, Sessions บน Chart (toggle ได้)
-- [ ] TASK-038: PHASE 3 Gate — Build + Test + Verify + DoD + อัปเดต `docs/07-market-structure.md`, `docs/08-smc-ict.md`
+- [x] TASK-030: Market Structure Engine — Swing High/Low (fractal), HH/HL/LH/LL, BOS, CHoCH, MSS + แยก Internal / External Structure + version ผลลัพธ์ต่อ candle
+- [x] TASK-031: Liquidity Engine — PDH/PDL, PWH/PWL, Asian/London/NY High-Low, Equal High/Low, Buy-side/Sell-side Liquidity, Liquidity Sweep/Grab detection
+- [x] TASK-032: SMC/ICT Engine — Order Block, Breaker Block, FVG, IFVG, Premium/Discount/Equilibrium, OTE + Confluence Model (เก็บเป็น structured zones)
+- [x] TASK-033: Indicator Engine — ATR, RSI, EMA/SMA, ADX, Bollinger, Volume avg + framework เพิ่ม indicator ได้
+- [x] TASK-034: Session Engine — Asian/London/NY sessions (config ได้), overlap detection, current session + ประวัติ session levels
+- [x] TASK-035: Market Regime Engine — จำแนก TRENDING_UP/TRENDING_DOWN/RANGING/HIGH_VOLATILITY/LOW_VOLATILITY/BREAKOUT/PULLBACK/NEWS_CONDITION/UNKNOWN ต่อ Timeframe
+- [x] TASK-036: Multi-Timeframe Analysis — Top-Down (D1→H4→H1→M15→M5) แยกวิเคราะห์ต่อ TF + Aggregate เป็น Market Bias + `GET /api/analysis/*`
+- [x] TASK-037: Chart Overlays — แสดง Structure (BOS/CHoCH/MSS), Liquidity levels, FVG, Order Blocks, Sessions บน Chart (toggle ได้)
+- [x] TASK-038: PHASE 3 Gate — Build + Test + Verify + DoD + อัปเดต `docs/07-market-structure.md`, `docs/08-smc-ict.md`
 
-**Files:** `backend/app/services/analysis/**`, `backend/app/api/analysis.py`, `frontend/src/features/chart/overlays/**`, `docs/07-market-structure.md`, `docs/08-smc-ict.md`
+**Files:** `backend/app/services/analysis/**`, `backend/app/api/analysis.py`, `frontend/src/features/analysis/**`, `docs/07-market-structure.md`, `docs/08-smc-ict.md`
+
+**Implementation decisions:** NEWS_CONDITION remains news_context=UNKNOWN without a news source; OTE is retracement geometry only; confluence is factual zone counts. All nine TF are exposed for top-down inspection. No strategy score, recommendation, risk or execution is included. No migration added; actual head 0004_market_unknown_ask preserved.
+
+**Verification:** backend 210 PASS (15 PostgreSQL), frontend 80 PASS, build/static/contracts/Alembic PASS, actual IUX all-nine-TF API/batch/incremental/prefix checks and Chromium overlays/closed-refresh/reload/reconnect/responsive PASS. W1 231/300 PARTIAL (230 closed) remains honestly reported. Rolling-window revisions are explicitly disclosed rather than claimed immutable. See [Phase 3 gate](docs/phase-3-gate.md), [structure semantics](docs/07-market-structure.md), [SMC semantics](docs/08-smc-ict.md). Phase 4 STOP.
 
 **Acceptance Criteria:**
 - Engine ทุกตัวเป็น pure function ของ candle data (deterministic, testable ย้อนหลังได้)
@@ -310,36 +412,30 @@ AI Gold Trader/
 
 ---
 
-## 9. PHASE 4 — Strategy Engine & Signal Engine
+## 9. PHASE 4 — Strategy / Trader Profile / Setup / Trade Plan Engine
 
-- **Objective:** สร้าง Strategy Framework แบบ Plug-in + 5 Strategies ตาม Spec + Signal Engine ที่สร้าง Trade Plan ครบองค์ประกอบ
-- **Scope:** Strategy Framework, 5 Built-in Strategies, Trading Modes, Signal Engine, Trade Plan (ยังไม่มี Risk Engine จริง — เรียกผ่าน interface stub ที่ PHASE 5 มา replace)
-- **Dependencies:** PHASE 3 ✅
-- **Status:** ⬜ NOT STARTED
+- **Scope:** Immutable shared context, key levels/sessions/indicators/patterns, six deterministic playbooks, seven profiles, setup/structural plans, lifecycle/persistence/API/Thai UI.
+- **Dependencies:** Phase 3 and Phase 3.5 implementation complete under disclosed safe-partial conditions.
+- **Status:** IMPLEMENTATION COMPLETE — PENDING COMBINED SOL HIGH INDEPENDENT REVIEW PHASE 3.5+4.
+- **Safety:** Analysis only. No risk sizing, trailing, partial-close, order, execution, AI or position management.
 
-**Tasks:**
+**Tasks (original IDs retained; latest authorized scope replaces old execution/risk placeholders):**
 
-- [ ] TASK-039: Strategy Framework — `Strategy` interface (entry condition, invalidation, SL logic, TP logic, risk rule, session rule, regime rule) + registry + config schema + enable/disable per account
-- [ ] TASK-040: Strategy 1 — Liquidity Sweep + MSS + FVG (Confluence ตาม Spec หัวข้อ 9)
-- [ ] TASK-041: Strategy 2 — Trend Pullback (HTF bias + pullback สู่ zone + confirmation)
-- [ ] TASK-042: Strategy 3 — Breakout Momentum (regime BREAKOUT + volume/momentum filter)
-- [ ] TASK-043: Strategy 4 — Mean Reversion (regime RANGING + premium/discount)
-- [ ] TASK-044: Strategy 5 — Run Trend (trend continuation + trailing)
-- [ ] TASK-045: Trading Modes — SCALP / DAY_TRADE / SWING / RUN_TREND + config แยกกัน (timeframe, risk, min RR, max holding, trailing, partial close)
-- [ ] TASK-046: Signal Engine & Trade Plan — สร้าง `signals` + `signal_evidence` + `trade_plans` ครบทุกฟิลด์ตาม Spec หัวข้อ 18 + expiration + invalidation + Confluence Gate (ห้าม signal เดี่ยวเป็น entry)
-- [ ] TASK-047: PHASE 4 Gate — Build + Test + Verify + DoD + อัปเดต `docs/09-strategy-engine.md`
+- [x] TASK-039: Immutable StrategyMarketContext + configuration/provenance, context engines and six-playbook registry.
+- [x] TASK-040: SMC liquidity reversal — HTF/sweep/reclaim/CHOCH-MSS/zone/retest evidence chain.
+- [x] TASK-041: Trend pullback — established context/BOS/zone/LTF confirmation.
+- [x] TASK-042: Confirmed pattern breakout + displacement + subsequent retest.
+- [x] TASK-043: Range mean reversion — confirmed boundaries, weak trend, rejection and structure.
+- [x] TASK-044: Post-news momentum and liquidity reversal playbooks; RUN_TREND context/profile only, no management.
+- [x] TASK-045: SCALP/DAY_TRADE/SWING/RUN_TREND mappings; seven isolated profiles, three comparison modes, adaptive reserved.
+- [x] TASK-046: Setup/structural plan geometry, immutable revisions/lifecycle, additive migration 0006, authenticated generated contracts and Thai chart/workspace.
+- [x] TASK-047: Final regression, actual IUX/browser/DB preservation gate and combined-review report.
 
-**Files:** `backend/app/services/strategy/**`, `backend/app/services/trading/signal_engine.py`, `backend/app/models` (strategies, strategy_configs, signals, signal_evidence, trade_plans), `frontend/src/features/signals/**`, `docs/09-strategy-engine.md`
+**Files:** backend/app/services/strategy, backend/app/api/strategy.py, backend/app/models/strategy.py, migration 0006, frontend/src/features/strategy, generated contracts, tests, [architecture](docs/09-strategy-engine.md), [gate](docs/phase-4-gate.md).
 
-**Acceptance Criteria:**
-- เพิ่ม Strategy ใหม่ได้โดยไม่แก้ engine code (plug-in ผ่าน registry + config)
-- ทุก signal มี evidence ครบ + Confluence rule บังคับใช้จริง (test ยืนยันว่า signal ที่ไม่ผ่าน confluence ถูกปฏิเสธ)
-- Trade Plan ครบทุกฟิลด์ตาม Spec หัวข้อ 18 + มี expiration และ invalidation
-- ทุก strategy ระบุ Market Regime ที่รองรับและปฏิเสธ regime อื่นจริง
+**Acceptance:** Explicit mandatory context gates precede scoring. No absent-snapshot invalidation, no future candles/pivots/news/session extrema, no forced TP/RR, no fixture news enabling real READY. Existing market/analysis/news engines and old migrations remain protected. W1 partial remains explicit.
 
-**Testing:** Unit test ทุก strategy บน synthetic + golden dataset, Confluence gate tests, Trade plan schema validation tests, Signal lifecycle tests (create→expire)
-
-**Risk:** Overfit กับข้อมูลทดสอบ → กันด้วย PHASE 9 (backtest + walk-forward) ก่อนถือว่า strategy ใช้ได้จริง; Signal ปลอมเกิน → strict confluence + min RR gate
+**Next:** STOP before Phase 5. COMBINED SOL HIGH INDEPENDENT REVIEW PHASE 3.5+4 is required.
 
 ---
 
@@ -689,3 +785,73 @@ Task จะถือว่าเสร็จเมื่อครบทุกข
 | 2026-09-08 | 1.3 | TASK-020 review: fixed auth loading/refresh/session recovery, safe validation errors, Docker packaging/dev overrides, health aliases and lint. Backend 21 tests + frontend 6 tests, lint/typecheck/build and local HTTP checks pass. Gate BLOCKED on Docker runtime and real PostgreSQL/Redis/browser integration; Phase 2 not started. Evidence: docs/phase-1-gate.md. |
 | 2026-09-08 | 1.4 | User-directed native Windows Phase 1 continuation: DATABASE_URL and escaped credentials, Windows psycopg loop, Redis disabled by default, startup secret validation, isolated PostgreSQL test and native docs. Backend 35/frontend 6 tests and build/typecheck/lint/HTTP smoke pass. TASK-020 remains unchecked; Phase 1 PARTIAL (10/11), total 19/104. Only database integration is BLOCKED BY LOCAL POSTGRESQL; full browser login pending. Docker/WSL are not blockers. Phase 2 not started. |
 | 2026-09-08 | 1.5 | TASK-020 / PHASE 1 COMPLETE (11/11; total 20/104). User installed PostgreSQL 18.6; authorized hidden-password setup created separate DEV/TEST databases and restricted roles. Real migration up/down/up, schema/constraints/transactions, persisted auth/audit and Chromium login/reload/refresh/logout pass. Fixed unbound Logout button using existing auth store. Final backend 36/frontend 6 tests, lint/typecheck/build pass. No Phase 2 work, commit or push. |
+| 2026-09-09 | 1.6 | Independent review FAIL reopened TASK-020 (10/11; 19/104) for P1-001. Added 0002_phase1_schema_alignment without changing 0001; aligned refresh-token unique-index ORM metadata; added real PostgreSQL drift/roundtrip gate. DEV data preserved, fresh/rollback/re-upgrade/alembic check PASS; full backend 37/frontend 6 tests, lint/typecheck/build, browser auth and JSONB audit PASS. TASK-020 re-closed (11/11; 20/104), pending Independent Sol High Re-review. P2/P3 unchanged; Phase 2 NO-GO; no commit/push. |
+| 2026-09-09 | 1.7 | User supplied Independent Re-review PASS WITH MINOR ISSUES, P1-001 independently verified. Added Phase 1.1 TASK-H001/H002/H003 without renumbering original tasks: proxy/login budgets, correlation/logging, OpenAPI/frontend contract hardening. Reproduced defects, then verified backend 71 (4 PostgreSQL)/frontend 17 tests, build/typecheck/lint, alembic/contract checks, native spoofing and Chromium auth smoke PASS. Hardening 3/3, total 23/107. Migration 0001/0002 preserved; P2-R01/P3-001 deferred; no Phase 2, commit or push. Stop for Independent Sol High Review. |
+| 2026-09-09 | 1.8 | Independent Review FAIL: HARD-R01 base Compose proxy rewriting, HARD-R02 malformed token semantics/persistence, HARD-R03 access-log correlation lifecycle. Reopened hardening tasks and gate before reproduction/correction. Minimal fixes and source-derived runtime tests now pass: backend 93 (12 PostgreSQL), frontend 41, complete build/lint/typecheck/contract/Alembic, native Windows and Chromium valid/malformed auth checks. Corrective verification PASS, 3/3 hardening, total 23/107. Initial claim and independent FAIL preserved in gate history. Migrations 0001/0002 unchanged; 0002 still untracked; no staging/commit/push. STOP for Independent Sol High Re-review; Phase 2 NO-GO. |
+| 2026-09-09 | 1.9 | User explicitly authorized provisional Phase 2 before final Sol review. Retained TASK-021–029 and adapted mandatory TimescaleDB/Redis wording to native PostgreSQL + bounded LocalMarketBus per current instructions. Implemented deterministic ReplayProvider, validated UTC/Decimal domain, M1-to-nine-timeframe aggregation, persistence/retention, authenticated REST/first-frame-auth WS, stale/events/recovery and responsive Lightweight Charts Trading screen. Fixed local-timezone serialization found by real browser verification. Final backend 127 (13 PostgreSQL) and frontend 61 tests, builds/static/contract/Alembic and real Chromium auth/Trading visual gate PASS. Tasks 9/9; total 32/107. 0001/0002 and corrective security code preserved; no commit/stage/push. IMPLEMENTATION COMPLETE — PENDING COMBINED INDEPENDENT REVIEW. Phase 3 DO NOT START. |
+
+| 2026-09-09 | 2.0 | User-reported Phase2 independent acceptance authorizes Phase2.5. Added nine scoped tasks (8 foundation tasks complete, real acceptance pending), official read-only IUX MT5 adapter, explicit broker-time normalization, UTC higher aggregation, source isolation, precision/labels, nullable historical ask migration0004 and offline/external tests. Current real W1 history231/300 prevents Gate PASS. See phase-2.5-gate.md. No Phase3 or Git publication. |
+
+| 2026-09-09 | 2.1 | Latest user explicitly authorizes provisional Phase 3 despite Phase 2.5 W1 partial and pending review. TASK-030–038 implemented/verified without renumbering: causal structure/liquidity/SMC, indicators/sessions/regime, authenticated typed API and chart overlays. 210 backend (15 PostgreSQL), 80 frontend tests, real IUX 9-TF cross-checks and native Chromium acceptance pass. Bounded-window/no-lookahead scope disclosed, no fake W1 history, no migration, protected foundation unchanged. Phase 3 9/9; total 49/116. IMPLEMENTATION COMPLETE — PENDING COMBINED SOL HIGH REVIEW. Phase 4 DO NOT START; no staging/commit/push. |
+
+
+## Phase 3.5 — Economic context extension
+
+ใช้รหัส TASK-N001–N012 เพิ่มเติม ไม่เปลี่ยนเลขเดิม งาน future news risk enforcement ใน Phase5 ยังไม่ถือว่าทำแล้ว
+
+- [x] **TASK-N001** — Audit Phase prerequisites, provider discovery และ QREV-R01/R02 boundaries
+- [x] **TASK-N002** — Canonical economic provider/18-event catalogue และ explicit FIXTURE fallback
+- [x] **TASK-N003** — Economic occurrence/revision schema + migration0005 + point-in-time repository
+- [x] **TASK-N004** — Configurable XAUUSD currency/channel/relevance semantics
+- [x] **TASK-N005** — Deterministic numeric surprise and directional semantics
+- [x] **TASK-N006** — Composite release groups/NFP negative revision/conflict analysis
+- [x] **TASK-N007** — News timeline/overlapping risk/context eligibility metadata
+- [x] **TASK-N008** — Canonical market reaction/spread/volatility context without fabricated data
+- [x] **TASK-N009** — Phase3 provenance/no-lookahead/fingerprint/operational freshness
+- [x] **TASK-N010** — Authenticated typed REST and runtime frontend contracts
+- [x] **TASK-N011** — Thai Trading News Panel/Calendar/countdown/responsive UI
+- [x] **TASK-N012** — Unit/PostgreSQL/build/regression/browser gate + documentation + STOP Phase4
+
+Gate: [docs/phase-3.5-gate.md](docs/phase-3.5-gate.md). IMPLEMENTATION COMPLETE — PENDING INDEPENDENT REVIEW.
+
+| 2026-09-09 | 2.2 | User-directed Phase3.5 before Phase4: added TASK-N001–N012 (12), total128; canonical economic revisions/migration0005, deterministic news context, QREV boundaries, Thai UI and verified acceptance: 277 backend (16 PostgreSQL), 96 frontend, 9 direct MT5 external tests, native news/calendar/Phase3 browser PASS. W1 231/300 Safe-Partial retained. 12/12 news tasks; total61/128. Phase4 remains DO NOT START. |
+
+| 2026-09-09 | 2.3 | Latest user authorized Phase4 after safe-partial Phase3.5 runtime verification. TASK-039–047 completed with six playbooks, seven profiles, shared immutable context, structural plans/lifecycle, migration0006 and Thai UI. 345 backend tests (17 PostgreSQL), 112 frontend tests, 9 direct MT5 tests, actual API/pure and browser regression passed. W1/news limitations retained; no execution or Git mutation. Phase4 9/9, total70/128. STOP before Phase5 pending combined independent review. |
+
+
+## Phase 3.5R — Real provider completion
+
+- [x] **TASK-NR001** — Audit providers, keyless endpoint and documented usage terms
+- [x] **TASK-NR002** — Explicit real adapter/configuration and fail-safe unconfigured default
+- [x] **TASK-NR003** — Canonical UTC/Decimal/observation identity and append-only revisions
+- [x] **TASK-NR004** — Bounded polling/backoff, health/freshness and no fixture fallback
+- [x] **TASK-NR005** — Real USD subset acceptance against raw provider; restricted canonical Phase4 context
+- [ ] **TASK-NR006** — Full original USD coverage, forecasts/components/revision history and release-latency acceptance (provider capability unavailable)
+
+## Phase 4.1 — Dashboard command center
+
+- [x] **TASK-D001** — Typed aggregated contract, isolated module failures and bounded cache
+- [x] **TASK-D002** — Thai market/structure/key levels/news summaries
+- [x] **TASK-D003** — Canonical strategies/profiles/plan/no-trade explanation summaries
+- [x] **TASK-D004** — Health/freshness/safety, internal WS reuse and cleanup
+- [x] **TASK-D005** — Final regression/browser/security evidence and mandatory stop report
+
+Gate and limitations: [docs/pre-review-3.5r-4.1.md](docs/pre-review-3.5r-4.1.md).
+No Phase5 implementation, Git stage/commit/push or order execution.
+
+
+| 2026-09-09 | 2.4 | Pre-review batch: keyless Xoomar real economic subset connected (NR5/6, full coverage PARTIAL), Dashboard command center D5/5;371 backend incl18 PostgreSQL,130 frontend,9 MT5, raw/provider/API and all browser regressions PASS. Protected33 files unchanged, no secret exposure, migrations remain0006. Total80/139. No Git mutation. STOP before Phase5; ready for combined review with explicit real-calendar limitations. |
+| 2026-09-10 | 2.5 | Targeted Forex Factory integration for STRAT05–06 only; market-only invariance for STRAT01–04; strategy-1.2.1/news-1.2.0. No migration or Git mutation. See dedicated acceptance report for final checks and actual-feed limitations. Phase5 NOT STARTED. |
+
+
+## SOL corrective milestone — SOL-P1-001
+
+Finding status: **FIXED — PENDING SOL RE-REVIEW** (implementation verification, not independent approval).
+Dependency-aware per-profile/strategy evaluation projections align general/news IDs, immutable
+payloads, candidate ownership and idempotent persistence. Separate evaluation-2.0.0 identity
+version; strategy-1.2.1 logic and migrations remain unchanged.
+Latest user authorization supersedes historical no-Git restrictions for one reviewed completed
+pre-Phase-5 baseline + corrective commit/push. No Phase5 task is marked complete.
+P2-001/002/003/004/005 and P3-001 remain DEFERRED — unchanged by this corrective batch.
+Evidence and scope: [SOL-P1-001 corrective report](docs/sol-p1-001-corrective.md).
+STOP after the authorized commit/push and wait for SOL HIGH RE-REVIEW.

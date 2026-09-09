@@ -59,7 +59,7 @@ When your native PostgreSQL service and configured application database are read
 Get-Service *postgres*
 .\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m app.db.seed
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --loop app.core.event_loop:new_event_loop
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --no-proxy-headers --host 127.0.0.1 --port 8000 --reload --loop app.core.event_loop:new_event_loop
 ~~~
 
 Use the hidden password prompt for seeding; avoid --admin-password because command lines can be observed.
@@ -124,3 +124,44 @@ Compose-only builds/service smoke checks are optional and do not block native de
 The frontend image copies standalone/static/public assets and runs as a non-root user.
 Backend migrations run before its single-replica development server.
 Do not run rollback or remove volumes against application data. Use only the isolated integration test for rollback evidence.
+
+## Phase 1.1 configuration and proxy boundary
+
+The native and optional Docker launch commands now explicitly disable Uvicorn proxy-header rewriting with
+--no-proxy-headers. This flag is required in both direct and trusted-proxy application modes: the application
+must receive the actual transport peer to enforce its own allow-list. Do not combine this resolver with another
+ASGI/server middleware that rewrites request.client first.
+
+New defaults in .env.example (existing private backend/.env need not be rewritten):
+
+~~~dotenv
+TRUST_PROXY=false
+TRUSTED_PROXY_CIDRS=
+RATE_LIMIT_AUTH_PER_MINUTE=10
+RATE_LIMIT_MAX_KEYS=10000
+~~~
+
+For a controlled proxy deployment, set TRUST_PROXY=true and TRUSTED_PROXY_CIDRS to a comma-separated list of
+only the actual proxy IPs/networks. Network validation rejects '*' and IPv4/IPv6 default routes. Keep the backend
+network restricted to the intended path and configure the proxy to overwrite/append XFF correctly.
+Do not enable proxy trust merely because an incoming request contains forwarded headers.
+
+Login limits use independent client and normalized-account budgets, each at the configured per-minute rate.
+Entries expire after 60 seconds and are bounded; at capacity new identities receive 429 until capacity expires.
+Use one process/instance for this phase's protection; restarting resets local state. Redis remains optional.
+
+SQL parameter hiding and safe exception summaries apply to JSON and console logs. Never enable SQL echo/debug
+logging or manually log request bodies/exception strings to troubleshoot authentication. Use correlation ID,
+error type, operation, route template and safe stack locations. No private configuration values were printed
+or added to source by this hardening work.
+
+
+## Phase 2 local market feed (2026-09-09)
+
+Apply the new additive migration with python -m alembic upgrade head and verify alembic check.
+Set MARKET_DATA_PROVIDER=simulated; retain PAPER, LIVE_AUTO_TRADING=false and Redis optional.
+Existing native Uvicorn launch options, including --no-proxy-headers, remain required.
+One DEV application instance owns the lazy replay worker; avoid multiple workers on the same dataset.
+The native app uses PostgreSQL without requiring TimescaleDB, Docker or WSL. See docs/06-market-data.md.
+Stop a running Next standalone process before rebuilding on Windows: it can lock .next/standalone.
+Keep tokens and provider credentials out of URLs/logs. Add local frontend origins explicitly to CORS.

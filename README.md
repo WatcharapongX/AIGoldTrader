@@ -36,7 +36,7 @@ REDIS_ENABLED=false, TRADING_MODE=PAPER, LIVE_AUTO_TRADING=false.
 ~~~powershell
 # Terminal 1 — หลังติดตั้ง dependencies และตั้ง environment/migrate/seed
 Set-Location backend
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000 --loop app.core.event_loop:new_event_loop
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --no-proxy-headers --reload --port 8000 --loop app.core.event_loop:new_event_loop
 
 # Terminal 2 — เริ่มจาก repository root
 Set-Location frontend
@@ -62,3 +62,22 @@ See [test commands](docs/17-testing.md), [native startup](docs/18-devops.md), an
 TASK-020 passed with native PostgreSQL 18.6 migration/rollback/auth/audit, real Chromium login/session/logout,
 36 backend tests, 6 frontend tests and build/lint/typecheck. Phase 2 has not started; independent review is next.
 # AIGoldTrader
+
+
+## Phase 2 Trading screen (provisional)
+
+After the existing database setup, run python -m alembic upgrade head from backend, then start the
+native backend/frontend as above. Log in and open /trading. XAUUSD historical candles, realtime
+Bid/Ask/Spread, nine timeframes, reconnect and status are available with clearly labeled SIMULATED DATA.
+No broker or order execution is implemented. Native PostgreSQL remains sufficient; Redis/Docker/WSL
+are optional. See docs/06-market-data.md and docs/phase-2-gate.md.
+Phase 1.1 + Phase 2 await combined independent review; Phase 3 must not start.
+
+
+## Current corrective milestone
+
+The working implementation now includes read-only IUX MT5 data, market structure, economic
+context, six analysis-only strategies and the Dashboard. SOL-P1-001 aligns evaluation identity
+and persistence with each strategy's dependencies. See [corrective report](docs/sol-p1-001-corrective.md).
+Earlier phase notes above are historical. PAPER mode remains enforced for this acceptance;
+Phase 5 is not started. W1 history and economic Actual coverage retain documented limitations.

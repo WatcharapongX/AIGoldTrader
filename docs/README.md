@@ -8,9 +8,10 @@
 | [03-trading-domain.md](03-trading-domain.md) | ✅ Baseline | P0 | Domain model + enums + state machines + invariants |
 | [04-database-design.md](04-database-design.md) | ✅ Baseline | P0 | ERD + schema 33 ตาราง |
 | [05-api-design.md](05-api-design.md) | ✅ Baseline | P0 | REST + WebSocket contract |
-| 06-market-data.md | ⬜ Planned | P2 | รายละเอียด market data + aggregation + providers |
-| 07-market-structure.md | ⬜ Planned | P3 | นิยาม structure (swing/BOS/CHoCH/MSS) + parameters |
-| 08-smc-ict.md | ⬜ Planned | P3 | นิยาม SMC/ICT + confluence model |
+| [06-market-data.md](06-market-data.md) | Implementation complete / review pending | P2 | รายละเอียด market data + aggregation + providers |
+| [07-market-structure.md](07-market-structure.md) | Implementation complete / combined review pending | P3 | นิยาม structure (swing/BOS/CHoCH/MSS) + parameters |
+| [08-smc-ict.md](08-smc-ict.md) | Implementation complete / combined review pending | P3 | นิยาม SMC/ICT + confluence model |
+| [phase-3-gate.md](phase-3-gate.md) | Implementation complete / combined review pending | P3 | Golden, PostgreSQL, actual IUX and browser acceptance evidence |
 | 09-strategy-engine.md | ⬜ Planned | P4 | Strategy framework + 5 strategies + trading styles |
 | 10-ai-engine.md | ⬜ Planned | P6 | Multi-agent + prompt design + validation |
 | 11-risk-engine.md | ⬜ Planned | P5 | ทุก rule + sizing + kill switch |
@@ -36,3 +37,17 @@
 **กฎ:** เอกสาร Baseline (01–05 + ADR) คือ contract ของ codebase — code ต้องตรงกับเอกสาร ถ้าจำเป็นต้องเบี่ยง ให้อัปเดตเอกสารก่อน implement (Definition of Done ทุก phase)
 
 Phase 1 verification report: [phase-1-gate.md](phase-1-gate.md).
+
+Phase 2 provisional verification: [phase-2-gate.md](phase-2-gate.md). Combined Phase 1.1 + Phase 2 independent review pending.
+
+Phase 3.5 economic context: [economic-news.md](economic-news.md).
+Verification: [phase-3.5-gate.md](phase-3.5-gate.md). Phase4 DO NOT START.
+
+- [Phase 4 strategy architecture](09-strategy-engine.md)
+- [Phase 4 implementation gate](phase-4-gate.md)
+
+- [Phase3.5R + 4.1 architecture and provider limits](10-dashboard-command-center.md)
+- [Pre-review completion batch verification](pre-review-3.5r-4.1.md)
+Current stop gate supersedes earlier historical next-phase notes: Phase5 DO NOT START.
+
+- [SOL-P1-001 corrective identity and persistence verification](sol-p1-001-corrective.md)

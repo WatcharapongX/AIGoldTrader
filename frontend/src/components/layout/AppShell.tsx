@@ -39,23 +39,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen w-full bg-[#0a0a0a] text-[#ededed] overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col h-full min-w-0">
-        <header className="h-16 flex items-center justify-between px-6 border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm z-10 shrink-0">
+        <header className="h-16 flex items-center justify-between px-3 md:px-6 border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm z-10 shrink-0">
           <div className="flex items-center space-x-2 text-sm">
             <span className="text-gray-500">App</span>
             <span className="text-gray-600">/</span>
             <span className="font-semibold text-gray-200">{pageTitle}</span>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 md:space-x-4">
             <div className="px-3 py-1 bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded text-xs font-bold tracking-wider">
               PAPER TRADING
             </div>
-            <div className="flex items-center space-x-2 text-sm text-gray-400">
+            <div className="hidden lg:flex items-center space-x-2 text-sm text-gray-400">
               <span className="w-2 h-2 rounded-full bg-gray-500"></span>
-              <span>Market data not connected</span>
+              <span>Market workspace · PAPER</span>
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-6 relative">
+        <main className="flex-1 overflow-auto p-3 md:p-6 relative">
           {children}
         </main>
       </div>

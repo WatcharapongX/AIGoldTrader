@@ -191,8 +191,8 @@ erDiagram
 |---|---|---|
 | **alerts** | user_id?, account_id?, type, severity, title, payload JSONB, is_read, created_at | index (user_id, is_read) |
 | **audit_logs** | ts, user_id?, action, entity, entity_id, before JSONB?, after JSONB?, reason?, source (API/WORKER/SYSTEM), correlation_id, ip? | append-only; ตาม Spec หัวข้อ 35 ครบทุกฟิลด์ |
-| **system_events** | ts, category (DATA/BROKER/AI/DB/REDIS/WS), severity, code, message, payload JSONB, correlation_id | monitoring + kill switch อ้างอิง |
-| **sessions** | user_id, refresh_token_hash, expires_at, revoked_at?, ip, user_agent | secure session (FR-SE-01) |
+| **system_events** | ts, category (DATA/BROKER/AI/DB/REDIS/WS), severity, code, message, payload JSONB?, correlation_id | monitoring + kill switch อ้างอิง |
+| **sessions** | user_id, refresh_token_hash, expires_at, revoked_at?, ip, user_agent | secure session (FR-SE-01); canonical unique index ix_sessions_refresh_token_hash |
 
 > **สรุปจำนวน:** ตารางหลักตาม Spec 30 ตาราง (users, accounts, broker_connections, symbols, ticks, candles, strategies, strategy_configs, signals, signal_evidence, trade_plans, orders, order_events, positions, position_events, trades, risk_configs, risk_events, ai_analysis, ai_agent_results, economic_events, alerts, journal_entries, backtest_runs, backtest_trades, paper_accounts, paper_orders, paper_positions, audit_logs, system_events) **+ เสริม 3 ตาราง:** analysis_snapshots, paper_equity_history, sessions (เพิ่มเพื่อรองรับ requirement ที่ระบุแต่ไม่มีตารางรองรับโดยตรง)
 
@@ -219,3 +219,56 @@ ai_analysis ─1:N─ ai_agent_results
 users ─1:N─ audit_logs / sessions / alerts
 (economic_events, system_events: อิสระ)
 ```
+
+## Phase 1 schema alignment — P1-001 (2026-09-09)
+
+The initial applied revision 0001_initial remains immutable. Corrective revision
+0002_phase1_schema_alignment converts the four deployed JSON columns to the intended PostgreSQL JSONB design:
+
+| Table | Column | PostgreSQL type at latest | Nullable | Database default |
+|---|---|---|---|---|
+| audit_logs | before | JSONB | YES | none |
+| audit_logs | after | JSONB | YES | none |
+| symbols | session_hours | JSONB | NO | '{}'::jsonb |
+| system_events | payload | JSONB | YES | none |
+
+SQLite remains a unit-test-only JSON variant; it cannot validate this PostgreSQL gate.
+The symbols ORM client default remains dict; the migration's server default supplies the same empty object
+for SQL inserts that omit session_hours. Other default policies are outside this correction.
+
+RefreshSession.refresh_token_hash uses unique=True, index=True. With the shared ix naming convention,
+this matches the existing unique B-tree index ix_sessions_refresh_token_hash on sessions(refresh_token_hash).
+It is the sole canonical uniqueness mechanism for this column; do not add a duplicate UniqueConstraint.
+The existing index has no dependent FK/constraint on the verified DEV schema, and is preserved unchanged.
+
+Upgrade uses ALTER COLUMN TYPE JSONB USING column::jsonb; downgrade explicitly uses column::json.
+Neither direction drops/recreates PostgreSQL tables. Nullability and other indexes/constraints remain unchanged;
+the empty-object default is explicitly cast to the target type. Rollbacks belong in an isolated TEST schema.
+
+Before converting populated environments, verify identity, nullable/default metadata, cast compatibility,
+duplicate object keys (including nested keys), and capture semantic data fingerprints.
+JSONB preserves values but normalizes formatting/key order; it cannot restore original JSON formatting
+or duplicate keys on downgrade. Invalid JSONB values fail conversion. The verified DEV had no duplicate keys
+and all existing JSON values were castable. See [PostgreSQL JSON types](https://www.postgresql.org/docs/16/datatype-json.html)
+and [Alembic ALTER COLUMN](https://alembic.sqlalchemy.org/en/latest/ops.html#alembic.operations.Operations.alter_column).
+The migration takes PostgreSQL table locks; schedule populated-environment upgrades accordingly.
+
+The required real-PostgreSQL consistency gate is documented in [17-testing.md](17-testing.md).
+
+
+## Phase 2 additive native schema (2026-09-09)
+
+Revision 0003_phase2_market_data adds symbols.default_spread plus ticks and candles with Decimal
+numeric fields and UTC timestamptz. Composite primary keys include symbol/source/time and candle
+timeframe; foreign keys reference symbols. Native PostgreSQL is the current user-authorized storage
+for TASK-023/025. Hypertables/TimescaleDB remain future deployment work. 0001/0002 are unchanged.
+See docs/06-market-data.md for retention, idempotency, transaction and pagination behavior.
+
+## Phase 3.5 revision storage (migration 0005)
+Economic occurrence identities and append-only JSONB vintages are stored separately.
+Unique(source, provider_event_id, occurrence_key); revision PK(event_id, revision_version).
+Latest available vintage is selected before schedule filters. Populated downgrade refuses history loss.
+Migrations 0001–0004 remain unchanged. See [economic-news.md](economic-news.md).
+
+## Phase 4 additive schema
+Migration 0006 adds immutable trader_profiles, strategy_evaluations, trade_candidates and candidate_transitions. Full source/config/evidence snapshots and explicit transitions preserve reproducibility. Populated-history downgrade is blocked. See [strategy contracts](09-strategy-engine.md).

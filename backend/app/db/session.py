@@ -14,7 +14,7 @@ def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
-        kwargs: dict = {"pool_pre_ping": True, "echo": False}
+        kwargs: dict = {"pool_pre_ping": True, "echo": False, "hide_parameters": True}
         # pool args ใช้ได้เฉพาะ dialect ที่มี connection pool ของตัวเอง (SQLite ใช้ StaticPool)
         if settings.database_url.startswith("postgresql"):
             kwargs.update(pool_size=10, max_overflow=10)

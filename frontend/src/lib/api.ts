@@ -1,4 +1,5 @@
-import { TokenPair, User, HealthResponse, ApiError } from '@/types';
+import type { TokenPair, User, HealthResponse, ReadyResponse } from '@/types';
+import { parseUser, parseTokenPair, parseHealth, parseReady, errorMessage, ApiContractError } from '@/lib/contracts';
 
 /** Sync token to a cookie so Next.js middleware can check auth state. */
 function syncTokenCookie(token: string | null) {
@@ -43,7 +44,7 @@ export class ApiClient {
     return this.refreshPromise;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown, options?: RequestInit): Promise<T> {
+  private async request(method: string, path: string, body?: unknown, options?: RequestInit): Promise<unknown> {
     const url = `${this.baseUrl}${path}`;
     const accessToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
     const headers = new Headers(options?.headers);
@@ -62,32 +63,32 @@ export class ApiClient {
       if (response.status === 401) clearSession();
     }
     if (!response.ok) {
-      let errorData: ApiError | undefined;
-      try { errorData = await response.json() as ApiError; } catch { /* Non-JSON error response. */ }
-      throw new Error(errorData?.error?.message || response.statusText || 'An API error occurred');
+      let message: string | undefined;
+      try { message = errorMessage(await response.json()); } catch { /* Non-JSON error response. */ }
+      throw new Error(message || response.statusText || 'An API error occurred');
     }
-    if (response.status === 204) return {} as T;
-    return await response.json() as T;
+    if (response.status === 204) return null;
+    return await response.json();
   }
 
-  public get<T>(path: string, options?: RequestInit): Promise<T> {
-    return this.request<T>('GET', path, undefined, options);
+  public get(path: string, options?: RequestInit): Promise<unknown> {
+    return this.request('GET', path, undefined, options);
   }
 
-  public post<T>(path: string, body?: unknown, options?: RequestInit): Promise<T> {
-    return this.request<T>('POST', path, body, options);
+  public post(path: string, body?: unknown, options?: RequestInit): Promise<unknown> {
+    return this.request('POST', path, body, options);
   }
 
-  public put<T>(path: string, body?: unknown, options?: RequestInit): Promise<T> {
-    return this.request<T>('PUT', path, body, options);
+  public put(path: string, body?: unknown, options?: RequestInit): Promise<unknown> {
+    return this.request('PUT', path, body, options);
   }
 
-  public patch<T>(path: string, body?: unknown, options?: RequestInit): Promise<T> {
-    return this.request<T>('PATCH', path, body, options);
+  public patch(path: string, body?: unknown, options?: RequestInit): Promise<unknown> {
+    return this.request('PATCH', path, body, options);
   }
 
-  public delete<T>(path: string, options?: RequestInit): Promise<T> {
-    return this.request<T>('DELETE', path, undefined, options);
+  public delete(path: string, options?: RequestInit): Promise<unknown> {
+    return this.request('DELETE', path, undefined, options);
   }
 
   // Auth methods
@@ -108,14 +109,15 @@ export class ApiClient {
         return null;
       }
 
-      return await response.json() as TokenPair;
-    } catch {
+      return parseTokenPair(await response.json());
+    } catch (error) {
+      if (error instanceof ApiContractError) throw error;
       return null;
     }
   }
 
   public async login(email: string, password: string): Promise<TokenPair> {
-    const data = await this.post<TokenPair>('/auth/login', { email, password });
+    const data = parseTokenPair(await this.post('/auth/login', { email, password }));
     if (typeof window !== 'undefined') {
       localStorage.setItem('access_token', data.access_token);
       localStorage.setItem('refresh_token', data.refresh_token);
@@ -128,16 +130,16 @@ export class ApiClient {
      await this.post('/auth/logout');
   }
 
-  public getMe(): Promise<User> {
-    return this.get<User>('/auth/me');
+  public async getMe(): Promise<User> {
+    return parseUser(await this.get('/auth/me'));
   }
 
-  public healthz(): Promise<HealthResponse> {
-    return this.get<HealthResponse>('/healthz');
+  public async healthz(): Promise<HealthResponse> {
+    return parseHealth(await this.get('/healthz'));
   }
 
-  public readyz(): Promise<HealthResponse> {
-    return this.get<HealthResponse>('/readyz');
+  public async readyz(): Promise<ReadyResponse> {
+    return parseReady(await this.get('/readyz'));
   }
 }
 

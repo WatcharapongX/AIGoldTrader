@@ -1,28 +1,34 @@
 """Auth endpoints — login / refresh / logout / me (TASK-016, docs/05 §2.1)."""
 
 import datetime as dt
+import hashlib
+import re
 import uuid
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AwareDatetime, BaseModel, EmailStr, Field, StringConstraints, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.client_ip import resolve_client_ip
 from app.core.config import get_settings
 from app.core.correlation import get_correlation_id
 from app.core.errors import AuthError, RateLimitedError
 from app.core.rate_limit import RateLimiter
 from app.core.security import create_token, decode_token
 from app.db.session import get_session
-from app.models import RefreshSession, User
+from app.models import RefreshSession, Role, User
 from app.services import audit
 from app.services.users import authenticate, get_user, hash_refresh_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 # auth endpoints อนุญาตสั้นกว่า API ทั่วไป (docs/05 §4)
-_auth_limiter = RateLimiter(per_minute=get_settings().rate_limit_auth_per_minute)
+_auth_limiter = RateLimiter(
+    per_minute=get_settings().rate_limit_auth_per_minute, max_keys=get_settings().rate_limit_max_keys,
+)
 
 
 class LoginRequest(BaseModel):
@@ -30,11 +36,26 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+# Match the timezone-aware RFC3339 form emitted by Pydantic (microseconds at most).
+TOKEN_EXPIRY_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+TokenString = Annotated[str, StringConstraints(strict=True, min_length=1, pattern=r"^\S+$")]
+
+
 class TokenPair(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_at: dt.datetime
+    access_token: TokenString
+    refresh_token: TokenString
+    token_type: Literal["bearer"]
+    expires_at: AwareDatetime = Field(json_schema_extra={"pattern": TOKEN_EXPIRY_PATTERN})
+
+    @field_validator("expires_at", mode="before")
+    @classmethod
+    def strict_expiry(cls, value):
+        # Future-at-receipt is enforced by the client; the transport model stays clock-independent.
+        if isinstance(value, dt.datetime):
+            return value
+        if not isinstance(value, str) or not re.fullmatch(TOKEN_EXPIRY_PATTERN, value, re.ASCII):
+            raise ValueError("expires_at must be a timezone-aware RFC3339 timestamp")
+        return value
 
 
 class RefreshRequest(BaseModel):
@@ -44,15 +65,8 @@ class RefreshRequest(BaseModel):
 class MeResponse(BaseModel):
     id: str
     email: str
-    role: str
+    role: Role
     is_active: bool
-
-
-def _client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
 
 
 def _as_utc(value: dt.datetime) -> dt.datetime:
@@ -79,15 +93,17 @@ def _issue_tokens(user: User) -> TokenPair:
     return TokenPair(
         access_token=access,
         refresh_token=refresh,
+        token_type="bearer",
         expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(minutes=settings.jwt_access_token_expire_minutes),
     )
 
 
 @router.post("/login", response_model=TokenPair)
 async def login(body: LoginRequest, request: Request, session: AsyncSession = Depends(get_session)) -> TokenPair:
-    ip = _client_ip(request)
+    ip = resolve_client_ip(request)
     try:
-        _auth_limiter.check(f"login:{ip}:{body.email}")
+        account = hashlib.sha256(str(body.email).strip().casefold().encode()).hexdigest()
+        _auth_limiter.check(f"login:client:{ip}", f"login:account:{account}")
     except RateLimitedError:
         await audit.write_audit(
             session, action="LOGIN_RATE_LIMITED", entity="user", reason=f"ip={ip}", ip=ip
@@ -182,6 +198,6 @@ async def me(current_user: User = Depends(get_current_user)) -> MeResponse:
     return MeResponse(
         id=str(current_user.id),
         email=current_user.email,
-        role=current_user.role.value,
+        role=current_user.role,
         is_active=current_user.is_active,
     )

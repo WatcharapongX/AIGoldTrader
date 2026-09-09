@@ -1,0 +1,256 @@
+{
+  "symbol": "XAUUSD",
+  "as_of": "2026-09-09T12:40:01Z",
+  "market_as_of": "2026-09-09T12:40:00Z",
+  "news_engine_version": "news-1.2.0",
+  "config_id": "fa72e55dd1347a2b",
+  "fingerprint": "17774452891ef34a3cb978183056969198e62f33fd881b8fba0513ba5a7c4b49",
+  "source": "fixture_economic_v1",
+  "source_mode": "FIXTURE",
+  "calendar_state": "AVAILABLE",
+  "view": "current",
+  "events": [
+    {
+      "id": "067774e5-5fe3-50f5-a358-e2aee84fe774",
+      "provider_event_id": "WAGES",
+      "occurrence_key": "2026-09-09T12:30:00+00:00",
+      "event_name": "Average Hourly Earnings",
+      "event_code": "WAGES",
+      "group_id": "ed83c43c-c141-5239-bd43-9b7e8ed03cae",
+      "country": "US",
+      "currency": "USD",
+      "category": "EMPLOYMENT",
+      "impact": "HIGH",
+      "scheduled_at": "2026-09-09T12:30:00Z",
+      "actual": "0.4",
+      "forecast": "0.3",
+      "previous": "0.3",
+      "revised_previous": "0.3",
+      "previous_before_revision": null,
+      "unit": "PERCENT",
+      "status": "REVISED",
+      "source": "fixture_economic_v1",
+      "source_mode": "FIXTURE",
+      "updated_at": "2026-09-09T12:40:00Z",
+      "available_at": "2026-09-09T12:40:00Z",
+      "released_at": "2026-09-09T12:30:10Z",
+      "revision_version": 3,
+      "direction_rule": "HIGHER_IS_POSITIVE",
+      "field_provenance": {},
+      "field_conflicts": []
+    },
+    {
+      "id": "16facc48-a2c6-52ac-9772-ff6764550624",
+      "provider_event_id": "NFP",
+      "occurrence_key": "2026-09-09T12:30:00+00:00",
+      "event_name": "Non-Farm Payrolls",
+      "event_code": "NFP",
+      "group_id": "ed83c43c-c141-5239-bd43-9b7e8ed03cae",
+      "country": "US",
+      "currency": "USD",
+      "category": "EMPLOYMENT",
+      "impact": "HIGH",
+      "scheduled_at": "2026-09-09T12:30:00Z",
+      "actual": "250",
+      "forecast": "180",
+      "previous": "165",
+      "revised_previous": "100",
+      "previous_before_revision": null,
+      "unit": "THOUSANDS",
+      "status": "REVISED",
+      "source": "fixture_economic_v1",
+      "source_mode": "FIXTURE",
+      "updated_at": "2026-09-09T12:40:00Z",
+      "available_at": "2026-09-09T12:40:00Z",
+      "released_at": "2026-09-09T12:30:10Z",
+      "revision_version": 3,
+      "direction_rule": "HIGHER_IS_POSITIVE",
+      "field_provenance": {},
+      "field_conflicts": []
+    },
+    {
+      "id": "779d70ce-f3fa-501e-a26d-bc0e24c224a8",
+      "provider_event_id": "UNEMPLOYMENT",
+      "occurrence_key": "2026-09-09T12:30:00+00:00",
+      "event_name": "US Unemployment Rate",
+      "event_code": "UNEMPLOYMENT",
+      "group_id": "ed83c43c-c141-5239-bd43-9b7e8ed03cae",
+      "country": "US",
+      "currency": "USD",
+      "category": "LABOR",
+      "impact": "HIGH",
+      "scheduled_at": "2026-09-09T12:30:00Z",
+      "actual": "4.2",
+      "forecast": "4.0",
+      "previous": "4.0",
+      "revised_previous": "4.0",
+      "previous_before_revision": null,
+      "unit": "PERCENT",
+      "status": "REVISED",
+      "source": "fixture_economic_v1",
+      "source_mode": "FIXTURE",
+      "updated_at": "2026-09-09T12:40:00Z",
+      "available_at": "2026-09-09T12:40:00Z",
+      "released_at": "2026-09-09T12:30:10Z",
+      "revision_version": 3,
+      "direction_rule": "LOWER_IS_POSITIVE",
+      "field_provenance": {},
+      "field_conflicts": []
+    }
+  ],
+  "xauusd_relevance": {
+    "067774e5-5fe3-50f5-a358-e2aee84fe774": {
+      "affected_currency": "USD",
+      "score": 3,
+      "channels": [
+        "USD",
+        "INTEREST_RATES"
+      ]
+    },
+    "16facc48-a2c6-52ac-9772-ff6764550624": {
+      "affected_currency": "USD",
+      "score": 3,
+      "channels": [
+        "USD",
+        "INTEREST_RATES"
+      ]
+    },
+    "779d70ce-f3fa-501e-a26d-bc0e24c224a8": {
+      "affected_currency": "USD",
+      "score": 3,
+      "channels": [
+        "USD",
+        "INTEREST_RATES"
+      ]
+    }
+  },
+  "upcoming_events": [],
+  "active_group": {
+    "group_id": "ed83c43c-c141-5239-bd43-9b7e8ed03cae",
+    "event_ids": [
+      "067774e5-5fe3-50f5-a358-e2aee84fe774",
+      "16facc48-a2c6-52ac-9772-ff6764550624",
+      "779d70ce-f3fa-501e-a26d-bc0e24c224a8"
+    ],
+    "alignment": "CONFLICTING",
+    "bias": "CONFLICTING",
+    "score": "1.0",
+    "completeness": "COMPLETE",
+    "surprises": [
+      {
+        "event_id": "067774e5-5fe3-50f5-a358-e2aee84fe774",
+        "raw": "0.10000000",
+        "relative": "0.33333333",
+        "normalized": null,
+        "normalized_method": "UNAVAILABLE_NO_DISTRIBUTION",
+        "direction": "ABOVE",
+        "magnitude": "LARGE",
+        "usd_direction": "POSITIVE",
+        "revision_delta": "0.00000000",
+        "reason_code": "NUMERIC_SURPRISE"
+      },
+      {
+        "event_id": "16facc48-a2c6-52ac-9772-ff6764550624",
+        "raw": "70.00000000",
+        "relative": "0.38888889",
+        "normalized": null,
+        "normalized_method": "UNAVAILABLE_NO_DISTRIBUTION",
+        "direction": "ABOVE",
+        "magnitude": "LARGE",
+        "usd_direction": "POSITIVE",
+        "revision_delta": "-65.00000000",
+        "reason_code": "NUMERIC_SURPRISE"
+      },
+      {
+        "event_id": "779d70ce-f3fa-501e-a26d-bc0e24c224a8",
+        "raw": "0.20000000",
+        "relative": "0.05000000",
+        "normalized": null,
+        "normalized_method": "UNAVAILABLE_NO_DISTRIBUTION",
+        "direction": "ABOVE",
+        "magnitude": "SMALL",
+        "usd_direction": "NEGATIVE",
+        "revision_delta": "0.00000000",
+        "reason_code": "NUMERIC_SURPRISE"
+      }
+    ]
+  },
+  "active_event_id": "067774e5-5fe3-50f5-a358-e2aee84fe774",
+  "news_regime": "POST_NEWS_CONFIRMATION",
+  "macro_bias": "CONFLICTING",
+  "macro_strength": "MIXED",
+  "multiple_event_risk": false,
+  "reaction_windows": [
+    {
+      "seconds": 60,
+      "status": "READY",
+      "cutoff": "2026-09-09T12:31:00Z",
+      "price_before": "100",
+      "price_after": "100",
+      "return_percent": "0.00000000",
+      "move_atr": "0.00000000",
+      "range_atr": "7.00000000",
+      "tick_activity_ratio": "1.00000000",
+      "classification": "WHIPSAW"
+    },
+    {
+      "seconds": 300,
+      "status": "READY",
+      "cutoff": "2026-09-09T12:35:00Z",
+      "price_before": "100",
+      "price_after": "100",
+      "return_percent": "0.00000000",
+      "move_atr": "0.00000000",
+      "range_atr": "7.00000000",
+      "tick_activity_ratio": "1.00000000",
+      "classification": "WHIPSAW"
+    },
+    {
+      "seconds": 900,
+      "status": "WAITING",
+      "cutoff": "2026-09-09T12:45:00Z",
+      "price_before": null,
+      "price_after": null,
+      "return_percent": null,
+      "move_atr": null,
+      "range_atr": null,
+      "tick_activity_ratio": null,
+      "classification": "UNCONFIRMED"
+    }
+  ],
+  "reaction_state": "WHIPSAW",
+  "spread_state": "UNAVAILABLE",
+  "baseline_spread": null,
+  "current_spread": null,
+  "spread_ratio": null,
+  "volatility_state": "EXTREME",
+  "structure_confirmation": {
+    "status": "STRUCTURE_UNAVAILABLE",
+    "upstream_input_id": null,
+    "upstream_config_id": null,
+    "upstream_algorithm_version": null,
+    "upstream_as_of": null,
+    "upstream_window_start": null,
+    "absence_means": "NOT_INCLUDED_UNKNOWN",
+    "references": {}
+  },
+  "trade_policy_state": "RESTRICTED",
+  "strategy_eligibility": {
+    "TREND_CONTINUATION": "CAUTION",
+    "MEAN_REVERSION": "CAUTION",
+    "BREAKOUT": "CAUTION",
+    "NEWS_MOMENTUM": "WAITING",
+    "NEWS_REVERSAL": "WAITING"
+  },
+  "reason_codes": [
+    "DEMO_NEWS_NOT_REAL_RELEASE",
+    "STRUCTURE_UNAVAILABLE",
+    "CONFLICTING_RELEASE"
+  ],
+  "market_source": "simulated",
+  "release_status": "RELEASED",
+  "data_quality": "COMPLETE",
+  "generated_at": "2026-09-09T12:50:00Z",
+  "served_at": "2026-09-09T12:50:00Z",
+  "cache_age_seconds": 0.0
+}

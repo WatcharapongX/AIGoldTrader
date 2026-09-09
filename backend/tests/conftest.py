@@ -97,13 +97,19 @@ def auth_headers(client: TestClient, admin_user) -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def isolate_settings(monkeypatch: pytest.MonkeyPatch):
+def isolate_settings(monkeypatch: pytest.MonkeyPatch, request):
     """ตั้งค่า test-safe settings และเคลียร์ cache ทุก test."""
     monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-unit-tests-only")
+    if request.node.get_closest_marker("live_external") is None:
+        monkeypatch.setenv("MARKET_DATA_PROVIDER", "simulated")
     monkeypatch.setenv("TRADING_MODE", "PAPER")
     monkeypatch.setenv("LIVE_AUTO_TRADING", "false")
     monkeypatch.setenv("REDIS_ENABLED", "false")
     monkeypatch.setenv("DATABASE_URL_OVERRIDE", "sqlite+aiosqlite:///:memory:")
+    from app.api.auth import _auth_limiter
+
+    _auth_limiter.reset()
     get_settings.cache_clear()
     yield
+    _auth_limiter.reset()
     get_settings.cache_clear()

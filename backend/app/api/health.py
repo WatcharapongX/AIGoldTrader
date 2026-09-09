@@ -2,8 +2,10 @@
 
 import logging
 import time
+from typing import Literal
 
 from fastapi import APIRouter, Response
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from app.core.config import get_settings
@@ -16,7 +18,27 @@ router = APIRouter(tags=["health"])
 _started_at = time.monotonic()
 
 
-@router.get("/healthz")
+class HealthResponse(BaseModel):
+    status: Literal["ok"]
+    app: str
+    env: str
+    trading_mode: str
+    live_auto_trading: bool
+    uptime_seconds: float
+
+
+class ReadyChecks(BaseModel):
+    database: bool
+    redis: bool | None
+
+
+class ReadyResponse(BaseModel):
+    status: Literal["ready", "not_ready"]
+    checks: ReadyChecks
+    redis_enabled: bool
+
+
+@router.get("/healthz", response_model=HealthResponse)
 async def healthz() -> dict:
     """Process-level health — ตอบเสมอเมื่อ process ยังทำงาน."""
     settings = get_settings()
@@ -30,7 +52,7 @@ async def healthz() -> dict:
     }
 
 
-@router.get("/readyz")
+@router.get("/readyz", response_model=ReadyResponse, responses={503: {"model": ReadyResponse}})
 async def readyz(response: Response) -> dict:
     """Readiness — DB ต้องพร้อมเสมอ, Redis ล่ม = degraded (ยัง ready แต่รายงาน)."""
     db_ok = False

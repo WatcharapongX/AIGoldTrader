@@ -184,3 +184,69 @@ this gate review does not claim they exist or implement a new management feature
 3. Rate limit: auth endpoints เข้มที่สุด; trading endpoints ตาม config
 4. ห้าม endpoint ใดคืน secret (credentials, keys) — มี test ตรวจใน PHASE 12
 5. Versioning: ยังไม่มี `/v1` จนกว่าจะมี breaking change ครั้งแรก (บันทึกในเอกสารนี้เมื่อเกิด)
+
+## Phase 1.1 implemented response contracts (2026-09-09)
+
+Backend OpenAPI/Pydantic is authoritative for implemented endpoint responses. The rest of this document retains
+planned future endpoints; this correction does not implement them.
+
+| Endpoint | Response model | Actual fields |
+|---|---|---|
+| GET /api/auth/me | MeResponse | id:string, email:string, role:ADMIN/TRADER/VIEWER, is_active:boolean; all required/non-null |
+| POST /api/auth/login, /api/auth/refresh | TokenPair | access_token/refresh_token:nonempty whitespace-free strings; token_type:literal bearer; expires_at:timezone-aware RFC3339; all required |
+| GET /api/healthz (+ /healthz alias) | HealthResponse | status:ok, app:string, env:string, trading_mode:string, live_auto_trading:boolean, uptime_seconds:number; all required |
+| GET /api/readyz (+ /readyz alias) | ReadyResponse | status:ready/not_ready, checks:{database:boolean, redis:boolean|null}, redis_enabled:boolean; all required |
+
+MeResponse intentionally does not contain mfa_enabled, last_login_at or created_at. Frontend User aliases MeResponse.
+Readiness uses HTTP 503 with the same ReadyResponse when the database is unavailable; disabled Redis is null,
+not false. Existing API client non-2xx responses still reject; parseReady covers both readiness payload statuses.
+
+Run from backend: python -m scripts.export_api_contract. This small dependency-free exporter produces
+frontend/src/types/api.generated.ts and frontend/tests/fixtures/api-contract.json from selected actual OpenAPI
+responses and referenced models. python -m scripts.export_api_contract --check detects stale artifacts;
+the full backend test suite also checks exact regeneration. Review generated diffs when changing a response.
+
+The frontend generic transport returns unknown. Endpoint methods validate /auth/me, tokens, health and readiness
+before use; malformed token responses cannot be written to browser storage. Parsers accept additive fields and
+validate required fields, nullability, role/status values and primitive types. Error text never embeds the invalid
+response body. Generated types give compile-time alignment; OpenAPI-derived fixture/mutation tests verify runtime
+parsers and API methods. No frontend type assertion substitutes for endpoint validation.
+
+Incoming X-Correlation-ID is accepted only for a safe ASCII identifier of 1..64 characters starting with an
+alphanumeric character; '.', '_' and '-' may follow. Otherwise the server supplies a UUID hex replacement.
+The response includes the canonical ID for ordinary requests and controlled errors. Invalid IDs do not produce 500.
+Login rate limiting returns the existing generic 429/RATE_LIMITED response; no account-existence detail is added.
+
+### HARD-R02 corrective semantics
+
+The TokenPair OpenAPI schema requires all four fields. Token strings use minLength=1 and a no-whitespace pattern;
+token_type is the exact lowercase literal bearer. Datetime strings require uppercase T, seconds, optional 1..6
+fractional digits and Z or a numeric timezone offset; invalid calendar values and naive/numeric dates are rejected.
+Backend serialization supplies an aware datetime; the response model remains independent of the receiver's clock.
+The frontend validates the calendar/offset explicitly and requires the expiry instant to be strictly later than
+Date.now() at acceptance (conservative millisecond precision). There is no permissive Date.parse fallback.
+
+Malformed login/refresh/recovery payloads raise ApiContractError before token/cookie writes. Existing stored values
+are preserved and recovery does not mark the user authenticated. Genuine rejected/expired refresh sessions retain
+the existing session-clearing policy. Generated types/fixtures must be regenerated with the existing exporter.
+
+
+## Implemented Phase 2 market protocol (2026-09-09)
+
+The current implementation adds authenticated symbol CRUD/read, market status/quote and paginated
+candles. /ws/market uses allowlisted Origin plus a validated auth first frame; query tokens are rejected.
+Canonical MarketMessage/WS command schemas are exported by the existing contract generator.
+All market timestamps serialize UTC Z and Decimal values serialize strings. The Phase 2 protocol
+in docs/06-market-data.md is authoritative over the earlier conceptual WS examples in section 3.
+
+## Phase 3.5 authenticated economic APIs
+GET /api/calendar/economic: bounded start/end (max7days), as_of, currency, impact, category,
+status=upcoming|released, relevant_only. GET /api/news/events/{event_id}: revision history at as_of.
+GET /api/news/context: as_of, fixture-only view=current|pre|release|post|none.
+Pydantic/exported TypeScript+JSONSchema/runtime validation share the same contract.
+GET /api/analysis/structure adds retention plus generated_at/served_at/cache_age_seconds;
+as_of remains deterministic market cutoff. No new news WS is required; existing market WS is reused.
+See [economic-news.md](economic-news.md) for field semantics, no-lookahead and source labels.
+
+## Phase 4 analysis-only API
+Authenticated GET /api/strategy/context and /api/trade-plan/current return the same current evaluation envelope. Registry/profiles, evaluation history, immutable candidate history and explicit candidate transitions have separate read endpoints. No order/write endpoint. Historical candidates must be interpreted with transitions and expiry. See [contracts](09-strategy-engine.md).

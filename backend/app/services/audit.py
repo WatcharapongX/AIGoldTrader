@@ -5,7 +5,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.correlation import get_correlation_id
+from app.core.correlation import get_correlation_id, normalize_correlation_id
 from app.core.masking import mask_payload
 from app.models import AuditLog
 
@@ -36,7 +36,7 @@ async def write_audit(
         after=mask_payload(after),
         reason=reason,
         source=source,
-        correlation_id=correlation_id or get_correlation_id(),
+        correlation_id=normalize_correlation_id(correlation_id or get_correlation_id()),
         ip=ip,
     )
     session.add(entry)

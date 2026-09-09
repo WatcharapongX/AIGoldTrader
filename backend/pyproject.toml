@@ -13,15 +13,17 @@ dependencies = [
     "psycopg[binary]>=3.2,<4.0",
     "aiosqlite>=0.20,<1.0",
     "redis>=5.2,<6.0",
+    "tzdata>=2025.1",
+    "httpx>=0.28,<1.0",
     "pyjwt>=2.10,<3.0",
     "passlib>=1.7.4,<2.0",
 ]
 
 [project.optional-dependencies]
+mt5 = ["MetaTrader5>=5.0,<6; sys_platform == 'win32'"]
 dev = [
     "pytest>=8.3,<9.0",
     "pytest-asyncio>=0.24,<1.0",
-    "httpx>=0.28,<1.0",
     "fakeredis>=2.26,<3.0",
     "ruff>=0.8,<1.0",
     "mypy>=1.13,<2.0",
@@ -60,7 +62,12 @@ plugins = []
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-q"
+addopts = '-q -m "not live_external"'
 markers = [
+    "live_external: explicit acceptance against a real configured MT5 terminal (never offline fixtures)",
     "integration: opt-in tests against an explicitly configured disposable PostgreSQL database",
 ]
+
+[[tool.mypy.overrides]]
+module = ["app.services.news.*", "app.api.news", "app.services.strategy.*", "app.api.strategy", "app.api.dashboard"]
+check_untyped_defs = true

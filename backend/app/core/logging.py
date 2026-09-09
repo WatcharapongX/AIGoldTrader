@@ -3,6 +3,8 @@
 import json
 import logging
 import sys
+import traceback
+from pathlib import Path
 
 from app.core.correlation import get_correlation_id
 
@@ -14,13 +16,33 @@ _RESERVED = {
 }
 
 
+def safe_exception(exc: BaseException) -> dict:
+    """Keep type/code/stack locations, never driver text, SQL, parameters or locals."""
+    details = {
+        "error_type": type(exc).__name__,
+        "stack": [
+            {"file": Path(frame.filename).name, "line": frame.lineno, "function": frame.name}
+            for frame in traceback.extract_tb(exc.__traceback__)
+        ],
+    }
+    sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+    if isinstance(sqlstate, str) and len(sqlstate) == 5 and sqlstate.isalnum():
+        details["sqlstate"] = sqlstate
+    return details
+
+
+class SafeFormatter(logging.Formatter):
+    def formatException(self, ei) -> str:
+        return json.dumps(safe_exception(ei[1]), ensure_ascii=False)
+
+
 class CorrelationFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.correlation_id = get_correlation_id()  # type: ignore[attr-defined]
         return True
 
 
-class JsonFormatter(logging.Formatter):
+class JsonFormatter(SafeFormatter):
     def format(self, record: logging.LogRecord) -> str:
         payload = {
             "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
@@ -44,11 +66,13 @@ def setup_logging(level: str = "INFO", log_format: str = "json") -> None:
         handler.setFormatter(JsonFormatter())
     else:
         handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s [%(correlation_id)s] %(name)s %(message)s")
+            SafeFormatter("%(asctime)s %(levelname)s [%(correlation_id)s] %(name)s %(message)s")
         )
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level.upper())
+    # SQL echo/debug rows can contain sensitive values even with parameter hiding.
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     for noisy in ("uvicorn.access", "uvicorn.error", "uvicorn"):
         logging.getLogger(noisy).handlers = []
         logging.getLogger(noisy).propagate = True

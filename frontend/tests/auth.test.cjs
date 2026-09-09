@@ -11,7 +11,7 @@ function load(file, overrides = {}, mocks = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   });
   const exports = {};
-  const context = { exports, require: name => mocks[name] || require(name), process,
+  const context = { exports, require: name => mocks[name] || (name === '@/lib/contracts' ? load('lib/contracts.ts') : require(name)), process,
     Headers, Event, ...overrides };
   vm.runInNewContext(outputText, context, { filename: file });
   return exports;
@@ -32,7 +32,7 @@ test('simultaneous 401 requests rotate once and retry with the new token', async
     if (url.endsWith('/auth/refresh')) {
       refreshes++;
       await new Promise(resolve => setImmediate(resolve));
-      return response(200, { access_token: 'new', refresh_token: 'refresh-new' });
+      return response(200, { access_token: 'new', refresh_token: 'refresh-new', token_type: 'bearer', expires_at: '2030-01-01T00:00:00Z' });
     }
     return options.headers.get('Authorization') === 'Bearer new'
       ? response(200, { ok: true }) : response(401, {});

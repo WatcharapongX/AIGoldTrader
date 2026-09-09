@@ -183,3 +183,49 @@ Environment config แยกกันผ่าน `.env` ต่อ environment (
 - Broker credentials เข้ารหัส (AES-GCM ด้วย key จาก env) — decrypt เฉพาะใน broker service, ไม่ออกทาง API ใด ๆ
 - Masking ของ sensitive field ใน log; CORS allow-list; input validation ด้วย Pydantic ทุก endpoint
 - Audit ทุก action สำคัญ (docs/01-requirements.md FR-SE-03)
+
+### Phase 1.1 targeted security hardening (2026-09-09)
+
+Phase 1 passed Independent Re-review WITH MINOR ISSUES; P1-001 is independently verified.
+The user requires preventive foundation hardening before Phase 2. This does not add trading features.
+
+- Login identity defaults to the transport peer. Supported Uvicorn launch commands explicitly use
+  --no-proxy-headers; otherwise the server can rewrite the peer before application trust checks.
+- TRUST_PROXY=false ignores X-Forwarded-For, Forwarded and X-Real-IP. With TRUST_PROXY=true,
+  TRUSTED_PROXY_CIDRS must contain explicit bounded IP networks (no wildcard/default route).
+  Only a peer inside that boundary may supply one valid XFF chain, processed right-to-left until the first
+  untrusted hop. Duplicate, malformed, oversized or excessive-hop chains fall back to the peer.
+  Forwarded/X-Real-IP never participate. The trusted proxy must overwrite or correctly append the transport
+  client address; a proxy that passes attacker XFF unchanged is not a valid trust boundary.
+- Every login attempt consumes both a resolved-client budget and a normalized account budget (trim/casefold,
+  SHA-256 key; this normalization affects throttling only, not user lookup). This prevents changing accounts
+  or forwarded headers from resetting client protection and prevents one account evading limits across peers.
+- Single-process sliding windows last 60 seconds. Each deque is bounded by RATE_LIMIT_AUTH_PER_MINUTE;
+  total entries by RATE_LIMIT_MAX_KEYS. Expired identities are removed lazily on traffic or explicit cleanup.
+  Capacity fails closed instead of evicting active protections. Restart resets local state; multiple instances
+  need a future shared limit design. Shared NAT users and targeted account throttling may temporarily share
+  lockout; defaults are intentionally conservative. Redis remains optional.
+- Correlation IDs use one helper: ASCII [A-Za-z0-9][A-Za-z0-9._-]{0,63}. Missing/invalid IDs are replaced
+  with UUID hex. Middleware, response headers, audit writer and structured log context use this identity.
+  Request context is reset after completion, including controlled exception responses.
+- SQLAlchemy parameter hiding is enabled; SQL engine logging stays WARNING even under app DEBUG.
+  Exception rendering preserves type, code locations and safe SQLSTATE, not exception/driver text, SQL
+  parameters, locals or request bodies. HTTP logs retain operation, method, route template and correlation ID.
+  JSON logs include stack locations; console retains operation/type/correlation without raw driver details.
+- P2-R01 browser token storage and P3-001 ordinary failed-login auditing remain deferred. Existing limited-login
+  audit behavior stays intact. HttpOnly/BFF, broker execution, distributed limiting and Phase 2 are not added.
+
+
+## Phase 2 native implementation — provisional (2026-09-09)
+
+The current user authorization permits Phase 2 before final Phase 1.1 review. Market data now flows
+through ReplayProvider, validated M1/higher aggregation, native PostgreSQL transaction, bounded
+LocalMarketBus and authenticated /ws/market to the Trading screen. The worker starts lazily and
+does not make market availability a liveness dependency. Redis and TimescaleDB diagrams above
+remain the distributed deployment target; native DEV requires neither. See docs/06-market-data.md.
+Phase 1.1 + Phase 2 combined independent review is pending. Phase 3 must not start.
+
+## Phase 3.5 economic context extension (2026-09-09)
+Authenticated REST consumers share one native NewsService worker and canonical economic revision repository.
+Pure point-in-time news engine consumes existing market/Phase3 data; no strategy or order path.
+See [economic-news.md](economic-news.md) for boundaries and fixture/live separation.
