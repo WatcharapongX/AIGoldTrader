@@ -12,7 +12,17 @@ export class WsClient {
   private intentionalClose = false;
 
   constructor(baseUrl?: string) {
-    this.url = baseUrl || process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
+    if (baseUrl) {
+      this.url = baseUrl;
+    } else if (process.env.NEXT_PUBLIC_WS_URL) {
+      this.url = process.env.NEXT_PUBLIC_WS_URL;
+    } else if (typeof window !== 'undefined') {
+      const host = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.url = `${protocol}//${host}:8000/ws`;
+    } else {
+      this.url = 'ws://127.0.0.1:8000/ws';
+    }
   }
 
   connect(): void {

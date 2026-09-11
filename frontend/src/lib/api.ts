@@ -24,7 +24,7 @@ export class ApiClient {
   private refreshPromise: Promise<string> | null = null;
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    this.baseUrl = baseUrl || process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:8000/api');
   }
 
   private refreshAccessToken(): Promise<string> {

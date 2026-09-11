@@ -4,6 +4,16 @@ import type { MarketMessage, Timeframe } from '@/types/market.generated';
 export type ConnectionState = 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'STALE' | 'DISCONNECTED' | 'ERROR';
 export const reconnectDelay = (attempt: number) => Math.min(1000 * 2 ** attempt, 30000);
 
+function defaultMarketWsUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) return `${process.env.NEXT_PUBLIC_WS_URL}/market`;
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${host}:8000/ws/market`;
+  }
+  return 'ws://127.0.0.1:8000/ws/market';
+}
+
 /** A connection owns its socket, timers and subscriptions; resubscribe always requests a fresh snapshot. */
 export class MarketConnection {
   private socket: WebSocket | null = null;
@@ -21,7 +31,7 @@ export class MarketConnection {
     private onState: (state: ConnectionState) => void,
     private symbol: string,
     private timeframe: Timeframe,
-    private url = (process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws') + '/market',
+    private url = defaultMarketWsUrl(),
   ) {}
 
   start() { this.stopped = false; void this.connect(); }
