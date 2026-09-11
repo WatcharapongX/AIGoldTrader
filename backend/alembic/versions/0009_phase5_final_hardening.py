@@ -1,8 +1,12 @@
-"""Phase 5 Final Hardening: singleton policy index, legacy decision repair, kill switch timestamp repair, and audit safety."""
+"""Phase 5 Final Hardening: singleton policy index, legacy decision repair,
+kill switch timestamp repair, and audit safety.
+"""
 
 import datetime as dt
 import json
+
 import sqlalchemy as sa
+
 from alembic import context, op
 
 revision = "0009_phase5_final_hardening"
@@ -117,8 +121,10 @@ def upgrade():
             if not acc_exists:
                 bind.execute(
                     sa.text(
-                        "INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, base_currency, is_active, created_at, updated_at) "
-                        "VALUES ('a0000000-0000-0000-0000-000000000001', :user_id, 'default_paper_account', 'PAPER', 10000.00, 'USD', true, :now, :now) "
+                        "INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, "
+                        "base_currency, is_active, created_at, updated_at) "
+                        "VALUES ('a0000000-0000-0000-0000-000000000001', :user_id, 'default_paper_account', "
+                        "'PAPER', 10000.00, 'USD', true, :now, :now) "
                         "ON CONFLICT (id) DO NOTHING"
                     ),
                     {"user_id": admin_user_id, "now": now},
@@ -146,11 +152,12 @@ def upgrade():
                 }
                 bind.execute(
                     sa.text(
-                        "INSERT INTO account_snapshots (id, account_id, balance, equity, free_margin, daily_realized_pnl, "
-                        "weekly_realized_pnl, peak_equity, open_risk_pct, reserved_risk_pct, consecutive_losses, "
-                        "trading_mode, source, as_of, payload) "
-                        "VALUES ('snap_default_paper_account_init', 'default_paper_account', 10000.00, 10000.00, 10000.00, "
-                        "0.00, 0.00, 10000.00, 0.0000, 0.0000, 0, 'PAPER', 'CONFIGURED_PAPER', :now, :payload) "
+                        "INSERT INTO account_snapshots (id, account_id, balance, equity, free_margin, "
+                        "daily_realized_pnl, weekly_realized_pnl, peak_equity, open_risk_pct, "
+                        "reserved_risk_pct, consecutive_losses, trading_mode, source, as_of, payload) "
+                        "VALUES ('snap_default_paper_account_init', 'default_paper_account', 10000.00, "
+                        "10000.00, 10000.00, 0.00, 0.00, 10000.00, 0.0000, 0.0000, 0, 'PAPER', "
+                        "'CONFIGURED_PAPER', :now, :payload) "
                         "ON CONFLICT (id) DO NOTHING"
                     ),
                     {"now": now, "payload": json.dumps(snap_payload)},

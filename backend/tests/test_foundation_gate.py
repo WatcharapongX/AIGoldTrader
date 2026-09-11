@@ -37,10 +37,28 @@ def test_migration_upgrade_downgrade_upgrade(tmp_path):
         "risk_reservations",
         "kill_switch_records",
         "data_health_records",
+        "paper_account_states",
     }
     try:
         for target in ("head", "base", "head"):
             action = "downgrade" if target == "base" else "upgrade"
+            if target == "base":
+                # Sol High P1-032: Downgrade refuses when authority rows exist.
+                # Explicit purge outside downgrade required.
+                import sqlalchemy as sa
+
+                with engine.begin() as conn:
+                    for t in (
+                        "paper_account_states",
+                        "data_health_records",
+                        "risk_decisions",
+                        "risk_reservations",
+                        "kill_switch_records",
+                        "account_snapshots",
+                        "symbol_specifications",
+                        "risk_policies",
+                    ):
+                        conn.execute(sa.text(f"DELETE FROM {t}"))  # noqa: S608
             result = subprocess.run(  # noqa: S603 — fixed executable and migration args, isolated temp DB
                 [sys.executable, "-m", "alembic", action, target],
                 cwd=backend,

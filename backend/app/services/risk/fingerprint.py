@@ -19,6 +19,31 @@ from app.services.risk.domain import (
 from app.services.strategy.domain import SetupCandidate, TradePlanSuggestion
 
 
+def compute_evaluation_intent_identity(
+    candidate: SetupCandidate,
+    plan: TradePlanSuggestion,
+    profile_id: str,
+    account_id: str,
+    requested_risk_pct: Decimal,
+) -> str:
+    """Computes a stable identity for the evaluation intent, independent of live market jitter."""
+    intent_obj = {
+        "account_id": account_id,
+        "candidate_id": candidate.id,
+        "strategy_id": candidate.strategy_id,
+        "symbol": candidate.symbol,
+        "profile_id": profile_id,
+        "plan_id": plan.id,
+        "direction": plan.direction,
+        "entry_lower": format(Decimal(str(plan.entry_lower)), ".5f"),
+        "entry_upper": format(Decimal(str(plan.entry_upper)), ".5f"),
+        "stop_loss": format(Decimal(str(plan.stop_loss)), ".5f"),
+        "requested_risk_pct": format(requested_risk_pct, ".4f"),
+    }
+    serialized = json.dumps(intent_obj, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def compute_risk_dependency_fingerprint(
     candidate: SetupCandidate,
     plan: TradePlanSuggestion,
@@ -40,7 +65,7 @@ def compute_risk_dependency_fingerprint(
 
     Any change to candidate geometry, account snapshot, quote, news status, Kill Switch state,
     symbol spec, policy version, portfolio budget, or temporal safety validity alters the fingerprint,
-    guaranteeing safe re-evaluation.
+    guaranteeing safe re-evaluation. Volatile quote arrival microsecond jitter is excluded.
     """
     quote_payload = None
     if quote:
@@ -50,15 +75,22 @@ def compute_risk_dependency_fingerprint(
             "bid": format(Decimal(str(quote.bid)), ".5f"),
             "ask": format(Decimal(str(quote.ask)), ".5f"),
             "spread": format(Decimal(str(quote.spread)), ".5f"),
-            "timestamp": quote.timestamp.isoformat(),
             "is_stale": quote_is_stale,
         }
 
     news_payload = None
     if news_prov:
+        prov = getattr(news_prov, "provider", "") or getattr(news_prov, "source", "")
+        rev = getattr(news_prov, "revision_id", "") or (
+            str(getattr(news_prov, "revision_version", ""))
+            if getattr(news_prov, "revision_version", None) is not None
+            else ""
+        )
         news_payload = {
-            "provider": getattr(news_prov, "provider", ""),
-            "revision_id": getattr(news_prov, "revision_id", ""),
+            "provider": prov,
+            "source": getattr(news_prov, "source", "") or prov,
+            "revision_id": rev,
+            "revision_version": getattr(news_prov, "revision_version", None),
             "news_state": news_prov.news_state,
             "in_blackout": news_prov.in_blackout,
             "in_pre_news_window": news_prov.in_pre_news_window,
@@ -67,14 +99,21 @@ def compute_risk_dependency_fingerprint(
             "description_th": news_prov.description_th,
             "events": [
                 {
-                    "provider": getattr(e, "provider", ""),
+                    "provider": getattr(e, "provider", "") or getattr(e, "source", ""),
+                    "source": getattr(e, "source", "") or getattr(e, "provider", ""),
                     "event_id": e.event_id,
                     "event_name": e.event_name,
                     "currency": e.currency,
                     "impact": e.impact,
                     "scheduled_at": e.scheduled_at.isoformat(),
                     "available_at": e.available_at.isoformat() if e.available_at is not None else None,
-                    "revision_id": getattr(e, "revision_id", ""),
+                    "revision_id": getattr(e, "revision_id", "")
+                    or (
+                        str(getattr(e, "revision_version", ""))
+                        if getattr(e, "revision_version", None) is not None
+                        else ""
+                    ),
+                    "revision_version": getattr(e, "revision_version", None),
                     "window_state": e.window_state,
                 }
                 for e in news_prov.events
@@ -105,10 +144,12 @@ def compute_risk_dependency_fingerprint(
         "free_margin": format(account.free_margin, ".2f") if account.free_margin is not None else None,
         "daily_realized_pnl": format(account.daily_realized_pnl, ".2f"),
         "weekly_realized_pnl": format(account.weekly_realized_pnl, ".2f"),
+        "floating_pnl": format(account.floating_pnl, ".2f") if account.floating_pnl is not None else None,
         "peak_equity": format(account.peak_equity, ".2f"),
         "open_risk_pct": format(account.open_risk_pct, ".4f"),
         "reserved_risk_pct": format(account.reserved_risk_pct, ".4f"),
         "consecutive_losses": account.consecutive_losses,
+        "last_loss_at": account.last_loss_at.isoformat() if account.last_loss_at else None,
         "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
         "cooldown_active": cooldown_active,
         "open_positions_count": account.open_positions_count,

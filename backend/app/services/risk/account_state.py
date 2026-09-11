@@ -1,8 +1,10 @@
 """Phase 5 Authoritative Paper Account State Service.
 
-Maintains authoritative balance, equity, and loss metrics without fabricating trading PnL.
-Emits snapshot with source PAPER_ACCOUNT_STATE.
-All GET endpoints remain 100% read-only.
+Maintains authoritative balance, equity, free_margin, and loss metrics without fabricating trading PnL.
+Uses persistent PaperAccountStateRecord as the canonical economic source of truth.
+AccountSnapshot represents an immutable observation/audit of that state.
+Free margin is strictly preserved; state_version increments only on economic state change.
+Freshness separates state_updated_at from observation time (no timestamp laundering).
 """
 
 import datetime as dt
@@ -14,19 +16,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
 from app.models.account import Account
-from app.models.risk import AccountSnapshotRecord
+from app.models.risk import AccountSnapshotRecord, PaperAccountStateRecord
 from app.services.risk.domain import AccountSnapshot
+
+
+def _to_utc(val: dt.datetime | None) -> dt.datetime | None:
+    if val is None:
+        return None
+    return val if val.tzinfo is not None else val.replace(tzinfo=dt.UTC)
 
 
 class PaperAccountStateService:
     @staticmethod
-    async def refresh_paper_account_snapshot(
+    async def get_or_create_paper_state(
         session: AsyncSession,
         account_id: str = "default_paper_account",
-        force: bool = False,
         now: dt.datetime | None = None,
-    ) -> AccountSnapshot:
-        as_of = now or dt.datetime.now(dt.UTC)
+    ) -> PaperAccountStateRecord:
+        """Retrieves or creates canonical PaperAccountStateRecord."""
+        effective_now = now or dt.datetime.now(dt.UTC)
 
         # 1. Look up authoritative Account
         try:
@@ -38,8 +46,20 @@ class PaperAccountStateService:
         if acc_row is None:
             raise NotFoundError(f"Account '{account_id}' not found")
 
-        # 2. Get newest existing snapshot if any
-        latest_row = (
+        canonical_id = str(acc_row.id) if account_id == str(acc_row.id) else account_id
+
+        # 2. Query PaperAccountStateRecord
+        state_row = await session.get(PaperAccountStateRecord, canonical_id)
+        if state_row is None and canonical_id != account_id:
+            state_row = await session.get(PaperAccountStateRecord, account_id)
+        if state_row is None and acc_row.name:
+            state_row = await session.get(PaperAccountStateRecord, acc_row.name)
+
+        if state_row is not None:
+            return state_row
+
+        # 3. Check for newest existing AccountSnapshotRecord to bootstrap state
+        latest_snap = (
             await session.scalars(
                 select(AccountSnapshotRecord)
                 .where(
@@ -52,88 +72,200 @@ class PaperAccountStateService:
             )
         ).first()
 
-        balance = Decimal(str(acc_row.starting_balance))
-        equity = balance
-        peak_equity = balance
-        daily_pnl = Decimal("0.00")
-        weekly_pnl = Decimal("0.00")
-        consecutive_losses = 0
-        cooldown_until = None
-        last_loss_at = None
-        open_risk_pct = Decimal("0.0000")
-        reserved_risk_pct = Decimal("0.0000")
-        floating_pnl = Decimal("0.00")
-        open_positions_count = 0
-        state_version = 1
+        start_bal = Decimal(str(acc_row.starting_balance)) if acc_row.starting_balance else Decimal("10000.00")
+        bal = Decimal(str(latest_snap.balance)) if latest_snap is not None else start_bal
+        eq = Decimal(str(latest_snap.equity)) if latest_snap is not None else bal
+        fm = (
+            Decimal(str(latest_snap.free_margin))
+            if latest_snap is not None and latest_snap.free_margin is not None
+            else eq
+        )
+        peq = Decimal(str(latest_snap.peak_equity)) if latest_snap is not None else max(bal, eq)
+        dpnl = Decimal(str(latest_snap.daily_realized_pnl)) if latest_snap is not None else Decimal("0.00")
+        wpnl = Decimal(str(latest_snap.weekly_realized_pnl)) if latest_snap is not None else Decimal("0.00")
+        orp = Decimal(str(latest_snap.open_risk_pct)) if latest_snap is not None else Decimal("0.0000")
+        rrp = Decimal(str(latest_snap.reserved_risk_pct)) if latest_snap is not None else Decimal("0.0000")
+        cl = latest_snap.consecutive_losses if latest_snap is not None else 0
+        state_ver = 1
+        fl_pnl = Decimal("0.00")
+        pos_count = 0
+        cd_until = None
+        last_loss = None
+        state_updated = _to_utc(latest_snap.as_of) if latest_snap is not None else effective_now
 
-        if latest_row is not None:
-            balance = Decimal(str(latest_row.balance))
-            equity = Decimal(str(latest_row.equity))
-            peak_equity = Decimal(str(latest_row.peak_equity))
-            daily_pnl = Decimal(str(latest_row.daily_realized_pnl))
-            weekly_pnl = Decimal(str(latest_row.weekly_realized_pnl))
-            consecutive_losses = latest_row.consecutive_losses
-            open_risk_pct = Decimal(str(latest_row.open_risk_pct))
-            reserved_risk_pct = Decimal(str(latest_row.reserved_risk_pct))
-            payload = latest_row.payload or {}
-            if payload.get("cooldown_until"):
-                cooldown_until = dt.datetime.fromisoformat(payload["cooldown_until"])
-            if payload.get("last_loss_at"):
-                last_loss_at = dt.datetime.fromisoformat(payload["last_loss_at"])
+        if latest_snap is not None and latest_snap.payload:
+            payload = latest_snap.payload
+            if payload.get("state_version"):
+                state_ver = int(payload["state_version"])
             if payload.get("floating_pnl") is not None:
-                floating_pnl = Decimal(str(payload["floating_pnl"]))
+                fl_pnl = Decimal(str(payload["floating_pnl"]))
             if payload.get("open_positions_count") is not None:
-                open_positions_count = int(payload["open_positions_count"])
-            if payload.get("state_version") is not None:
-                state_version = int(payload["state_version"])
+                pos_count = int(payload["open_positions_count"])
+            if payload.get("cooldown_until"):
+                cd_until = dt.datetime.fromisoformat(payload["cooldown_until"])
+            if payload.get("last_loss_at"):
+                last_loss = dt.datetime.fromisoformat(payload["last_loss_at"])
 
-            # Reuse unexpired snapshot if not forced (SOL-P5-P1-030, 031)
-            latest_as_of = latest_row.as_of if latest_row.as_of.tzinfo else latest_row.as_of.replace(tzinfo=dt.UTC)
-            if not force and (as_of - latest_as_of).total_seconds() <= 60:
-                return AccountSnapshot(
-                    id=latest_row.id,
-                    account_id=latest_row.account_id,
-                    balance=balance,
-                    equity=equity,
-                    free_margin=latest_row.free_margin or equity,
-                    daily_realized_pnl=daily_pnl,
-                    weekly_realized_pnl=weekly_pnl,
-                    floating_pnl=floating_pnl,
-                    peak_equity=peak_equity,
-                    open_risk_pct=open_risk_pct,
-                    reserved_risk_pct=reserved_risk_pct,
-                    consecutive_losses=consecutive_losses,
-                    last_loss_at=last_loss_at,
-                    cooldown_until=cooldown_until,
-                    open_positions_count=open_positions_count,
-                    state_version=state_version,
-                    trading_mode=latest_row.trading_mode,  # type: ignore
-                    source=latest_row.source,  # type: ignore
-                    as_of=latest_as_of,
-                )
+        state_row = PaperAccountStateRecord(
+            account_id=canonical_id,
+            state_version=state_ver,
+            balance=bal,
+            equity=eq,
+            free_margin=fm,
+            daily_realized_pnl=dpnl,
+            weekly_realized_pnl=wpnl,
+            floating_pnl=fl_pnl,
+            peak_equity=peq,
+            open_risk_pct=orp,
+            reserved_risk_pct=rrp,
+            open_positions_count=pos_count,
+            consecutive_losses=cl,
+            last_loss_at=last_loss,
+            cooldown_until=cd_until,
+            state_updated_at=state_updated,
+            last_observed_at=effective_now,
+            payload={},
+        )
+        session.add(state_row)
+        await session.flush()
+        return state_row
 
-        account_slug = str(acc_row.id.hex)[:8] if hasattr(acc_row.id, "hex") else str(account_id)[:8]
-        snap_id = f"snap_paper_{account_slug}_{int(as_of.timestamp())}_{state_version}"
+    @staticmethod
+    async def update_paper_account_state(
+        session: AsyncSession,
+        account_id: str,
+        balance: Decimal | None = None,
+        equity: Decimal | None = None,
+        free_margin: Decimal | None = None,
+        daily_realized_pnl: Decimal | None = None,
+        weekly_realized_pnl: Decimal | None = None,
+        floating_pnl: Decimal | None = None,
+        open_risk_pct: Decimal | None = None,
+        reserved_risk_pct: Decimal | None = None,
+        open_positions_count: int | None = None,
+        consecutive_losses: int | None = None,
+        last_loss_at: dt.datetime | None = None,
+        cooldown_until: dt.datetime | None = None,
+        now: dt.datetime | None = None,
+    ) -> PaperAccountStateRecord:
+        """Updates economic fields. Increments state_version and updates state_updated_at
+
+        ONLY when safety-relevant economics actually change (SOL-P5-P1-030).
+        """
+        effective_now = now or dt.datetime.now(dt.UTC)
+        state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, effective_now)
+
+        has_economic_change = False
+
+        if balance is not None and balance != state.balance:
+            state.balance = balance
+            has_economic_change = True
+        if equity is not None and equity != state.equity:
+            state.equity = equity
+            state.peak_equity = max(state.peak_equity, equity)
+            has_economic_change = True
+        if free_margin is not None and free_margin != state.free_margin:
+            state.free_margin = free_margin
+            has_economic_change = True
+        if daily_realized_pnl is not None and daily_realized_pnl != state.daily_realized_pnl:
+            state.daily_realized_pnl = daily_realized_pnl
+            has_economic_change = True
+        if weekly_realized_pnl is not None and weekly_realized_pnl != state.weekly_realized_pnl:
+            state.weekly_realized_pnl = weekly_realized_pnl
+            has_economic_change = True
+        if floating_pnl is not None and floating_pnl != state.floating_pnl:
+            state.floating_pnl = floating_pnl
+            has_economic_change = True
+        if open_risk_pct is not None and open_risk_pct != state.open_risk_pct:
+            state.open_risk_pct = open_risk_pct
+            has_economic_change = True
+        if reserved_risk_pct is not None and reserved_risk_pct != state.reserved_risk_pct:
+            state.reserved_risk_pct = reserved_risk_pct
+            has_economic_change = True
+        if open_positions_count is not None and open_positions_count != state.open_positions_count:
+            state.open_positions_count = open_positions_count
+            has_economic_change = True
+        if consecutive_losses is not None and consecutive_losses != state.consecutive_losses:
+            state.consecutive_losses = consecutive_losses
+            has_economic_change = True
+        if last_loss_at is not None and last_loss_at != state.last_loss_at:
+            state.last_loss_at = _to_utc(last_loss_at)
+            has_economic_change = True
+        if cooldown_until is not None and cooldown_until != state.cooldown_until:
+            state.cooldown_until = _to_utc(cooldown_until)
+            has_economic_change = True
+
+        if has_economic_change:
+            state.state_version += 1
+            state.state_updated_at = effective_now
+
+        state.last_observed_at = effective_now
+        await session.flush()
+        return state
+
+    @staticmethod
+    async def refresh_paper_account_snapshot(
+        session: AsyncSession,
+        account_id: str = "default_paper_account",
+        force: bool = False,
+        now: dt.datetime | None = None,
+    ) -> AccountSnapshot:
+        """Produces authoritative AccountSnapshot observing current PaperAccountState.
+
+        Strictly preserves free_margin (never resets to equity).
+        Maintains authentic economic timestamp (state_updated_at) without freshness laundering.
+        """
+        observation_time = now or dt.datetime.now(dt.UTC)
+        state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, observation_time)
+
+        # Update last_observed_at on observation
+        state.last_observed_at = observation_time
+
+        state_updated_at = _to_utc(state.state_updated_at) or observation_time
+        account_slug = str(account_id)[:8]
+        snap_id = f"snap_paper_{account_slug}_{int(state_updated_at.timestamp())}_{state.state_version}"
+
+        # If not forced and existing snapshot with same state_version and unexpired age exists, reuse
+        latest_row = (
+            await session.scalars(
+                select(AccountSnapshotRecord)
+                .where(AccountSnapshotRecord.account_id == account_id)
+                .order_by(AccountSnapshotRecord.as_of.desc())
+                .limit(1)
+            )
+        ).first()
+
+        if not force and latest_row is not None:
+            latest_as_of = _to_utc(latest_row.as_of) or observation_time
+            payload = latest_row.payload or {}
+            if payload.get("state_version") == state.state_version:
+                age_sec = (observation_time - latest_as_of).total_seconds()
+                if age_sec <= 60:
+                    return AccountSnapshot.model_validate(latest_row.payload)
+
+        # Snapshot strictly preserves free_margin, floating_pnl, and economic state_version
         snapshot = AccountSnapshot(
             id=snap_id,
             account_id=account_id,
-            balance=balance,
-            equity=equity,
-            free_margin=equity,
-            daily_realized_pnl=daily_pnl,
-            weekly_realized_pnl=weekly_pnl,
-            floating_pnl=floating_pnl,
-            peak_equity=max(peak_equity, equity),
-            open_risk_pct=open_risk_pct,
-            reserved_risk_pct=reserved_risk_pct,
-            consecutive_losses=consecutive_losses,
-            last_loss_at=last_loss_at,
-            cooldown_until=cooldown_until,
-            open_positions_count=open_positions_count,
-            state_version=state_version,
+            balance=Decimal(str(state.balance)),
+            equity=Decimal(str(state.equity)),
+            free_margin=Decimal(str(state.free_margin)),
+            daily_realized_pnl=Decimal(str(state.daily_realized_pnl)),
+            weekly_realized_pnl=Decimal(str(state.weekly_realized_pnl)),
+            floating_pnl=Decimal(str(state.floating_pnl)),
+            peak_equity=Decimal(str(state.peak_equity)),
+            open_risk_pct=Decimal(str(state.open_risk_pct)),
+            reserved_risk_pct=Decimal(str(state.reserved_risk_pct)),
+            consecutive_losses=state.consecutive_losses,
+            last_loss_at=_to_utc(state.last_loss_at),
+            cooldown_until=_to_utc(state.cooldown_until),
+            open_positions_count=state.open_positions_count,
+            state_version=state.state_version,
+            state_updated_at=state_updated_at,
+            observed_at=observation_time,
             trading_mode="PAPER",
             source="PAPER_ACCOUNT_STATE",
-            as_of=as_of,
+            as_of=state_updated_at,
         )
 
         record = AccountSnapshotRecord(
@@ -156,3 +288,4 @@ class PaperAccountStateService:
         session.add(record)
         await session.flush()
         return snapshot
+

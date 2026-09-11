@@ -94,6 +94,7 @@ def _alembic(*args, success=True):
 
 def test_postgresql_migrations_auth_and_audit(isolated_postgres, capfd):
     conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
     expected = {
         "users",
         "sessions",
@@ -116,8 +117,22 @@ def test_postgresql_migrations_auth_and_audit(isolated_postgres, capfd):
         "risk_reservations",
         "kill_switch_records",
         "data_health_records",
+        "paper_account_states",
     }
     for action, target in (("upgrade", "head"), ("downgrade", "base"), ("upgrade", "head")):
+        if target == "base":
+            # Sol High P1-032: Downgrade refuses when authority rows exist. Explicit purge outside downgrade required.
+            for t in (
+                "paper_account_states",
+                "data_health_records",
+                "risk_decisions",
+                "risk_reservations",
+                "kill_switch_records",
+                "account_snapshots",
+                "symbol_specifications",
+                "risk_policies",
+            ):
+                conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(t)))
         _alembic(action, target)
         rows = conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
@@ -210,6 +225,19 @@ def test_postgresql_corrective_roundtrip_and_drift_gate(isolated_postgres):
         ("downgrade", "0001_initial", "json"),
         ("upgrade", "head", "jsonb"),
     ):
+        if target == "0001_initial":
+            # Sol High P1-032: Downgrade refuses when authority rows exist. Explicit purge outside downgrade required.
+            for t in (
+                "paper_account_states",
+                "data_health_records",
+                "risk_decisions",
+                "risk_reservations",
+                "kill_switch_records",
+                "account_snapshots",
+                "symbol_specifications",
+                "risk_policies",
+            ):
+                conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(t)))
         _alembic(action, target)
         _verify_json_columns(conn, schema, data_type)
         assert snapshot() == before
@@ -247,7 +275,7 @@ def _verify_schema(conn, schema, expected):
     revision = conn.execute(
         sql.SQL("SELECT version_num FROM {}.alembic_version").format(sql.Identifier(schema))
     ).fetchone()
-    assert revision == ("0007_risk_engine",)
+    assert revision == ("0011_phase5_final_acceptance",)
     indexes = {
         row[0]: row[1]
         for row in conn.execute(

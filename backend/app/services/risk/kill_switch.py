@@ -234,6 +234,8 @@ class KillSwitchManager:
         policy: RiskPolicy,
         quote_stale: bool = False,
         quote_stale_reason: str = "",
+        provider: str = "market_data",
+        source: str = "default",
     ) -> KillSwitchState | None:
         """Evaluates automatic safety triggers (daily loss limit, drawdown limit, data health).
         If triggered, activates and persists the Kill Switch state immediately (SOL-P5-P1-013, 014, 015).
@@ -267,24 +269,59 @@ class KillSwitchManager:
                     policy_version=policy.version,
                 )
 
-        # Data health trigger with cross-process persistent tracking (SOL-P5-P2-038)
+        # Data health trigger with cross-process persistent tracking scoped by (provider, source) (SOL-P5-P2-038)
         now_utc = dt.datetime.now(dt.UTC)
         threshold = getattr(policy, "data_health_consecutive_failures", 3)
-        stmt = select(DataHealthRecord).where(DataHealthRecord.id == "dh_default")
-        if session.get_bind().dialect.name == "postgresql":
-            stmt = stmt.with_for_update()
-        dh_row = (await session.scalars(stmt)).first()
-        if dh_row is None:
-            dh_row = DataHealthRecord(
-                id="dh_default",
-                provider="default",
-                source="market_data",
-                consecutive_failures=0,
-                updated_at=now_utc,
-                payload={},
+        row_id = "dh_default" if (provider == "market_data" and source == "default") else f"dh_{provider}_{source}"
+        is_postgres = session.get_bind().dialect.name == "postgresql"
+
+        from sqlalchemy.exc import IntegrityError
+
+        if is_postgres:
+            # Atomic upsert eliminates initial-row SELECT->INSERT race (SOL-P5-P2-038)
+            await session.execute(
+                text(
+                    "INSERT INTO data_health_records "
+                    "(id, provider, source, consecutive_failures, last_failure_at, "
+                    "last_healthy_at, updated_at, payload) "
+                    "VALUES (:id, :provider, :source, 0, NULL, :now, :now, '{}') "
+                    "ON CONFLICT (provider, source) DO NOTHING"
+                ),
+                {"id": row_id, "provider": provider, "source": source, "now": now_utc},
             )
-            session.add(dh_row)
-            await session.flush()
+            stmt = (
+                select(DataHealthRecord)
+                .where(
+                    DataHealthRecord.provider == provider,
+                    DataHealthRecord.source == source,
+                )
+                .with_for_update()
+            )
+            dh_row = (await session.scalars(stmt)).one()
+        else:
+            stmt = select(DataHealthRecord).where(
+                DataHealthRecord.provider == provider,
+                DataHealthRecord.source == source,
+            )
+            existing_dh = (await session.scalars(stmt)).first()
+            if existing_dh is None:
+                try:
+                    async with session.begin_nested():
+                        new_row = DataHealthRecord(
+                            id=row_id,
+                            provider=provider,
+                            source=source,
+                            consecutive_failures=0,
+                            updated_at=now_utc,
+                            payload={},
+                        )
+                        session.add(new_row)
+                        await session.flush()
+                        dh_row = new_row
+                except IntegrityError:
+                    dh_row = (await session.scalars(stmt)).one()
+            else:
+                dh_row = existing_dh
 
         if quote_stale:
             dh_row.consecutive_failures += 1
@@ -297,7 +334,8 @@ class KillSwitchManager:
                     session=session,
                     trigger_type="AUTOMATIC_DATA_HEALTH",
                     reason_th=(
-                        f"ข้อมูลราคาผิดปกติหรือไม่สดใหม่ต่อเนื่อง {dh_row.consecutive_failures} ครั้ง: {quote_stale_reason}"
+                        f"ข้อมูลราคาจาก {provider}/{source} ผิดปกติหรือไม่สดใหม่ต่อเนื่อง "
+                        f"{dh_row.consecutive_failures} ครั้ง: {quote_stale_reason}"
                     ),
                     activated_by="system_data_health",
                     policy_version=policy.version,

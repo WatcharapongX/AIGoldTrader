@@ -154,6 +154,8 @@ class AccountSnapshot(BaseModel):
     cooldown_until: AwareDatetime | None = None
     open_positions_count: int = 0
     state_version: int = 1
+    state_updated_at: AwareDatetime | None = None
+    observed_at: AwareDatetime | None = None
     trading_mode: Literal["PAPER", "BACKTEST", "SEMI_AUTO", "LIVE"] = "PAPER"
     source: Literal[
         "CONFIGURED_TEST",
@@ -166,10 +168,10 @@ class AccountSnapshot(BaseModel):
     ] = "CONFIGURED_TEST"
     as_of: AwareDatetime
 
-    @field_validator("as_of")
+    @field_validator("as_of", "state_updated_at", "observed_at")
     @classmethod
-    def utc_clock(cls, v: dt.datetime) -> dt.datetime:
-        return v.astimezone(dt.UTC)
+    def utc_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
+        return v.astimezone(dt.UTC) if v is not None else None
 
     @model_validator(mode="after")
     def validate_equity(self):
@@ -202,11 +204,30 @@ class NewsEventAudit(BaseModel):
     window_state: str = ""
     provider: str = ""
     revision_id: str = ""
+    source: str = ""
+    revision_version: int | None = None
 
     @field_validator("scheduled_at", "available_at")
     @classmethod
     def utc_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
         return v.astimezone(dt.UTC) if v is not None else None
+
+    @model_validator(mode="after")
+    def sync_aliases(self):
+        prov = self.provider or self.source
+        src = self.source or self.provider
+        rev_id = self.revision_id or (str(self.revision_version) if self.revision_version is not None else "")
+        rev_ver = self.revision_version
+        if rev_ver is None and self.revision_id:
+            try:
+                rev_ver = int(self.revision_id)
+            except ValueError:
+                pass
+        object.__setattr__(self, "provider", prov)
+        object.__setattr__(self, "source", src)
+        object.__setattr__(self, "revision_id", rev_id)
+        object.__setattr__(self, "revision_version", rev_ver)
+        return self
 
 
 class NewsRiskProvenance(BaseModel):
@@ -221,6 +242,25 @@ class NewsRiskProvenance(BaseModel):
     events: tuple[NewsEventAudit, ...] = ()
     provider: str = ""
     revision_id: str = ""
+    source: str = ""
+    revision_version: int | None = None
+
+    @model_validator(mode="after")
+    def sync_aliases(self):
+        prov = self.provider or self.source
+        src = self.source or self.provider
+        rev_id = self.revision_id or (str(self.revision_version) if self.revision_version is not None else "")
+        rev_ver = self.revision_version
+        if rev_ver is None and self.revision_id:
+            try:
+                rev_ver = int(self.revision_id)
+            except ValueError:
+                pass
+        object.__setattr__(self, "provider", prov)
+        object.__setattr__(self, "source", src)
+        object.__setattr__(self, "revision_id", rev_id)
+        object.__setattr__(self, "revision_version", rev_ver)
+        return self
 
 
 class RiskDecision(BaseModel):
@@ -271,6 +311,7 @@ class RiskReservation(BaseModel):
     id: str
     decision_id: str
     account_id: str
+    candidate_id: str | None = None
     profile_id: str
     symbol: str
     direction: Direction

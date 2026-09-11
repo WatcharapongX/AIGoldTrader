@@ -27,10 +27,24 @@ def test_unknown_ask_migration_preserves_sources_and_refuses_lossy_downgrade(iso
     _alembic("check")
     _alembic("downgrade", "0003_phase2_market_data", success=False)
     assert conn.execute("SELECT source,ask_close FROM candles ORDER BY source").fetchall() == before
-    assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == ("0007_risk_engine",)
+    assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == (
+        "0011_phase5_final_acceptance",
+    )
     # In this owned disposable fixture only, provide known asks to exercise reversible DDL.
     conn.execute("UPDATE candles SET ask_close=2350.30 WHERE ask_close IS NULL")
     known = conn.execute("SELECT * FROM candles ORDER BY source").fetchall()
+    # Sol High P1-032: Downgrade refuses when authority rows exist. Explicit purge outside downgrade required.
+    for t in (
+        "paper_account_states",
+        "data_health_records",
+        "risk_decisions",
+        "risk_reservations",
+        "kill_switch_records",
+        "account_snapshots",
+        "symbol_specifications",
+        "risk_policies",
+    ):
+        conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(t)))
     _alembic("downgrade", "0003_phase2_market_data")
     _alembic("upgrade", "head")
     assert conn.execute("SELECT * FROM candles ORDER BY source").fetchall() == known

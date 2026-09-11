@@ -124,6 +124,7 @@ class RiskReservationRecord(Base):
         nullable=False,
     )
     account_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    candidate_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     profile_id: Mapped[str] = mapped_column(String(64), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     direction: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -138,6 +139,14 @@ class RiskReservationRecord(Base):
     __table_args__ = (
         Index("ix_risk_reservation_active", "account_id", "status", "reserved_until"),
         Index("ix_risk_reservation_symbol", "symbol", "direction", "status"),
+        Index(
+            "ix_risk_reservation_active_candidate",
+            "account_id",
+            "candidate_id",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+            sqlite_where=text("status = 'ACTIVE'"),
+        ),
         UniqueConstraint("decision_id", name="uq_risk_reservation_decision"),
     )
 
@@ -170,4 +179,31 @@ class DataHealthRecord(Base):
     last_healthy_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False, default=dict)
-    __table_args__ = (Index("ix_data_health_provider_source", "provider", "source"),)
+    __table_args__ = (
+        UniqueConstraint("provider", "source", name="uq_data_health_provider_source"),
+        Index("ix_data_health_provider_source", "provider", "source"),
+    )
+
+
+class PaperAccountStateRecord(Base):
+    __tablename__ = "paper_account_states"
+
+    account_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    state_version: Mapped[int] = mapped_column(default=1, nullable=False)
+    balance: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    equity: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    free_margin: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    daily_realized_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0.00"), nullable=False)
+    weekly_realized_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0.00"), nullable=False)
+    floating_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0.00"), nullable=False)
+    peak_equity: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    open_risk_pct: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("0.0000"), nullable=False)
+    reserved_risk_pct: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("0.0000"), nullable=False)
+    open_positions_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    consecutive_losses: Mapped[int] = mapped_column(default=0, nullable=False)
+    last_loss_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cooldown_until: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    state_updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_observed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False, default=dict)
+

@@ -10,6 +10,7 @@ import {
   parseRiskPolicy,
   type KillSwitchData,
   type PortfolioRiskData,
+  type ResourceStatus,
   type RiskDecisionData,
   type RiskPolicyData,
 } from './contracts';
@@ -18,10 +19,23 @@ export function RiskWorkspace() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'ADMIN';
 
+  // Per-resource data and status authority
   const [policy, setPolicy] = useState<RiskPolicyData | null>(null);
+  const [policyStatus, setPolicyStatus] = useState<ResourceStatus>('LOADING');
+  const [policyLastSuccessAt, setPolicyLastSuccessAt] = useState<Date | null>(null);
+
   const [portfolio, setPortfolio] = useState<PortfolioRiskData | null>(null);
+  const [portfolioStatus, setPortfolioStatus] = useState<ResourceStatus>('LOADING');
+  const [portfolioLastSuccessAt, setPortfolioLastSuccessAt] = useState<Date | null>(null);
+
   const [killSwitch, setKillSwitch] = useState<KillSwitchData | null>(null);
+  const [killSwitchStatus, setKillSwitchStatus] = useState<ResourceStatus>('LOADING');
+  const [killSwitchLastSuccessAt, setKillSwitchLastSuccessAt] = useState<Date | null>(null);
+
   const [decisions, setDecisions] = useState<RiskDecisionData[]>([]);
+  const [decisionsStatus, setDecisionsStatus] = useState<ResourceStatus>('LOADING');
+  const [decisionsLastSuccessAt, setDecisionsLastSuccessAt] = useState<Date | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,6 +50,87 @@ export function RiskWorkspace() {
 
   const [refresh, setRefresh] = useState(0);
 
+  const fetchResources = useCallback(async () => {
+    const errors: string[] = [];
+
+    const [policyRes, portfolioRes, killSwitchRes, decisionsRes] = await Promise.allSettled([
+      api.get('/risk/policy'),
+      api.get('/risk/portfolio'),
+      api.get('/risk/kill-switch'),
+      api.get('/risk/decisions?limit=20'),
+    ]);
+
+    // 1. Policy
+    if (policyRes.status === 'fulfilled') {
+      try {
+        const parsed = parseRiskPolicy(policyRes.value);
+        setPolicy(parsed);
+        setPolicyStatus('READY');
+        setPolicyLastSuccessAt(new Date());
+      } catch (e) {
+        errors.push(`Policy Error: ${(e as Error).message}`);
+        setPolicyStatus((prev) => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+      }
+    } else {
+      errors.push(`Policy Unreachable: ${(policyRes.reason as Error).message}`);
+      setPolicyStatus((prev) => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+    }
+
+    // 2. Portfolio
+    if (portfolioRes.status === 'fulfilled') {
+      try {
+        const parsed = parsePortfolioRisk(portfolioRes.value);
+        setPortfolio(parsed);
+        setPortfolioStatus('READY');
+        setPortfolioLastSuccessAt(new Date());
+      } catch (e) {
+        errors.push(`Portfolio Error: ${(e as Error).message}`);
+        setPortfolioStatus((prev) => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+      }
+    } else {
+      errors.push(`Portfolio Unreachable: ${(portfolioRes.reason as Error).message}`);
+      setPortfolioStatus((prev) => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+    }
+
+    // 3. Kill Switch
+    if (killSwitchRes.status === 'fulfilled') {
+      try {
+        const parsed = parseKillSwitch(killSwitchRes.value);
+        setKillSwitch(parsed);
+        setKillSwitchStatus('READY');
+        setKillSwitchLastSuccessAt(new Date());
+      } catch (e) {
+        errors.push(`Kill Switch Error: ${(e as Error).message}`);
+        setKillSwitchStatus((prev) => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+      }
+    } else {
+      errors.push(`Kill Switch Unreachable: ${(killSwitchRes.reason as Error).message}`);
+      setKillSwitchStatus((prev) => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+    }
+
+    // 4. Decisions
+    if (decisionsRes.status === 'fulfilled') {
+      try {
+        const parsed = parseRiskDecisions(decisionsRes.value);
+        setDecisions(parsed);
+        setDecisionsStatus('READY');
+        setDecisionsLastSuccessAt(new Date());
+      } catch (e) {
+        errors.push(`Decisions Error: ${(e as Error).message}`);
+        setDecisionsStatus((prev) => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+      }
+    } else {
+      errors.push(`Decisions Unreachable: ${(decisionsRes.reason as Error).message}`);
+      setDecisionsStatus((prev) => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+    }
+
+    if (errors.length > 0) {
+      setError(errors.join(' | '));
+    } else {
+      setError(null);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setRefresh((v) => v + 1);
@@ -46,55 +141,23 @@ export function RiskWorkspace() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [pData, portData, ksData, decData] = await Promise.all([
-        api.get('/risk/policy'),
-        api.get('/risk/portfolio'),
-        api.get('/risk/kill-switch'),
-        api.get('/risk/decisions?limit=20'),
-      ]);
-
-      setPolicy(parseRiskPolicy(pData));
-      setPortfolio(parsePortfolioRisk(portData));
-      setKillSwitch(parseKillSwitch(ksData));
-      setDecisions(parseRiskDecisions(decData));
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message || 'เกิดข้อผิดพลาดในการโหลดข้อมูลความเสี่ยง');
+      await fetchResources();
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchResources]);
 
   useEffect(() => {
     let active = true;
-    const fetchLatest = async () => {
-      try {
-        const [pData, portData, ksData, decData] = await Promise.all([
-          api.get('/risk/policy'),
-          api.get('/risk/portfolio'),
-          api.get('/risk/kill-switch'),
-          api.get('/risk/decisions?limit=20'),
-        ]);
-        if (active) {
-          setPolicy(parseRiskPolicy(pData));
-          setPortfolio(parsePortfolioRisk(portData));
-          setKillSwitch(parseKillSwitch(ksData));
-          setDecisions(parseRiskDecisions(decData));
-          setError(null);
-        }
-      } catch (err) {
-        if (active) {
-          setError((err as Error).message || 'เกิดข้อผิดพลาดในการโหลดข้อมูลความเสี่ยง');
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
+    const runPoll = async () => {
+      await fetchResources();
+      if (active) setLoading(false);
     };
-    void fetchLatest();
+    void runPoll();
     return () => {
       active = false;
     };
-  }, [refresh]);
+  }, [refresh, fetchResources]);
 
   const handleKillSwitchAction = async () => {
     if (!actionReason.trim()) {
@@ -119,19 +182,22 @@ export function RiskWorkspace() {
     }
   };
 
-  const isKillSwitchUnknown = !killSwitch || killSwitch?.state === 'UNKNOWN' || !!error;
+  const isKillSwitchNotReady = killSwitchStatus !== 'READY';
+  const isKillSwitchUnknown = isKillSwitchNotReady || !killSwitch || killSwitch?.state === 'UNKNOWN' || !!error;
   const isKillSwitchActive = !isKillSwitchUnknown && (killSwitch?.state === 'ACTIVE' || portfolio?.kill_switch_active);
 
   // Portfolio budget calculation
-  const hasPortfolio = !!portfolio;
-  const hasPolicy = !!policy;
-  const totalRiskPct = hasPortfolio ? Number(portfolio.total_risk_pct) : null;
-  const maxAccountRiskPct = hasPortfolio
+  const hasPortfolio = portfolioStatus === 'READY' && !!portfolio;
+  const isPortfolioStale = portfolioStatus === 'STALE' && !!portfolio;
+  const hasPolicy = policyStatus === 'READY' && !!policy;
+
+  const totalRiskPct = (hasPortfolio || isPortfolioStale) && portfolio ? Number(portfolio.total_risk_pct) : null;
+  const maxAccountRiskPct = (hasPortfolio || isPortfolioStale) && portfolio
     ? Number(portfolio.max_account_risk_pct)
-    : hasPolicy
+    : (hasPolicy || policyStatus === 'STALE') && policy
     ? Number(policy.max_account_risk_pct)
     : null;
-  const availableRiskPct = hasPortfolio ? Number(portfolio.available_risk_pct) : null;
+  const availableRiskPct = (hasPortfolio || isPortfolioStale) && portfolio ? Number(portfolio.available_risk_pct) : null;
   const budgetUsageRatio = (totalRiskPct !== null && maxAccountRiskPct !== null && maxAccountRiskPct > 0)
     ? Math.min(100, Math.max(0, (totalRiskPct / maxAccountRiskPct) * 100))
     : 0;
@@ -166,8 +232,12 @@ export function RiskWorkspace() {
       </div>
 
       {error && (
-        <div className="bg-red-950/50 border border-red-500/50 text-red-200 text-sm p-4 rounded-xl">
-          {error}
+        <div className="bg-amber-950/40 border border-amber-500/50 text-amber-200 text-xs p-3 rounded-xl flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
+          <span className="text-[10px] text-amber-400/80 font-mono">FAIL-CLOSED ACTIVATED</span>
         </div>
       )}
 
@@ -206,7 +276,11 @@ export function RiskWorkspace() {
                       : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   }`}
                 >
-                  {isKillSwitchUnknown
+                  {killSwitchStatus === 'UNAVAILABLE'
+                    ? 'UNAVAILABLE (ไม่สามารถตรวจสอบสถานะได้ - Fail Closed)'
+                    : killSwitchStatus === 'STALE'
+                    ? 'STALE (ข้อมูลล้าสมัย - Fail Closed)'
+                    : isKillSwitchUnknown
                     ? 'UNKNOWN (ไม่สามารถตรวจสอบสถานะได้ - Fail Closed)'
                     : isKillSwitchActive
                     ? 'ACTIVE (ปิดระบบฉุกเฉิน)'
@@ -214,7 +288,11 @@ export function RiskWorkspace() {
                 </span>
               </div>
               <p className="text-sm text-gray-300 mt-1">
-                {isKillSwitchUnknown
+                {killSwitchStatus === 'UNAVAILABLE'
+                  ? 'ระบบปฏิเสธคำสั่งทั้งหมดเนื่องจากไม่สามารถเชื่อมต่อฐานข้อมูลสถานะความปลอดภัยได้ (Fail-Closed)'
+                  : killSwitchStatus === 'STALE'
+                  ? `ระบบปฏิเสธคำสั่งเนื่องจากข้อมูลความปลอดภัยล่าสุด (${killSwitchLastSuccessAt ? killSwitchLastSuccessAt.toLocaleTimeString('th-TH') : 'ไม่ระบุ'}) อาจล้าสมัย`
+                  : isKillSwitchUnknown
                   ? `ระบบปฏิเสธคำสั่งทั้งหมดเนื่องจากไม่สามารถยืนยันสถานะ Kill Switch ได้ (Fail-Closed): ${killSwitch?.reason_th || 'ฐานข้อมูลยังไม่พร้อม'}`
                   : isKillSwitchActive
                   ? `ระบบถูกระงับ: ${killSwitch?.reason_th || 'ไม่สามารถทำการประเมินแผนการเทรดได้'}`
@@ -225,6 +303,9 @@ export function RiskWorkspace() {
                   <span>ผู้สั่งการ: <strong className="text-gray-200">{killSwitch.activated_by}</strong></span>
                   <span>สาเหตุ: <strong className="text-red-300">{killSwitch.trigger_type}</strong></span>
                   <span>เวลาบันทึก: <strong className="text-gray-200">{new Date(killSwitch.activated_at).toLocaleString('th-TH')}</strong></span>
+                  {killSwitchLastSuccessAt && (
+                    <span>ซิงค์สำเร็จล่าสุด: <strong className="text-amber-300">{killSwitchLastSuccessAt.toLocaleTimeString('th-TH')}</strong></span>
+                  )}
                 </div>
               )}
             </div>
@@ -265,10 +346,25 @@ export function RiskWorkspace() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-semibold text-gray-300">เพดานความเสี่ยงบัญชี (Account Risk)</h3>
-              <span className="text-[10px] text-gray-500 font-mono">Source: {portfolio?.account_source || 'UNAVAILABLE'}</span>
+              <span className="text-[10px] text-gray-500 font-mono">
+                Source: {portfolio?.account_source || 'UNAVAILABLE'}
+                {portfolioLastSuccessAt && ` · ${portfolioLastSuccessAt.toLocaleTimeString('th-TH')}`}
+              </span>
             </div>
-            <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">
-              Max {maxAccountRiskPct !== null ? `${maxAccountRiskPct.toFixed(2)}%` : 'UNKNOWN'}
+            <span
+              className={`text-xs px-2 py-0.5 rounded font-mono ${
+                portfolioStatus === 'READY'
+                  ? 'bg-gray-800 text-gray-400'
+                  : portfolioStatus === 'STALE'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : 'bg-red-500/20 text-red-300 border border-red-500/30'
+              }`}
+            >
+              {portfolioStatus === 'READY'
+                ? `Max ${maxAccountRiskPct !== null ? `${maxAccountRiskPct.toFixed(2)}%` : 'UNKNOWN'}`
+                : portfolioStatus === 'STALE'
+                ? 'STALE'
+                : 'UNAVAILABLE'}
             </span>
           </div>
 
@@ -276,20 +372,34 @@ export function RiskWorkspace() {
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-gray-400">ความเสี่ยงรวมปัจจุบัน:</span>
-                <span className={`font-mono font-bold ${totalRiskPct !== null && maxAccountRiskPct !== null && totalRiskPct > maxAccountRiskPct * 0.8 ? 'text-red-400' : 'text-emerald-400'}`}>
-                  {totalRiskPct !== null ? `${totalRiskPct.toFixed(2)}%` : 'UNAVAILABLE'}
+                <span
+                  className={`font-mono font-bold ${
+                    portfolioStatus !== 'READY'
+                      ? 'text-amber-400'
+                      : totalRiskPct !== null && maxAccountRiskPct !== null && totalRiskPct > maxAccountRiskPct * 0.8
+                      ? 'text-red-400'
+                      : 'text-emerald-400'
+                  }`}
+                >
+                  {portfolioStatus === 'UNAVAILABLE'
+                    ? 'UNAVAILABLE'
+                    : totalRiskPct !== null
+                    ? `${totalRiskPct.toFixed(2)}%`
+                    : 'UNAVAILABLE'}
                 </span>
               </div>
               <div className="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all ${
-                    budgetUsageRatio > 80
+                    portfolioStatus !== 'READY'
+                      ? 'bg-amber-600/70'
+                      : budgetUsageRatio > 80
                       ? 'bg-red-500'
                       : budgetUsageRatio > 50
                       ? 'bg-amber-500'
                       : 'bg-emerald-500'
                   }`}
-                  style={{ width: `${budgetUsageRatio}%` }}
+                  style={{ width: `${portfolioStatus === 'UNAVAILABLE' ? 0 : budgetUsageRatio}%` }}
                 />
               </div>
             </div>
@@ -297,14 +407,14 @@ export function RiskWorkspace() {
             <div className="grid grid-cols-2 gap-3 pt-2 text-xs border-t border-gray-800/80">
               <div>
                 <span className="text-gray-500 block">คงเหลือที่อนุญาต (Available):</span>
-                <span className="font-mono font-bold text-gray-200 text-sm">
-                  {availableRiskPct !== null ? `${availableRiskPct.toFixed(2)}%` : 'UNAVAILABLE'}
+                <span className={`font-mono font-bold text-sm ${portfolioStatus === 'READY' ? 'text-gray-200' : 'text-amber-300'}`}>
+                  {portfolioStatus === 'UNAVAILABLE' ? 'UNAVAILABLE' : availableRiskPct !== null ? `${availableRiskPct.toFixed(2)}%` : 'UNAVAILABLE'}
                 </span>
               </div>
               <div>
                 <span className="text-gray-500 block">จองไว้ล่วงหน้า (Reserved):</span>
                 <span className="font-mono font-bold text-amber-400 text-sm">
-                  {hasPortfolio ? `${Number(portfolio.reserved_risk_pct).toFixed(2)}%` : 'UNAVAILABLE'}
+                  {portfolioStatus === 'UNAVAILABLE' ? 'UNAVAILABLE' : (hasPortfolio || isPortfolioStale) && portfolio ? `${Number(portfolio.reserved_risk_pct).toFixed(2)}%` : 'UNAVAILABLE'}
                 </span>
               </div>
             </div>
@@ -315,8 +425,14 @@ export function RiskWorkspace() {
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-gray-300">ความเสี่ยงตามทิศทาง (Gross Directional)</h3>
-            <span className="text-[11px] text-gray-400 bg-gray-800 px-2 py-0.5 rounded">
-              ไม่หักล้างกัน (Gross)
+            <span
+              className={`text-[11px] px-2 py-0.5 rounded ${
+                portfolioStatus === 'READY'
+                  ? 'text-gray-400 bg-gray-800'
+                  : 'text-amber-300 bg-amber-500/20 border border-amber-500/30'
+              }`}
+            >
+              {portfolioStatus === 'READY' ? 'ไม่หักล้างกัน (Gross)' : portfolioStatus}
             </span>
           </div>
 
@@ -325,14 +441,19 @@ export function RiskWorkspace() {
               <div className="flex justify-between text-xs mb-1">
                 <span className="text-emerald-400 font-medium">LONG Exposure</span>
                 <span className="font-mono text-gray-200">
-                  {hasPortfolio ? `${Number(portfolio.directional_risk_pct?.LONG || '0').toFixed(2)}%` : 'UNAVAILABLE'} / {hasPolicy ? `${Number(policy.max_directional_risk_pct).toFixed(2)}%` : 'UNKNOWN'}
+                  {portfolioStatus === 'UNAVAILABLE'
+                    ? 'UNAVAILABLE'
+                    : (hasPortfolio || isPortfolioStale) && portfolio
+                    ? `${Number(portfolio.directional_risk_pct?.LONG || '0').toFixed(2)}%`
+                    : 'UNAVAILABLE'}{' '}
+                  / {hasPolicy && policy ? `${Number(policy.max_directional_risk_pct).toFixed(2)}%` : 'UNKNOWN'}
                 </span>
               </div>
               <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-emerald-500 rounded-full"
+                  className={`h-full rounded-full ${portfolioStatus === 'READY' ? 'bg-emerald-500' : 'bg-gray-600'}`}
                   style={{
-                    width: `${hasPortfolio && hasPolicy ? Math.min(100, (Number(portfolio.directional_risk_pct?.LONG || '0') / Number(policy.max_directional_risk_pct)) * 100) : 0}%`,
+                    width: `${portfolioStatus === 'READY' && portfolio && policy ? Math.min(100, (Number(portfolio.directional_risk_pct?.LONG || '0') / Number(policy.max_directional_risk_pct)) * 100) : 0}%`,
                   }}
                 />
               </div>
@@ -342,21 +463,32 @@ export function RiskWorkspace() {
               <div className="flex justify-between text-xs mb-1">
                 <span className="text-rose-400 font-medium">SHORT Exposure</span>
                 <span className="font-mono text-gray-200">
-                  {hasPortfolio ? `${Number(portfolio.directional_risk_pct?.SHORT || '0').toFixed(2)}%` : 'UNAVAILABLE'} / {hasPolicy ? `${Number(policy.max_directional_risk_pct).toFixed(2)}%` : 'UNKNOWN'}
+                  {portfolioStatus === 'UNAVAILABLE'
+                    ? 'UNAVAILABLE'
+                    : (hasPortfolio || isPortfolioStale) && portfolio
+                    ? `${Number(portfolio.directional_risk_pct?.SHORT || '0').toFixed(2)}%`
+                    : 'UNAVAILABLE'}{' '}
+                  / {hasPolicy && policy ? `${Number(policy.max_directional_risk_pct).toFixed(2)}%` : 'UNKNOWN'}
                 </span>
               </div>
               <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-rose-500 rounded-full"
+                  className={`h-full rounded-full ${portfolioStatus === 'READY' ? 'bg-rose-500' : 'bg-gray-600'}`}
                   style={{
-                    width: `${hasPortfolio && hasPolicy ? Math.min(100, (Number(portfolio.directional_risk_pct?.SHORT || '0') / Number(policy.max_directional_risk_pct)) * 100) : 0}%`,
+                    width: `${portfolioStatus === 'READY' && portfolio && policy ? Math.min(100, (Number(portfolio.directional_risk_pct?.SHORT || '0') / Number(policy.max_directional_risk_pct)) * 100) : 0}%`,
                   }}
                 />
               </div>
             </div>
 
             <div className="pt-2 text-[11px] text-gray-400 border-t border-gray-800/80">
-              สัญลักษณ์หลัก: <strong className="text-gray-200">XAUUSD</strong> ({hasPortfolio ? `${Number(portfolio.symbol_risk_pct?.XAUUSD || '0').toFixed(2)}%` : 'UNAVAILABLE'} ความเสี่ยงสะสม)
+              สัญลักษณ์หลัก: <strong className="text-gray-200">XAUUSD</strong> (
+              {portfolioStatus === 'UNAVAILABLE'
+                ? 'UNAVAILABLE'
+                : (hasPortfolio || isPortfolioStale) && portfolio
+                ? `${Number(portfolio.symbol_risk_pct?.XAUUSD || '0').toFixed(2)}%`
+                : 'UNAVAILABLE'}{' '}
+              ความเสี่ยงสะสม)
             </div>
           </div>
         </div>
@@ -367,14 +499,20 @@ export function RiskWorkspace() {
             <h3 className="text-sm font-semibold text-gray-300">มาตรวัดความเสียหาย (Loss Guardrails)</h3>
             <span
               className={`text-xs px-2 py-0.5 rounded font-medium ${
-                !hasPortfolio
-                  ? 'bg-gray-800 text-gray-400'
-                  : portfolio.in_cooldown
+                portfolioStatus !== 'READY'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : portfolio?.in_cooldown
                   ? 'bg-red-500/20 text-red-400 border border-red-500/30'
                   : 'bg-emerald-500/20 text-emerald-400'
               }`}
             >
-              {!hasPortfolio ? 'UNKNOWN' : portfolio.in_cooldown ? 'อยู่ในช่วง Cooldown' : 'ปกติ'}
+              {portfolioStatus === 'READY'
+                ? portfolio?.in_cooldown
+                  ? 'อยู่ในช่วง Cooldown'
+                  : 'ปกติ'
+                : portfolioStatus === 'STALE'
+                ? 'ข้อมูลล้าสมัย (STALE)'
+                : 'UNAVAILABLE'}
             </span>
           </div>
 
@@ -382,26 +520,26 @@ export function RiskWorkspace() {
             <div className="bg-gray-800/60 p-3 rounded-lg border border-gray-800">
               <span className="text-gray-400 block mb-1">ขาดทุนรายวัน:</span>
               <span className="font-mono font-bold text-gray-200 text-sm">
-                {hasPortfolio ? `${Number(portfolio.daily_loss_pct).toFixed(2)}%` : 'UNAVAILABLE'}
+                {portfolioStatus === 'UNAVAILABLE' ? 'UNAVAILABLE' : (hasPortfolio || isPortfolioStale) && portfolio ? `${Number(portfolio.daily_loss_pct).toFixed(2)}%` : 'UNAVAILABLE'}
               </span>
-              <span className="text-[10px] text-gray-500 block">เพดาน: {hasPolicy ? `${policy.daily_loss_limit_pct}%` : 'UNKNOWN'}</span>
+              <span className="text-[10px] text-gray-500 block">เพดาน: {policy ? `${policy.daily_loss_limit_pct}%` : 'UNKNOWN'}</span>
             </div>
 
             <div className="bg-gray-800/60 p-3 rounded-lg border border-gray-800">
               <span className="text-gray-400 block mb-1">ขาดทุนรายสัปดาห์:</span>
               <span className="font-mono font-bold text-gray-200 text-sm">
-                {hasPortfolio ? `${Number(portfolio.weekly_loss_pct).toFixed(2)}%` : 'UNAVAILABLE'}
+                {portfolioStatus === 'UNAVAILABLE' ? 'UNAVAILABLE' : (hasPortfolio || isPortfolioStale) && portfolio ? `${Number(portfolio.weekly_loss_pct).toFixed(2)}%` : 'UNAVAILABLE'}
               </span>
-              <span className="text-[10px] text-gray-500 block">เพดาน: {hasPolicy ? `${policy.weekly_loss_limit_pct}%` : 'UNKNOWN'}</span>
+              <span className="text-[10px] text-gray-500 block">เพดาน: {policy ? `${policy.weekly_loss_limit_pct}%` : 'UNKNOWN'}</span>
             </div>
 
             <div className="col-span-2 bg-gray-800/60 p-3 rounded-lg border border-gray-800 flex justify-between items-center">
               <div>
                 <span className="text-gray-400 block">Drawdown สูงสุดปัจจุบัน:</span>
-                <span className="text-[10px] text-gray-500">เพดานสูงสุด: {hasPolicy ? `${policy.max_drawdown_pct}%` : 'UNKNOWN'}</span>
+                <span className="text-[10px] text-gray-500">เพดานสูงสุด: {policy ? `${policy.max_drawdown_pct}%` : 'UNKNOWN'}</span>
               </div>
               <span className="font-mono font-bold text-gray-100 text-base">
-                {hasPortfolio ? `${Number(portfolio.drawdown_pct).toFixed(2)}%` : 'UNAVAILABLE'}
+                {portfolioStatus === 'UNAVAILABLE' ? 'UNAVAILABLE' : (hasPortfolio || isPortfolioStale) && portfolio ? `${Number(portfolio.drawdown_pct).toFixed(2)}%` : 'UNAVAILABLE'}
               </span>
             </div>
           </div>
@@ -413,11 +551,25 @@ export function RiskWorkspace() {
         <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <h3 className="font-semibold text-gray-200">การจองงบประมาณความเสี่ยงที่เปิดอยู่ (Active Risk Reservations)</h3>
-            <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-amber-500/20 text-amber-400 border border-amber-500/30">
-              {hasPortfolio ? `${portfolio.active_reservations_count} รายการ` : 'UNAVAILABLE'}
+            <span
+              className={`px-2 py-0.5 rounded-full text-xs font-mono border ${
+                portfolioStatus === 'READY'
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                  : portfolioStatus === 'STALE'
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-red-500/20 text-red-300 border-red-500/30'
+              }`}
+            >
+              {portfolioStatus === 'READY' && portfolio
+                ? `${portfolio.active_reservations_count} รายการ`
+                : portfolioStatus === 'STALE' && portfolio
+                ? `STALE (${portfolio.active_reservations_count} รายการ)`
+                : 'UNAVAILABLE'}
             </span>
           </div>
-          <span className="text-xs text-gray-400">หมดอายุอัตโนมัติเมื่อครบกำหนด (TTL: {hasPolicy ? `${policy.reservation_ttl_seconds}s` : 'UNKNOWN'})</span>
+          <span className="text-xs text-gray-400">
+            หมดอายุอัตโนมัติเมื่อครบกำหนด (TTL: {policy ? `${policy.reservation_ttl_seconds}s` : 'UNKNOWN'})
+          </span>
         </div>
 
         <div className="overflow-x-auto">
@@ -463,7 +615,11 @@ export function RiskWorkspace() {
               ) : (
                 <tr>
                   <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
-                    ไม่มีงบประมาณความเสี่ยงที่ถูกจองค้างไว้ในขณะนี้ (No active reservations)
+                    {portfolioStatus === 'READY'
+                      ? 'ไม่มีงบประมาณความเสี่ยงที่ถูกจองค้างไว้ในขณะนี้ (No active reservations)'
+                      : portfolioStatus === 'STALE'
+                      ? 'ข้อมูลการจองล่าสุดอาจล้าสมัย กรุณารีเฟรชเพื่อยืนยัน (Data Stale)'
+                      : 'ไม่สามารถยืนยันข้อมูลการจองความเสี่ยงได้ (Fail-Closed)'}
                   </td>
                 </tr>
               )}
@@ -476,9 +632,22 @@ export function RiskWorkspace() {
       <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-gray-200">ประวัติการประเมินความเสี่ยงล่าสุด (Risk Decisions Audit)</h3>
+            <div className="flex items-center space-x-2">
+              <h3 className="font-semibold text-gray-200">ประวัติการประเมินความเสี่ยงล่าสุด (Risk Decisions Audit)</h3>
+              {decisionsStatus === 'STALE' && (
+                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono border border-amber-500/30">
+                  STALE
+                </span>
+              )}
+              {decisionsStatus === 'UNAVAILABLE' && (
+                <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-300 text-[10px] font-mono border border-red-500/30">
+                  UNAVAILABLE
+                </span>
+              )}
+            </div>
             <p className="text-xs text-gray-400 mt-0.5">
               บันทึกการตัดสินใจที่เป็น Immutable และผลลัพธ์คำอธิบายภาษาไทยตามเกณฑ์ Fail-Closed
+              {decisionsLastSuccessAt && ` · ซิงค์ล่าสุด ${decisionsLastSuccessAt.toLocaleTimeString('th-TH')}`}
             </p>
           </div>
           <span className="text-xs font-mono text-gray-500">แสดงสูงสุด 20 รายการ</span>
@@ -634,7 +803,9 @@ export function RiskWorkspace() {
               ) : (
                 <tr>
                   <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
-                    ยังไม่มีประวัติการประเมินความเสี่ยง (No risk decisions recorded)
+                    {decisionsStatus === 'UNAVAILABLE'
+                      ? 'ไม่สามารถโหลดประวัติการประเมินความเสี่ยงได้ (UNAVAILABLE)'
+                      : 'ยังไม่มีประวัติการประเมินความเสี่ยง (No risk decisions recorded)'}
                   </td>
                 </tr>
               )}
@@ -647,8 +818,24 @@ export function RiskWorkspace() {
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="font-semibold text-gray-200">นโยบายความเสี่ยงที่ใช้งานอยู่ (Active Risk Policy)</h3>
-            <span className="text-xs text-gray-400 font-mono">Version: {policy?.version || 'N/A'}</span>
+            <div className="flex items-center space-x-2">
+              <h3 className="font-semibold text-gray-200">นโยบายความเสี่ยงที่ใช้งานอยู่ (Active Risk Policy)</h3>
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded font-mono border ${
+                  policyStatus === 'READY'
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                    : policyStatus === 'STALE'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-red-500/20 text-red-300 border-red-500/30'
+                }`}
+              >
+                {policyStatus}
+              </span>
+            </div>
+            <span className="text-xs text-gray-400 font-mono">
+              Version: {policy?.version || 'N/A'}
+              {policyLastSuccessAt && ` · ซิงค์ล่าสุด ${policyLastSuccessAt.toLocaleTimeString('th-TH')}`}
+            </span>
           </div>
           <span className="px-2.5 py-1 rounded bg-gray-800 text-gray-400 text-xs">
             กำหนดค่าผ่าน Server Configuration (Read-Only)
@@ -658,35 +845,35 @@ export function RiskWorkspace() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 text-xs">
           <div className="bg-gray-800/40 p-3 rounded-lg border border-gray-800">
             <span className="text-gray-500 block mb-1">ความเสี่ยงสูงสุดต่อไม้</span>
-            <span className="font-mono font-bold text-gray-200 text-sm">{hasPolicy ? `${policy.max_risk_per_trade_pct}%` : 'UNKNOWN'}</span>
+            <span className="font-mono font-bold text-gray-200 text-sm">{policy ? `${policy.max_risk_per_trade_pct}%` : 'UNKNOWN'}</span>
           </div>
           <div className="bg-gray-800/40 p-3 rounded-lg border border-gray-800">
             <span className="text-gray-500 block mb-1">ความเสี่ยงขั้นต่ำต่อไม้</span>
-            <span className="font-mono font-bold text-gray-200 text-sm">{hasPolicy ? `${policy.min_risk_per_trade_pct}%` : 'UNKNOWN'}</span>
+            <span className="font-mono font-bold text-gray-200 text-sm">{policy ? `${policy.min_risk_per_trade_pct}%` : 'UNKNOWN'}</span>
           </div>
           <div className="bg-gray-800/40 p-3 rounded-lg border border-gray-800">
             <span className="text-gray-500 block mb-1">เพดานรวมของบัญชี</span>
-            <span className="font-mono font-bold text-gray-200 text-sm">{hasPolicy ? `${policy.max_account_risk_pct}%` : 'UNKNOWN'}</span>
+            <span className="font-mono font-bold text-gray-200 text-sm">{policy ? `${policy.max_account_risk_pct}%` : 'UNKNOWN'}</span>
           </div>
           <div className="bg-gray-800/40 p-3 rounded-lg border border-gray-800">
             <span className="text-gray-500 block mb-1">เพดานความเสี่ยงต่อทิศทาง</span>
-            <span className="font-mono font-bold text-gray-200 text-sm">{hasPolicy ? `${policy.max_directional_risk_pct}%` : 'UNKNOWN'}</span>
+            <span className="font-mono font-bold text-gray-200 text-sm">{policy ? `${policy.max_directional_risk_pct}%` : 'UNKNOWN'}</span>
           </div>
           <div className="bg-gray-800/40 p-3 rounded-lg border border-gray-800">
             <span className="text-gray-500 block mb-1">จำนวนคำสั่งเปิดพร้อมกันสูงสุด</span>
-            <span className="font-mono font-bold text-gray-200 text-sm">{hasPolicy ? `${policy.max_concurrent_trades} ไม้` : 'UNKNOWN'}</span>
+            <span className="font-mono font-bold text-gray-200 text-sm">{policy ? `${policy.max_concurrent_trades} ไม้` : 'UNKNOWN'}</span>
           </div>
           <div className="bg-gray-800/40 p-3 rounded-lg border border-gray-800">
             <span className="text-gray-500 block mb-1">ช่วงห้ามเทรดก่อนข่าว (Blackout)</span>
-            <span className="font-mono font-bold text-gray-200 text-sm">{hasPolicy ? `${policy.news_blackout_minutes} นาที` : 'UNKNOWN'}</span>
+            <span className="font-mono font-bold text-gray-200 text-sm">{policy ? `${policy.news_blackout_minutes} นาที` : 'UNKNOWN'}</span>
           </div>
           <div className="bg-gray-800/40 p-3 rounded-lg border border-gray-800">
             <span className="text-gray-500 block mb-1">ช่วงปรับลดความเสี่ยงก่อนข่าว</span>
-            <span className="font-mono font-bold text-gray-200 text-sm">{hasPolicy ? `${policy.news_reduction_window_minutes} นาที (ลดเหลือ ${(Number(policy.news_reduction_factor) * 100).toFixed(0)}%)` : 'UNKNOWN'}</span>
+            <span className="font-mono font-bold text-gray-200 text-sm">{policy ? `${policy.news_reduction_window_minutes} นาที (ลดเหลือ ${(Number(policy.news_reduction_factor) * 100).toFixed(0)}%)` : 'UNKNOWN'}</span>
           </div>
           <div className="bg-gray-800/40 p-3 rounded-lg border border-gray-800">
             <span className="text-gray-500 block mb-1">สเปรดสูงสุดที่ยอมรับได้</span>
-            <span className="font-mono font-bold text-gray-200 text-sm">{hasPolicy ? policy.max_spread_absolute : 'UNKNOWN'}</span>
+            <span className="font-mono font-bold text-gray-200 text-sm">{policy ? policy.max_spread_absolute : 'UNKNOWN'}</span>
           </div>
         </div>
       </div>

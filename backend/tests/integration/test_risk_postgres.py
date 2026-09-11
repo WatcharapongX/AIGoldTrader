@@ -56,6 +56,8 @@ def test_risk_migration_idempotence_and_preservation(isolated_postgres):  # noqa
         "risk_decisions",
         "risk_reservations",
         "kill_switch_records",
+        "data_health_records",
+        "paper_account_states",
     }.issubset(tables)
 
     # Insert a dummy risk decision
@@ -440,10 +442,18 @@ def test_migration_0010_downgrade_barrier_and_seed_quarantine(isolated_postgres)
     # Downgrade to 0009 must be refused!
     _alembic("downgrade", "0009_phase5_final_hardening", success=False)
 
-    # Clean up audit record and any seeded Phase 5 authority rows to allow downgrade
-    for tbl in ("risk_decisions", "risk_reservations", "account_snapshots", "symbol_specifications", "risk_policies"):
+    # Clean up audit record and all seeded Phase 5 authority rows to allow downgrade
+    for tbl in (
+        "risk_decisions",
+        "risk_reservations",
+        "account_snapshots",
+        "symbol_specifications",
+        "risk_policies",
+        "data_health_records",
+        "paper_account_states",
+        "kill_switch_records",
+    ):
         conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(tbl)))
-    conn.execute("DELETE FROM kill_switch_records WHERE id != 'ks_bootstrap'")
     # Now downgrade to 0009 succeeds
     _alembic("downgrade", "0009_phase5_final_hardening", success=True)
 

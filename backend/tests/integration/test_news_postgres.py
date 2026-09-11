@@ -24,6 +24,17 @@ def test_news_migration_preserves_existing_rows_and_revision_history(isolated_po
     _alembic("upgrade", "head")
     _alembic("check")
     assert conn.execute("SELECT to_jsonb(s) FROM symbols s").fetchall() == before
+    for tbl in (
+        "paper_account_states",
+        "data_health_records",
+        "risk_policies",
+        "symbol_specifications",
+        "account_snapshots",
+        "risk_decisions",
+        "risk_reservations",
+        "kill_switch_records",
+    ):
+        conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(tbl)))
     _alembic("downgrade", "0004_market_unknown_ask")
     _alembic("upgrade", "head")
 

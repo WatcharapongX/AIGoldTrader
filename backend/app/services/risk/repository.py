@@ -91,6 +91,12 @@ async def get_authoritative_symbol_spec(
     at = now or dt.datetime.now(dt.UTC)
     expected_server = getattr(provider, "broker_server", None) or getattr(provider, "server", None)
 
+    # For real MT5 source, broker server authority is mandatory; fail closed if unknown (SOL-P5-P1-033)
+    if source.startswith("mt5") and not expected_server:
+        raise NotFoundError(
+            f"Broker server authority required for MT5 source '{source}' on '{symbol}'; server is unknown"
+        )
+
     row = (
         await session.scalars(
             select(SymbolSpecificationRecord)
@@ -107,7 +113,8 @@ async def get_authoritative_symbol_spec(
         observed_at = row.observed_at if row.observed_at.tzinfo else row.observed_at.replace(tzinfo=dt.UTC)
         age = (at - observed_at).total_seconds()
         stored_server = row.payload.get("broker_server") if row.payload else None
-        server_matches = expected_server is None or stored_server == expected_server
+        # Strict server match: if expected_server is specified, stored_server must match exactly
+        server_matches = (stored_server == expected_server) if expected_server else (stored_server is None)
         if age <= max_age_seconds and server_matches:
             return SymbolSpecification.model_validate(row.payload)
 
@@ -248,7 +255,19 @@ async def find_existing_decision(
 async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -> RiskDecision:
     existing = await session.get(RiskDecisionRecord, decision.id)
     if existing is not None:
-        return decision
+        # Verify semantic identity: mismatched candidate/profile/fingerprint is NOT idempotency (SOL-P5-P2-037)
+        if (
+            existing.candidate_id != decision.candidate_id
+            or existing.profile_id != decision.profile_id
+            or existing.dependency_fingerprint != decision.dependency_fingerprint
+        ):
+            logger.error("RiskDecision PK collision with mismatched semantic identity: failing closed")
+            raise IntegrityError(
+                "Primary key collision with mismatched semantic identity on RiskDecision",
+                params=None,
+                orig=Exception("PK_COLLISION_MISMATCH"),
+            )
+        return RiskDecision.model_validate(existing.payload)
 
     record = RiskDecisionRecord(
         id=decision.id,
@@ -280,10 +299,37 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
             session.add(record)
             await session.flush()
     except IntegrityError as exc:
-        logger.debug("Concurrent persist unique collision recovered cleanly: %s", exc)
+        diag = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = getattr(diag, "constraint_name", None) or ""
+        exc_str = str(exc).lower()
+
+        is_expected_unique = (
+            "uq_risk_decision_deterministic" in constraint_name
+            or "uq_risk_reservation_decision" in constraint_name
+            or "ix_risk_reservation_active_candidate" in constraint_name
+            or "uq_risk_decision_deterministic" in exc_str
+            or "uq_risk_reservation_decision" in exc_str
+            or "ix_risk_reservation_active_candidate" in exc_str
+        )
+        is_pk_collision = "risk_decisions_pkey" in constraint_name or "primary key" in exc_str
+
         existing = await session.get(RiskDecisionRecord, decision.id)
         if existing is not None:
+            if (
+                existing.candidate_id != decision.candidate_id
+                or existing.profile_id != decision.profile_id
+                or existing.dependency_fingerprint != decision.dependency_fingerprint
+            ):
+                logger.error("Unrelated RiskDecision PK collision detected: failing closed")
+                raise exc
             return RiskDecision.model_validate(existing.payload)
+
+        # Do not swallow unrelated integrity errors (e.g. FK, nullability, unrelated PK)
+        if not is_expected_unique and not is_pk_collision:
+            logger.error("Unexpected IntegrityError during persist_risk_decision: %s", exc)
+            raise exc
+
+        # For expected deterministic unique collision, fetch DB row and verify exact semantic identity
         stmt = (
             select(RiskDecisionRecord)
             .where(
@@ -296,7 +342,13 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
         )
         row = (await session.scalars(stmt)).first()
         if row is not None:
-            return RiskDecision.model_validate(row.payload)
+            if (
+                row.candidate_id == decision.candidate_id
+                and row.profile_id == decision.profile_id
+                and row.dependency_fingerprint == decision.dependency_fingerprint
+            ):
+                return RiskDecision.model_validate(row.payload)
+
         raise exc
     return decision
 

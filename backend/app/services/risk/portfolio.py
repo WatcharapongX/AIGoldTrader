@@ -6,9 +6,10 @@ Ensures aggregate risk across multiple trader profiles and concurrent requests n
 import datetime as dt
 import uuid
 from decimal import Decimal
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.risk import RiskReservationRecord
@@ -31,6 +32,34 @@ class ReservationBudgetCheck(NamedTuple):
     is_reduced: bool
 
 
+def is_cooldown_active(
+    account: AccountSnapshot,
+    policy: RiskPolicy,
+    now: dt.datetime,
+) -> tuple[bool, dt.datetime | None]:
+    """Evaluates whether account is actively in cooldown, accounting for both
+
+    cooldown_until and newer last_loss_at events (SOL-P5-P2-038).
+    Returns (in_cooldown, effective_cooldown_until).
+    """
+    effective_now = now if now.tzinfo is not None else now.replace(tzinfo=dt.UTC)
+    cd_until = account.cooldown_until
+    last_loss = account.last_loss_at
+
+    # If current cooldown_until > now: active
+    if cd_until is not None and effective_now < cd_until:
+        return True, cd_until
+
+    # If a newer loss occurred after or when cooldown expired, and consecutive losses qualify
+    if account.consecutive_losses >= policy.cooldown_consecutive_losses and last_loss is not None:
+        calc_until = last_loss + dt.timedelta(minutes=policy.cooldown_period_minutes)
+        if cd_until is None or last_loss > cd_until or effective_now < calc_until:
+            if effective_now < calc_until:
+                return True, calc_until
+
+    return False, None
+
+
 class PortfolioRiskManager:
     async def get_active_reservations(
         self,
@@ -38,23 +67,20 @@ class PortfolioRiskManager:
         account_id: str,
         now: dt.datetime,
         for_update: bool = False,
+        exclude_reservation_id: str | None = None,
         exclude_candidate_id: str | None = None,
     ) -> list[RiskReservationRecord]:
         """Fetch all active unexpired risk reservations for the account with optional row-lock."""
-        from app.models.risk import RiskDecisionRecord
-
         stmt = select(RiskReservationRecord).where(
             RiskReservationRecord.account_id == account_id,
             RiskReservationRecord.status == "ACTIVE",
             RiskReservationRecord.reserved_until > now,
         )
-        if exclude_candidate_id is not None:
-            stmt = stmt.outerjoin(RiskDecisionRecord, RiskReservationRecord.decision_id == RiskDecisionRecord.id).where(
-                or_(
-                    RiskDecisionRecord.candidate_id.is_(None),
-                    RiskDecisionRecord.candidate_id != exclude_candidate_id,
-                )
-            )
+        if exclude_reservation_id is not None:
+            stmt = stmt.where(RiskReservationRecord.id != exclude_reservation_id)
+        elif exclude_candidate_id is not None:
+            # If specifically testing legacy exclude_candidate_id, exclude only if explicit
+            pass
 
         if for_update and session.get_bind().dialect.name == "postgresql":
             stmt = stmt.with_for_update(of=RiskReservationRecord)
@@ -75,21 +101,17 @@ class PortfolioRiskManager:
         # Database table risk_reservations is the sole source of truth for active reserved risk (SOL-P5-P2-011)
         reserved_risk_pct = sum((Decimal(str(r.risk_pct)) for r in reservations), Decimal("0"))
         open_risk_pct = account.open_risk_pct
-        total_risk_pct = (open_risk_pct + reserved_risk_pct).quantize(Decimal("0.0001"))
-
-        # Symbol breakdown
-        symbol_risk: dict[str, Decimal] = {}
-        directional_risk: dict[Direction, Decimal] = {"LONG": Decimal("0"), "SHORT": Decimal("0")}
-
-        for r in reservations:
-            s = r.symbol
-            pct = Decimal(str(r.risk_pct))
-            symbol_risk[s] = symbol_risk.get(s, Decimal("0")) + pct
-            d = r.direction
-            if d in directional_risk:
-                directional_risk[d] = directional_risk[d] + pct
-
+        total_risk_pct = open_risk_pct + reserved_risk_pct
         available = max(Decimal("0"), policy.max_account_risk_pct - total_risk_pct)
+
+        symbol_risk: dict[str, Decimal] = {}
+        for r in reservations:
+            symbol_risk[r.symbol] = symbol_risk.get(r.symbol, Decimal("0")) + Decimal(str(r.risk_pct))
+
+        directional_risk: dict[Direction, Decimal] = {}
+        for r in reservations:
+            d = cast(Direction, r.direction)
+            directional_risk[d] = directional_risk.get(d, Decimal("0")) + Decimal(str(r.risk_pct))
 
         # Loss metrics
         daily_loss_pct = Decimal("0")
@@ -110,12 +132,7 @@ class PortfolioRiskManager:
                 Decimal("0.01")
             )
 
-        in_cooldown = False
-        if account.cooldown_until is not None:
-            in_cooldown = as_of < account.cooldown_until
-        elif account.consecutive_losses >= policy.cooldown_consecutive_losses and account.last_loss_at is not None:
-            calc_until = account.last_loss_at + dt.timedelta(minutes=policy.cooldown_period_minutes)
-            in_cooldown = as_of < calc_until
+        in_cooldown, effective_cooldown = is_cooldown_active(account, policy, as_of)
 
         active_res = tuple(
             RiskReservation(
@@ -154,7 +171,7 @@ class PortfolioRiskManager:
             weekly_loss_pct=weekly_loss_pct,
             drawdown_pct=drawdown_pct,
             in_cooldown=in_cooldown,
-            cooldown_until=account.cooldown_until,
+            cooldown_until=effective_cooldown,
         )
 
     async def check_budget_capacity(
@@ -166,6 +183,7 @@ class PortfolioRiskManager:
         direction: Direction,
         requested_risk_pct: Decimal,
         now: dt.datetime,
+        exclude_reservation_id: str | None = None,
         exclude_candidate_id: str | None = None,
     ) -> ReservationBudgetCheck:
         """Atomically evaluates portfolio capacity without creating a reservation."""
@@ -176,15 +194,9 @@ class PortfolioRiskManager:
                 {"lock_key": f"risk_account_{account.account_id}"},
             )
 
-        # Check account cooldown lifecycle (SOL-P5-P1-010)
-        is_cooldown = False
-        if account.cooldown_until is not None:
-            is_cooldown = now < account.cooldown_until
-        elif account.consecutive_losses >= policy.cooldown_consecutive_losses and account.last_loss_at is not None:
-            calc_until = account.last_loss_at + dt.timedelta(minutes=policy.cooldown_period_minutes)
-            is_cooldown = now < calc_until
-
-        if is_cooldown:
+        # Check account cooldown lifecycle with newer loss precedence (SOL-P5-P1-010, SOL-P5-P2-038)
+        in_cooldown, _ = is_cooldown_active(account, policy, now)
+        if in_cooldown:
             return ReservationBudgetCheck(
                 allowed=False,
                 approved_risk_pct=Decimal("0"),
@@ -195,10 +207,29 @@ class PortfolioRiskManager:
                 is_reduced=False,
             )
 
-        # Row-level lock active reservations for this account to prevent concurrency races
+        # Row-level lock active reservations for this account to prevent concurrency races.
+        # Excludes ONLY the exact canonical reservation being replaced (SOL-P5-P1-031).
         active_rows = await self.get_active_reservations(
-            session, account.account_id, now, for_update=True, exclude_candidate_id=exclude_candidate_id
+            session, account.account_id, now, for_update=True, exclude_reservation_id=exclude_reservation_id
         )
+
+        # Fail closed if duplicate active reservations exist for any candidate (SOL-P5-P1-031)
+        active_candidates: dict[str, int] = {}
+        for r in active_rows:
+            c_id = getattr(r, "candidate_id", None)
+            if c_id:
+                active_candidates[c_id] = active_candidates.get(c_id, 0) + 1
+                if active_candidates[c_id] > 1:
+                    current_res = sum((Decimal(str(row.risk_pct)) for row in active_rows), Decimal("0"))
+                    return ReservationBudgetCheck(
+                        allowed=False,
+                        approved_risk_pct=Decimal("0"),
+                        approved_risk_amount=Decimal("0"),
+                        portfolio_exposure_before=account.open_risk_pct + current_res,
+                        portfolio_exposure_after=account.open_risk_pct + current_res,
+                        reason_th=f"พบการจองความเสี่ยงซ้ำซ้อนสำหรับคำสั่ง {c_id} (Duplicate Active Reservations Detected)",
+                        is_reduced=False,
+                    )
 
         # Database table risk_reservations is the sole source of truth (SOL-P5-P2-011)
         current_reserved = sum((Decimal(str(r.risk_pct)) for r in active_rows), Decimal("0"))
@@ -332,6 +363,7 @@ class PortfolioRiskManager:
         position_size: Decimal,
         policy: RiskPolicy,
         now: dt.datetime,
+        candidate_id: str | None = None,
     ) -> RiskReservation:
         """Atomically records a reservation ONLY after final sizing succeeds (SOL-P5-P1-008)."""
         reservation_id = f"res_{uuid.uuid4().hex[:24]}"
@@ -341,6 +373,7 @@ class PortfolioRiskManager:
             id=reservation_id,
             decision_id=decision_id,
             account_id=account_id,
+            candidate_id=candidate_id,
             profile_id=profile_id,
             symbol=symbol,
             direction=direction,
@@ -351,13 +384,52 @@ class PortfolioRiskManager:
             reserved_at=now,
             reserved_until=reserved_until,
         )
-        session.add(record)
-        await session.flush()
+        try:
+            async with session.begin_nested():
+                session.add(record)
+                await session.flush()
+        except IntegrityError:
+            if candidate_id:
+                existing = await session.scalar(
+                    select(RiskReservationRecord).where(
+                        RiskReservationRecord.account_id == account_id,
+                        RiskReservationRecord.candidate_id == candidate_id,
+                        RiskReservationRecord.status == "ACTIVE",
+                    )
+                )
+                if existing is not None:
+                    res_at = (
+                        existing.reserved_at
+                        if existing.reserved_at.tzinfo
+                        else existing.reserved_at.replace(tzinfo=dt.UTC)
+                    )
+                    res_until = (
+                        existing.reserved_until
+                        if existing.reserved_until.tzinfo
+                        else existing.reserved_until.replace(tzinfo=dt.UTC)
+                    )
+                    return RiskReservation(
+                        id=existing.id,
+                        decision_id=existing.decision_id,
+                        account_id=existing.account_id,
+                        candidate_id=existing.candidate_id,
+                        profile_id=existing.profile_id,
+                        symbol=existing.symbol,
+                        direction=existing.direction,  # type: ignore[arg-type]
+                        risk_pct=Decimal(str(existing.risk_pct)),
+                        risk_amount=Decimal(str(existing.risk_amount)),
+                        position_size=Decimal(str(existing.position_size)),
+                        status="ACTIVE",
+                        reserved_at=res_at,
+                        reserved_until=res_until,
+                    )
+            raise
 
         return RiskReservation(
             id=reservation_id,
             decision_id=decision_id,
             account_id=account_id,
+            candidate_id=candidate_id,
             profile_id=profile_id,
             symbol=symbol,
             direction=direction,

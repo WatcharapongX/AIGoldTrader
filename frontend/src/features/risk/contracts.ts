@@ -2,6 +2,8 @@
  * Phase 5 Risk Engine & Portfolio Risk contracts and strict runtime validators.
  */
 
+export type ResourceStatus = 'LOADING' | 'READY' | 'STALE' | 'UNAVAILABLE';
+
 export interface RiskPolicyData {
   version: string;
   max_risk_per_trade_pct: string;

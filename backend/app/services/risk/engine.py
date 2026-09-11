@@ -90,12 +90,16 @@ class RiskEngine:
             )
 
         # 2. Evaluate automatic safety triggers (daily loss, drawdown, data health)
+        provider_name = "mt5" if (quote and quote.source.startswith("mt5")) else "market_data"
+        source_name = quote.source if quote else "default"
         await kill_switch_manager.evaluate_automatic_triggers(
             session=session,
             account=account,
             policy=policy,
             quote_stale=quote_is_stale,
             quote_stale_reason=quote_stale_reason,
+            provider=provider_name,
+            source=source_name,
         )
 
         # 3. Kill Switch check (dominates all evaluations, fail-closed on UNKNOWN)
@@ -182,8 +186,24 @@ class RiskEngine:
                                 else ("POST" if ev.id in relevant_event_ids and in_post else "CALM")
                             )
                         ),
-                        provider=getattr(ev, "provider", "") or getattr(news_context, "provider", ""),
-                        revision_id=getattr(ev, "revision_id", "") or getattr(news_context, "revision_id", ""),
+                        provider=getattr(ev, "source", "")
+                        or getattr(ev, "provider", "")
+                        or getattr(news_context, "source", "")
+                        or getattr(news_context, "provider", ""),
+                        source=getattr(ev, "source", "")
+                        or getattr(ev, "provider", "")
+                        or getattr(news_context, "source", "")
+                        or getattr(news_context, "provider", ""),
+                        revision_id=str(getattr(ev, "revision_version", ""))
+                        if getattr(ev, "revision_version", None) is not None
+                        else (
+                            getattr(ev, "revision_id", "")
+                            or str(getattr(news_context, "revision_version", ""))
+                            if getattr(news_context, "revision_version", None) is not None
+                            else getattr(news_context, "revision_id", "")
+                        ),
+                        revision_version=getattr(ev, "revision_version", None)
+                        or getattr(news_context, "revision_version", None),
                     )
                     for ev in news_context.events
                 ]
@@ -195,10 +215,20 @@ class RiskEngine:
                     event_ids=tuple(relevant_event_ids),
                     description_th=desc,
                     events=tuple(events_audit),
-                    provider=getattr(news_context, "provider", "")
+                    provider=getattr(news_context, "source", "")
+                    or getattr(news_context, "provider", "")
                     or (events_audit[0].provider if events_audit else ""),
-                    revision_id=getattr(news_context, "revision_id", "")
-                    or (events_audit[0].revision_id if events_audit else ""),
+                    source=getattr(news_context, "source", "")
+                    or getattr(news_context, "provider", "")
+                    or (events_audit[0].source if events_audit else ""),
+                    revision_id=str(getattr(news_context, "revision_version", ""))
+                    if getattr(news_context, "revision_version", None) is not None
+                    else (
+                        getattr(news_context, "revision_id", "")
+                        or (events_audit[0].revision_id if events_audit else "")
+                    ),
+                    revision_version=getattr(news_context, "revision_version", None)
+                    or (events_audit[0].revision_version if events_audit else None),
                 )
             else:
                 news_prov = NewsRiskProvenance(
@@ -208,25 +238,33 @@ class RiskEngine:
                     in_post_news_window=False,
                     event_ids=(),
                     description_th="สภาวะข่าวปกติ ไม่มีเหตุการณ์สำคัญ",
-                    provider=getattr(news_context, "provider", ""),
-                    revision_id=getattr(news_context, "revision_id", ""),
+                    provider=getattr(news_context, "source", "") or getattr(news_context, "provider", ""),
+                    source=getattr(news_context, "source", "") or getattr(news_context, "provider", ""),
+                    revision_id=str(getattr(news_context, "revision_version", ""))
+                    if getattr(news_context, "revision_version", None) is not None
+                    else getattr(news_context, "revision_id", ""),
+                    revision_version=getattr(news_context, "revision_version", None),
                 )
 
         # 5. Evaluate temporal safety flags
         account_is_stale = (now - account.as_of).total_seconds() > policy.account_freshness_seconds
         plan_is_expired = plan.expires_at is not None and plan.expires_at <= now
-        cooldown_active = False
-        if account.cooldown_until is not None:
-            cooldown_active = now < account.cooldown_until
-        elif account.consecutive_losses >= policy.cooldown_consecutive_losses and account.last_loss_at is not None:
-            calc_until = account.last_loss_at + dt.timedelta(minutes=policy.cooldown_period_minutes)
-            cooldown_active = now < calc_until
+        from app.services.risk.portfolio import is_cooldown_active
+
+        cooldown_active, _ = is_cooldown_active(account, policy, now)
 
         # 6. Calculate current portfolio exposure for fingerprint (sole source: DB reservations)
-        active_reservations = await portfolio_manager.get_active_reservations(
-            session, account.account_id, now, exclude_candidate_id=candidate.id
+        # Exclude candidate's own active reservation so baseline exposure and fingerprint
+        # are deterministic across retries
+        active_reservations = await portfolio_manager.get_active_reservations(session, account.account_id, now)
+        current_reserved = sum(
+            (
+                Decimal(str(r.risk_pct))
+                for r in active_reservations
+                if getattr(r, "candidate_id", None) != candidate.id
+            ),
+            Decimal("0"),
         )
-        current_reserved = sum((Decimal(str(r.risk_pct)) for r in active_reservations), Decimal("0"))
         current_exposure = account.open_risk_pct + current_reserved
 
         # 7. Compute canonical deterministic dependency fingerprint & ID
@@ -300,14 +338,8 @@ class RiskEngine:
                 )
 
         # Cooldown check lifecycle (SOL-P5-P1-010, SOL-P5-P2-038)
-        is_cooldown = False
-        if account.cooldown_until is not None:
-            is_cooldown = now < account.cooldown_until
-        elif account.consecutive_losses >= policy.cooldown_consecutive_losses and account.last_loss_at is not None:
-            calc_until = account.last_loss_at + dt.timedelta(minutes=policy.cooldown_period_minutes)
-            is_cooldown = now < calc_until
-
-        if is_cooldown:
+        in_cooldown, _ = is_cooldown_active(account, policy, now)
+        if in_cooldown:
             blocked_reasons_th.append(
                 f"บัญชีอยู่ในช่วงพักการเทรด (Cooldown) เนื่องจากขาดทุนต่อเนื่อง {account.consecutive_losses} ครั้ง"
             )
@@ -356,6 +388,12 @@ class RiskEngine:
             )
 
         # 9. Portfolio budget capacity check (pure check, no reservation yet - SOL-P5-P1-008)
+        # Excludes ONLY the exact reservation being canonically replaced (SOL-P5-P1-031)
+        existing_candidate_res = [
+            r for r in active_reservations if getattr(r, "candidate_id", None) == candidate.id
+        ]
+        exclude_res_id = existing_candidate_res[0].id if len(existing_candidate_res) == 1 else None
+
         budget_check = await portfolio_manager.check_budget_capacity(
             session=session,
             account=account,
@@ -364,7 +402,7 @@ class RiskEngine:
             direction=direction,
             requested_risk_pct=target_risk_pct,
             now=now,
-            exclude_candidate_id=candidate.id,
+            exclude_reservation_id=exclude_res_id,
         )
 
         if not budget_check.allowed:
@@ -428,6 +466,7 @@ class RiskEngine:
             position_size=final_sizing.position_size,
             policy=policy,
             now=now,
+            candidate_id=candidate.id,
         )
 
         # 12. Construct APPROVED or REDUCED Decision

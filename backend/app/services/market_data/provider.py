@@ -72,6 +72,10 @@ class MarketDataProvider(ABC):
     authoritative_candles = False
     description = "Deterministic replay; not live market prices"
 
+    @property
+    def broker_server(self) -> str | None:
+        return None
+
     async def candle_updates(self, now: dt.datetime) -> list[Candle]:
         return []
 

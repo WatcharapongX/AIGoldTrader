@@ -8,6 +8,7 @@ corrupt candle extrema. M3 is folded from M1 using canonical UTC buckets.
 import asyncio
 import datetime as dt
 import importlib
+import logging
 import threading
 from decimal import Decimal
 from pathlib import Path
@@ -15,6 +16,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.services.market_data.domain import SECONDS, Candle, Tick, Timeframe, bucket
 from app.services.market_data.provider import MarketDataProvider
+
+logger = logging.getLogger(__name__)
 
 # Provider constants stay in this adapter, never in domain/service/frontend.
 RATE_TIMEFRAMES = {tf: "TIMEFRAME_" + tf.value for tf in Timeframe if tf != Timeframe.M3}
@@ -105,6 +108,18 @@ class MT5MarketDataProvider(MarketDataProvider):
         except ZoneInfoNotFoundError:
             raise MT5Unavailable("MT5_TIMEZONE_UNAVAILABLE") from None
         self.last_quote: dt.datetime | None = None
+
+    @property
+    def broker_server(self) -> str | None:
+        """Exposes authoritative broker server from MT5 account_info or configured expected server."""
+        if self._gateway is not None:
+            try:
+                acc = self._gateway.call("account_info")
+                if acc is not None and getattr(acc, "server", None):
+                    return str(acc.server)
+            except Exception as exc:
+                logger.debug("Failed to read broker server from MT5 account_info: %s", exc)
+        return self.settings.mt5_expected_server or None
 
     async def connect(self):
         await asyncio.to_thread(self._connect)

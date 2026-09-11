@@ -1,9 +1,11 @@
 """Phase 5 Safety Closure: persistent data health tracking, old MT5 seed quarantine, and downgrade audit protection."""
 
 import datetime as dt
+
 import sqlalchemy as sa
-from alembic import context, op
 from sqlalchemy.dialects import postgresql
+
+from alembic import context, op
 
 revision = "0010_phase5_safety_closure"
 down_revision = "0009_phase5_final_hardening"

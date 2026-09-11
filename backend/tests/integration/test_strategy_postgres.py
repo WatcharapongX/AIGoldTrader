@@ -57,6 +57,17 @@ def test_strategy_migration_history_idempotence_and_preservation(isolated_postgr
     _alembic("upgrade", "head")
     _alembic("check")
     assert conn.execute("SELECT to_jsonb(s) FROM symbols s").fetchall() == original
+    for tbl in (
+        "paper_account_states",
+        "data_health_records",
+        "risk_policies",
+        "symbol_specifications",
+        "account_snapshots",
+        "risk_decisions",
+        "risk_reservations",
+        "kill_switch_records",
+    ):
+        conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(tbl)))
     _alembic("downgrade", "0005_economic_events")
     _alembic("upgrade", "head")
     _alembic("check")

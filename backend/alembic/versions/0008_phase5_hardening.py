@@ -1,7 +1,9 @@
 """Phase 5 Corrective Hardening: deterministic fingerprint, reservation uniqueness, and kill switch bootstrap."""
 
 import datetime as dt
+
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "0008_phase5_hardening"
