@@ -15,14 +15,17 @@ export interface RiskPolicyData {
   max_drawdown_pct: string;
   cooldown_consecutive_losses: number;
   max_spread_absolute: string;
-  news_blackout_minutes: number;
-  news_reduction_window_minutes: number;
+  news_high_impact_blackout_pre_minutes: number;
+  news_high_impact_pre_minutes: number;
+  news_high_impact_post_minutes: number;
+  news_blackout_minutes?: number;
+  news_reduction_window_minutes?: number;
   news_reduction_factor: string;
   reservation_ttl_seconds: number;
 }
 
 export interface KillSwitchData {
-  state: 'ACTIVE' | 'INACTIVE';
+  state: 'ACTIVE' | 'INACTIVE' | 'UNKNOWN';
   trigger_type: string;
   reason_th: string;
   activated_at: string;
@@ -49,6 +52,7 @@ export interface RiskReservationData {
 
 export interface PortfolioRiskData {
   account_id: string;
+  account_source: string;
   as_of: string;
   open_risk_pct: string;
   reserved_risk_pct: string;
@@ -65,6 +69,7 @@ export interface PortfolioRiskData {
   weekly_loss_pct: string;
   drawdown_pct: string;
   in_cooldown: boolean;
+  cooldown_until: string | null;
 }
 
 export interface MarketProvenanceData {
@@ -112,6 +117,7 @@ export interface RiskDecisionData {
   policy_version: string;
   as_of: string;
   expires_at: string;
+  dependency_fingerprint: string;
   reasons_th: string[];
   warnings_th: string[];
   blocked_reasons_th: string[];
@@ -159,6 +165,10 @@ export function parseRiskPolicy(raw: unknown): RiskPolicyData {
   if (!isNumericStringOrNumber(d.max_directional_risk_pct)) fail('Invalid max_directional_risk_pct');
   if (typeof d.max_concurrent_trades !== 'number' || d.max_concurrent_trades <= 0) fail('Invalid max_concurrent_trades');
 
+  const blackoutPre = Number(d.news_high_impact_blackout_pre_minutes ?? d.news_blackout_minutes ?? 5);
+  const preMinutes = Number(d.news_high_impact_pre_minutes ?? d.news_reduction_window_minutes ?? 15);
+  const postMinutes = Number(d.news_high_impact_post_minutes ?? 15);
+
   return {
     version: d.version,
     max_risk_per_trade_pct: String(d.max_risk_per_trade_pct),
@@ -172,8 +182,11 @@ export function parseRiskPolicy(raw: unknown): RiskPolicyData {
     max_drawdown_pct: String(d.max_drawdown_pct),
     cooldown_consecutive_losses: Number(d.cooldown_consecutive_losses),
     max_spread_absolute: String(d.max_spread_absolute),
-    news_blackout_minutes: Number(d.news_blackout_minutes),
-    news_reduction_window_minutes: Number(d.news_reduction_window_minutes),
+    news_high_impact_blackout_pre_minutes: blackoutPre,
+    news_high_impact_pre_minutes: preMinutes,
+    news_high_impact_post_minutes: postMinutes,
+    news_blackout_minutes: blackoutPre,
+    news_reduction_window_minutes: preMinutes,
     news_reduction_factor: String(d.news_reduction_factor),
     reservation_ttl_seconds: Number(d.reservation_ttl_seconds),
   };
@@ -182,14 +195,14 @@ export function parseRiskPolicy(raw: unknown): RiskPolicyData {
 export function parseKillSwitch(raw: unknown): KillSwitchData {
   if (!raw || typeof raw !== 'object') fail('Kill switch must be object');
   const d = raw as Record<string, unknown>;
-  if (d.state !== 'ACTIVE' && d.state !== 'INACTIVE') fail('Invalid kill switch state');
+  if (d.state !== 'ACTIVE' && d.state !== 'INACTIVE' && d.state !== 'UNKNOWN') fail('Invalid kill switch state');
   if (typeof d.trigger_type !== 'string') fail('Invalid trigger_type');
   if (typeof d.reason_th !== 'string') fail('Invalid reason_th');
   parseInstant(d.activated_at);
   if (d.cleared_at !== null && d.cleared_at !== undefined) parseInstant(d.cleared_at);
 
   return {
-    state: d.state as 'ACTIVE' | 'INACTIVE',
+    state: d.state as 'ACTIVE' | 'INACTIVE' | 'UNKNOWN',
     trigger_type: d.trigger_type,
     reason_th: d.reason_th,
     activated_at: String(d.activated_at),
@@ -247,6 +260,7 @@ export function parsePortfolioRisk(raw: unknown): PortfolioRiskData {
 
   return {
     account_id: String(d.account_id),
+    account_source: String(d.account_source || 'CONFIGURED_PAPER'),
     as_of: String(d.as_of),
     open_risk_pct: String(d.open_risk_pct),
     reserved_risk_pct: String(d.reserved_risk_pct),
@@ -268,6 +282,7 @@ export function parsePortfolioRisk(raw: unknown): PortfolioRiskData {
     weekly_loss_pct: String(d.weekly_loss_pct || '0.00'),
     drawdown_pct: String(d.drawdown_pct || '0.00'),
     in_cooldown: Boolean(d.in_cooldown),
+    cooldown_until: d.cooldown_until ? String(d.cooldown_until) : null,
   };
 }
 
@@ -309,6 +324,7 @@ export function parseRiskDecision(raw: unknown): RiskDecisionData {
     policy_version: String(d.policy_version),
     as_of: String(d.as_of),
     expires_at: String(d.expires_at),
+    dependency_fingerprint: String(d.dependency_fingerprint || ''),
     reasons_th: Array.isArray(d.reasons_th) ? d.reasons_th.map(String) : [],
     warnings_th: Array.isArray(d.warnings_th) ? d.warnings_th.map(String) : [],
     blocked_reasons_th: Array.isArray(d.blocked_reasons_th) ? d.blocked_reasons_th.map(String) : [],

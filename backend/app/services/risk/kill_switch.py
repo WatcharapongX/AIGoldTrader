@@ -5,13 +5,21 @@ Kill Switch state dominates all risk decisions; if active, all risk approvals ar
 
 import datetime as dt
 import uuid
-from typing import NamedTuple
+from decimal import Decimal
+from typing import NamedTuple, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.risk import KillSwitchRecord
-from app.services.risk.domain import POLICY_VERSION, KillSwitchState, KillSwitchTrigger
+from app.services.risk.domain import (
+    POLICY_VERSION,
+    AccountSnapshot,
+    KillSwitchState,
+    KillSwitchStatus,
+    KillSwitchTrigger,
+    RiskPolicy,
+)
 
 
 class KillSwitchCheck(NamedTuple):
@@ -31,35 +39,31 @@ class KillSwitchManager:
         self._cached_state: KillSwitchState | None = None
 
     async def get_state(self, session: AsyncSession) -> KillSwitchState:
-        """Fetch latest kill switch state from DB; fallback to default INACTIVE if empty."""
+        """Fetch latest kill switch state from DB; fallback to UNKNOWN (fail-closed) if empty (SOL-P5-P1-009)."""
         row = (
-            await session.scalars(
-                select(KillSwitchRecord)
-                .order_by(KillSwitchRecord.activated_at.desc())
-                .limit(1)
-            )
+            await session.scalars(select(KillSwitchRecord).order_by(KillSwitchRecord.activated_at.desc()).limit(1))
         ).first()
 
         if row is None:
             now = dt.datetime.now(dt.UTC)
             return KillSwitchState(
-                id=f"ks_{uuid.uuid4().hex[:16]}",
-                state="INACTIVE",
-                trigger_type="MANUAL",
-                reason_th="ระบบปกติ Kill Switch ไม่ได้ทำงาน",
+                id="ks_unknown",
+                state="UNKNOWN",
+                trigger_type="AUTOMATIC_SYSTEM_HEALTH",
+                reason_th="ไม่สามารถตรวจสอบสถานะ Kill Switch ได้ (ฐานข้อมูลยังไม่มีข้อมูลสถานะ)",
                 activated_at=now,
                 activated_by="system",
-                cleared_at=now,
-                cleared_by="system",
+                cleared_at=None,
+                cleared_by=None,
                 policy_version=POLICY_VERSION,
             )
 
         return KillSwitchState(
             id=row.id,
-            state=row.state,
-            trigger_type=row.trigger_type,
+            state=cast(KillSwitchStatus, row.state),
+            trigger_type=cast(KillSwitchTrigger, row.trigger_type),
             reason_th=row.reason_th,
-            activated_at=_to_utc(row.activated_at),
+            activated_at=_to_utc(row.activated_at) or dt.datetime.now(dt.UTC),
             activated_by=row.activated_by,
             cleared_at=_to_utc(row.cleared_at),
             cleared_by=row.cleared_by,
@@ -73,6 +77,12 @@ class KillSwitchManager:
                 is_active=True,
                 state=state,
                 blocked_reason_th=f"ไม่อนุมัติเนื่องจาก Kill Switch ทำงาน ({state.reason_th})",
+            )
+        if state.state == "UNKNOWN":
+            return KillSwitchCheck(
+                is_active=True,
+                state=state,
+                blocked_reason_th="ไม่อนุมัติเนื่องจากไม่สามารถยืนยันสถานะ Kill Switch ได้ (Fail-closed)",
             )
         return KillSwitchCheck(
             is_active=False,
@@ -88,6 +98,10 @@ class KillSwitchManager:
         activated_by: str,
         policy_version: str = POLICY_VERSION,
     ) -> KillSwitchState:
+        # Serialized execution across workers
+        if session.get_bind().dialect.name == "postgresql":
+            await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('kill_switch_action'))"))
+
         now = dt.datetime.now(dt.UTC)
         current = await self.get_state(session)
         if current.state == "ACTIVE":
@@ -141,6 +155,10 @@ class KillSwitchManager:
         cleared_by: str,
         reason_th: str = "ผู้ดูแลระบบยกเลิกสถานะ Kill Switch",
     ) -> KillSwitchState:
+        # Serialized execution across workers
+        if session.get_bind().dialect.name == "postgresql":
+            await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('kill_switch_action'))"))
+
         now = dt.datetime.now(dt.UTC)
         current = await self.get_state(session)
         if current.state == "INACTIVE":
@@ -186,6 +204,58 @@ class KillSwitchManager:
         )
         self._cached_state = state
         return state
+
+    async def evaluate_automatic_triggers(
+        self,
+        session: AsyncSession,
+        account: AccountSnapshot,
+        policy: RiskPolicy,
+        quote_stale: bool = False,
+        quote_stale_reason: str = "",
+    ) -> KillSwitchState | None:
+        """Evaluates automatic safety triggers (daily loss limit, drawdown limit, data health).
+        If triggered, activates and persists the Kill Switch state immediately (SOL-P5-P1-013, 014, 015).
+        """
+        # Daily loss trigger
+        if account.daily_realized_pnl < Decimal("0") and account.equity > Decimal("0"):
+            daily_loss_pct = abs(account.daily_realized_pnl) / account.equity * Decimal("100")
+            if daily_loss_pct >= policy.daily_loss_limit_pct:
+                return await self.activate(
+                    session=session,
+                    trigger_type="AUTOMATIC_DAILY_LOSS",
+                    reason_th=(
+                        f"ผลขาดทุนรายวันสะสม ({daily_loss_pct:.2f}%) "
+                        f"เกินเพดานความปลอดภัย ({policy.daily_loss_limit_pct:.2f}%)"
+                    ),
+                    activated_by="system_risk_engine",
+                    policy_version=policy.version,
+                )
+
+        # Drawdown trigger
+        if account.peak_equity > Decimal("0") and account.equity < account.peak_equity:
+            drawdown_pct = (account.peak_equity - account.equity) / account.peak_equity * Decimal("100")
+            if drawdown_pct >= policy.max_drawdown_pct:
+                return await self.activate(
+                    session=session,
+                    trigger_type="AUTOMATIC_DRAWDOWN",
+                    reason_th=(
+                        f"ระดับ Drawdown ({drawdown_pct:.2f}%) เกินเพดานความปลอดภัยสูงสุด ({policy.max_drawdown_pct:.2f}%)"
+                    ),
+                    activated_by="system_risk_engine",
+                    policy_version=policy.version,
+                )
+
+        # Data health trigger
+        if quote_stale:
+            return await self.activate(
+                session=session,
+                trigger_type="AUTOMATIC_DATA_HEALTH",
+                reason_th=f"ข้อมูลราคาผิดปกติหรือไม่สดใหม่: {quote_stale_reason}",
+                activated_by="system_data_health",
+                policy_version=policy.version,
+            )
+
+        return None
 
 
 kill_switch_manager = KillSwitchManager()

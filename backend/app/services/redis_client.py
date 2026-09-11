@@ -4,6 +4,7 @@ Redis ไม่ใช่ source of truth (ADR-003) — ระบบหลัก�
 """
 
 import asyncio
+import inspect
 import json
 import logging
 from collections.abc import Callable, Coroutine
@@ -44,7 +45,10 @@ async def redis_health() -> bool | None:
         return None
     try:
         client = get_redis()
-        return bool(await client.ping())
+        ping_res = client.ping()
+        if inspect.isawaitable(ping_res):
+            ping_res = await ping_res
+        return bool(ping_res)
     except Exception:  # noqa: BLE001 — readiness probe ต้องไม่พังเมื่อ Redis ล่ม
         logger.warning("redis health check failed", exc_info=True)
         return False

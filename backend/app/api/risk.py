@@ -7,6 +7,7 @@ Execution (orders, Phase 7) is strictly forbidden.
 
 import datetime as dt
 import logging
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
@@ -16,10 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.api.market import started
 from app.api.news import service as news_service
+from app.core.config import get_settings
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.db.session import get_session
 from app.models import Role, User
 from app.models.strategy import TradeCandidateRecord
+from app.services.news.repository import event_vintages
 from app.services.risk.domain import (
     KillSwitchState,
     PortfolioRiskSummary,
@@ -31,10 +34,9 @@ from app.services.risk.engine import risk_engine
 from app.services.risk.kill_switch import kill_switch_manager
 from app.services.risk.portfolio import portfolio_manager
 from app.services.risk.repository import (
-    find_existing_decision,
     get_active_policy,
-    get_or_create_account_snapshot,
-    get_or_create_symbol_spec,
+    get_authoritative_account_snapshot,
+    get_authoritative_symbol_spec,
     list_recent_decisions,
     persist_risk_decision,
 )
@@ -63,14 +65,19 @@ async def evaluate_risk(
     session: AsyncSession = Depends(get_session),
 ):
     """Command to evaluate a trade candidate/plan and create an atomic risk reservation."""
-    now = body.as_of or dt.datetime.now(dt.UTC)
+    settings = get_settings()
+    # In PAPER mode, caller as_of is strictly ignored in favor of server UTC clock (SOL-P5-P1-007)
+    if settings.trading_mode == "PAPER":
+        now = dt.datetime.now(dt.UTC)
+    else:
+        now = body.as_of or dt.datetime.now(dt.UTC)
 
-    # 1. Idempotency fast-path: return existing unexpired decision if already evaluated
-    existing = await find_existing_decision(session, body.candidate_id, body.profile_id, now)
-    if existing:
-        return existing
+    # Validate requested_risk_pct if provided
+    if body.requested_risk_pct is not None:
+        if body.requested_risk_pct <= Decimal("0") or not body.requested_risk_pct.is_finite():
+            raise ValidationError("Requested risk percentage must be a positive finite number")
 
-    # 2. Fetch candidate record
+    # 1. Fetch candidate record with strict candidate_id AND profile_id (SOL-P5-P1-006)
     candidate_row = (
         await session.scalars(
             select(TradeCandidateRecord)
@@ -83,31 +90,23 @@ async def evaluate_risk(
     ).first()
 
     if candidate_row is None:
-        # Fallback: search by candidate ID only
-        candidate_row = (
-            await session.scalars(
-                select(TradeCandidateRecord)
-                .where(TradeCandidateRecord.id == body.candidate_id)
-                .limit(1)
-            )
-        ).first()
-
-    if candidate_row is None:
-        raise NotFoundError("Trade candidate not found")
+        raise NotFoundError("Trade candidate not found for the specified profile")
 
     candidate = SetupCandidate.model_validate(candidate_row.payload)
     if candidate.plan is None:
         raise ValidationError("Trade candidate does not contain a trade plan")
 
-    # 3. Context dependencies
+    # 2. Context dependencies
     market = await started(request)
     quote = market.quote
 
     news = None
     try:
         ns = await news_service(request)
+        events = await event_vintages(session, ns.provider.source, now)
+        events = [e for e in events if now - dt.timedelta(days=7) <= e.scheduled_at <= now + dt.timedelta(days=7)]
         news = await ns.context(
-            events=[],
+            events=events,
             as_of=now,
             candles=[],
             structure=None,
@@ -118,12 +117,17 @@ async def evaluate_risk(
         logger.warning("Failed to fetch news context for risk evaluation: %s", exc)
 
     policy = await get_active_policy(session)
-    spec = await get_or_create_symbol_spec(session, symbol=candidate.symbol, source=market.provider.source)
-    account = await get_or_create_account_snapshot(
-        session, account_id=body.account_id, user_id=str(user.id), now=now
+    spec = await get_authoritative_symbol_spec(session, symbol=candidate.symbol, source=market.provider.source, now=now)
+    account = await get_authoritative_account_snapshot(
+        session=session,
+        account_id=body.account_id,
+        user_id=str(user.id),
+        is_admin=(user.role == Role.ADMIN),
+        now=now,
     )
 
-    # 4. Evaluate and persist decision
+    # 3. Evaluate candidate (handles KillSwitch, automatic triggers,
+    # idempotency cache with fingerprint, sizing, and atomic reservation)
     decision = await risk_engine.evaluate_candidate(
         session=session,
         candidate=candidate,
@@ -177,7 +181,13 @@ async def get_portfolio_risk(
     """Read-only portfolio risk exposure and active reservations."""
     now = dt.datetime.now(dt.UTC)
     policy = await get_active_policy(session)
-    account = await get_or_create_account_snapshot(session, account_id=account_id, user_id=str(user.id), now=now)
+    account = await get_authoritative_account_snapshot(
+        session=session,
+        account_id=account_id,
+        user_id=str(user.id),
+        is_admin=(user.role == Role.ADMIN),
+        now=now,
+    )
     summary = await portfolio_manager.get_summary(session, account, policy, now)
     ks_state = await kill_switch_manager.get_state(session)
 

@@ -1,10 +1,12 @@
-"""Phase 5 repository layer for immutable risk decisions, reservations, policies, and snapshots."""
-
 import datetime as dt
+import uuid
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ForbiddenError, NotFoundError
+from app.models.account import Account
 from app.models.risk import (
     AccountSnapshotRecord,
     RiskDecisionRecord,
@@ -49,9 +51,13 @@ async def save_policy(session: AsyncSession, policy: RiskPolicy) -> RiskPolicy:
     return policy
 
 
-async def get_or_create_symbol_spec(
-    session: AsyncSession, symbol: str = "XAUUSD", source: str = "simulated"
+async def get_authoritative_symbol_spec(
+    session: AsyncSession,
+    symbol: str = "XAUUSD",
+    source: str = "simulated",
+    now: dt.datetime | None = None,
 ) -> SymbolSpecification:
+    """Fetches latest symbol specification from DB, or returns authoritative default spec without DB mutation."""
     row = (
         await session.scalars(
             select(SymbolSpecificationRecord)
@@ -65,35 +71,53 @@ async def get_or_create_symbol_spec(
     ).first()
 
     if row is None:
-        spec = default_gold_spec(source=source)
-        rec = SymbolSpecificationRecord(
-            id=spec.id,
-            symbol=spec.symbol,
-            source=spec.source,
-            tick_size=spec.tick_size,
-            tick_value=spec.tick_value,
-            contract_size=spec.contract_size,
-            volume_min=spec.volume_min,
-            volume_max=spec.volume_max,
-            volume_step=spec.volume_step,
-            digits=spec.digits,
-            observed_at=spec.observed_at,
-            payload=spec.model_dump(mode="json"),
-        )
-        session.add(rec)
-        await session.flush()
-        return spec
+        return default_gold_spec(source=source, observed_at=now)
 
     return SymbolSpecification.model_validate(row.payload)
 
 
-async def get_or_create_account_snapshot(
+async def get_or_create_symbol_spec(
+    session: AsyncSession, symbol: str = "XAUUSD", source: str = "simulated"
+) -> SymbolSpecification:
+    return await get_authoritative_symbol_spec(session, symbol=symbol, source=source)
+
+
+async def get_authoritative_account_snapshot(
     session: AsyncSession,
     account_id: str = "default_paper_account",
     user_id: str = "system",
+    is_admin: bool = False,
     now: dt.datetime | None = None,
 ) -> AccountSnapshot:
+    """Fetches authoritative snapshot for an authorized account.
+    Fails closed (404/403) on arbitrary non-existent or unauthorized accounts (SOL-P5-P1-003, SOL-P5-P1-004).
+    Pure read operation: never mutates DB on GET.
+    """
     at = now or dt.datetime.now(dt.UTC)
+
+    # 1. Account existence and authorization check
+    if account_id != "default_paper_account":
+        # Check if account exists in accounts table
+        acc_row = None
+        try:
+            parsed_uuid = uuid.UUID(account_id)
+            acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
+        except (ValueError, TypeError):
+            acc_row = await session.scalar(select(Account).where(Account.name == account_id))
+
+        if acc_row is not None:
+            # Check ownership
+            if not is_admin and user_id != "system" and str(acc_row.user_id) != str(user_id):
+                raise ForbiddenError("User is not authorized to access this account")
+        else:
+            # Check if any snapshot exists for this account_id
+            existing_snap = await session.scalar(
+                select(AccountSnapshotRecord).where(AccountSnapshotRecord.account_id == account_id).limit(1)
+            )
+            if existing_snap is None:
+                raise NotFoundError(f"Account '{account_id}' not found")
+
+    # 2. Fetch latest snapshot from DB
     row = (
         await session.scalars(
             select(AccountSnapshotRecord)
@@ -104,67 +128,66 @@ async def get_or_create_account_snapshot(
     ).first()
 
     if row is None:
-        # Default baseline test account snapshot with $10,000 equity
-        snapshot = AccountSnapshot(
+        # Default in-memory baseline for default_paper_account without mutating DB
+        return AccountSnapshot(
             id=f"snap_{account_id}_{int(at.timestamp())}",
             account_id=account_id,
-            balance=10000,
-            equity=10000,
-            free_margin=10000,
-            daily_realized_pnl=0,
-            weekly_realized_pnl=0,
-            peak_equity=10000,
-            open_risk_pct=0,
-            reserved_risk_pct=0,
+            balance=Decimal("10000.00"),
+            equity=Decimal("10000.00"),
+            free_margin=Decimal("10000.00"),
+            daily_realized_pnl=Decimal("0.00"),
+            weekly_realized_pnl=Decimal("0.00"),
+            peak_equity=Decimal("10000.00"),
+            open_risk_pct=Decimal("0.0000"),
+            reserved_risk_pct=Decimal("0.0000"),
             consecutive_losses=0,
             trading_mode="PAPER",
-            source="CONFIGURED_TEST",
+            source="CONFIGURED_PAPER",
             as_of=at,
         )
-        rec = AccountSnapshotRecord(
-            id=snapshot.id,
-            account_id=snapshot.account_id,
-            balance=snapshot.balance,
-            equity=snapshot.equity,
-            free_margin=snapshot.free_margin,
-            daily_realized_pnl=snapshot.daily_realized_pnl,
-            weekly_realized_pnl=snapshot.weekly_realized_pnl,
-            peak_equity=snapshot.peak_equity,
-            open_risk_pct=snapshot.open_risk_pct,
-            reserved_risk_pct=snapshot.reserved_risk_pct,
-            consecutive_losses=snapshot.consecutive_losses,
-            trading_mode=snapshot.trading_mode,
-            source=snapshot.source,
-            as_of=snapshot.as_of,
-            payload=snapshot.model_dump(mode="json"),
-        )
-        session.add(rec)
-        await session.flush()
-        return snapshot
 
     return AccountSnapshot.model_validate(row.payload)
+
+
+async def get_or_create_account_snapshot(
+    session: AsyncSession,
+    account_id: str = "default_paper_account",
+    user_id: str = "system",
+    now: dt.datetime | None = None,
+) -> AccountSnapshot:
+    return await get_authoritative_account_snapshot(
+        session=session,
+        account_id=account_id,
+        user_id=user_id,
+        is_admin=True,
+        now=now,
+    )
 
 
 async def find_existing_decision(
     session: AsyncSession,
     candidate_id: str,
     profile_id: str,
-    now: dt.datetime,
+    dependency_fingerprint: str | None = None,
+    now: dt.datetime | None = None,
 ) -> RiskDecision | None:
-    """Idempotency check: returns existing unexpired decision for the candidate and profile."""
-    row = (
-        await session.scalars(
-            select(RiskDecisionRecord)
-            .where(
-                RiskDecisionRecord.candidate_id == candidate_id,
-                RiskDecisionRecord.profile_id == profile_id,
-                RiskDecisionRecord.expires_at > now,
-            )
-            .order_by(RiskDecisionRecord.as_of.desc())
-            .limit(1)
+    """Idempotency check: returns existing unexpired decision matching
+    candidate, profile, and dependency fingerprint.
+    """
+    stmt = (
+        select(RiskDecisionRecord)
+        .where(
+            RiskDecisionRecord.candidate_id == candidate_id,
+            RiskDecisionRecord.profile_id == profile_id,
         )
-    ).first()
+        .order_by(RiskDecisionRecord.as_of.desc())
+    )
+    if dependency_fingerprint is not None:
+        stmt = stmt.where(RiskDecisionRecord.dependency_fingerprint == dependency_fingerprint)
+    if now is not None:
+        stmt = stmt.where(RiskDecisionRecord.expires_at > now)
 
+    row = (await session.scalars(stmt.limit(1))).first()
     if row:
         return RiskDecision.model_validate(row.payload)
     return None
@@ -193,6 +216,7 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
         policy_version=decision.policy_version,
         as_of=decision.as_of,
         expires_at=decision.expires_at,
+        dependency_fingerprint=decision.dependency_fingerprint or "default_fingerprint",
         payload=decision.model_dump(mode="json"),
     )
     session.add(record)

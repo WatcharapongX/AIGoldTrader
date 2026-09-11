@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -46,9 +47,7 @@ class SymbolSpecificationRecord(Base):
     digits: Mapped[int] = mapped_column(nullable=False)
     observed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False)
-    __table_args__ = (
-        Index("ix_symbol_spec_symbol_source", "symbol", "source", "observed_at"),
-    )
+    __table_args__ = (Index("ix_symbol_spec_symbol_source", "symbol", "source", "observed_at"),)
 
 
 class AccountSnapshotRecord(Base):
@@ -69,9 +68,7 @@ class AccountSnapshotRecord(Base):
     source: Mapped[str] = mapped_column(String(40), default="CONFIGURED_TEST", nullable=False)
     as_of: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False)
-    __table_args__ = (
-        Index("ix_account_snapshot_as_of", "account_id", "as_of"),
-    )
+    __table_args__ = (Index("ix_account_snapshot_as_of", "account_id", "as_of"),)
 
 
 class RiskDecisionRecord(Base):
@@ -96,12 +93,15 @@ class RiskDecisionRecord(Base):
     stop_distance: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
     account_snapshot_id: Mapped[str] = mapped_column(String(64), nullable=False)
     policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    dependency_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     as_of: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False)
     __table_args__ = (
         Index("ix_risk_decision_candidate", "candidate_id", "profile_id"),
         Index("ix_risk_decision_as_of", "symbol", "as_of"),
+        Index("ix_risk_decision_fingerprint", "candidate_id", "profile_id", "dependency_fingerprint"),
+        UniqueConstraint("candidate_id", "profile_id", "dependency_fingerprint", name="uq_risk_decision_deterministic"),
     )
 
 
@@ -129,6 +129,7 @@ class RiskReservationRecord(Base):
     __table_args__ = (
         Index("ix_risk_reservation_active", "account_id", "status", "reserved_until"),
         Index("ix_risk_reservation_symbol", "symbol", "direction", "status"),
+        UniqueConstraint("decision_id", name="uq_risk_reservation_decision"),
     )
 
 
@@ -146,6 +147,4 @@ class KillSwitchRecord(Base):
     cleared_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False)
-    __table_args__ = (
-        Index("ix_kill_switch_active", "state", "activated_at"),
-    )
+    __table_args__ = (Index("ix_kill_switch_active", "state", "activated_at"),)

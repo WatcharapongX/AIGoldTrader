@@ -219,7 +219,7 @@ async def test_spread_exceeds_policy_blocks(db_session, candidate, plan, account
         as_of=base_time,
     )
     assert decision.decision == "BLOCKED"
-    assert any("ค่าสเปรด" in r and "สูงกว่าเพดานสูงสุด" in r for r in decision.blocked_reasons_th)
+    assert any("ค่าสเปรด" in r and "สูงกว่าเพดาน" in r for r in decision.blocked_reasons_th)
 
 
 @pytest.mark.asyncio

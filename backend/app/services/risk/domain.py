@@ -20,7 +20,7 @@ KillSwitchTrigger = Literal[
     "AUTOMATIC_DATA_HEALTH",
     "AUTOMATIC_SYSTEM_HEALTH",
 ]
-KillSwitchStatus = Literal["ACTIVE", "INACTIVE"]
+KillSwitchStatus = Literal["ACTIVE", "INACTIVE", "UNKNOWN"]
 ReservationStatus = Literal["ACTIVE", "RELEASED", "EXPIRED"]
 
 
@@ -147,8 +147,18 @@ class AccountSnapshot(BaseModel):
     open_risk_pct: Decimal = Field(default=Decimal("0.0000"), ge=0)
     reserved_risk_pct: Decimal = Field(default=Decimal("0.0000"), ge=0)
     consecutive_losses: int = Field(default=0, ge=0)
+    last_loss_at: AwareDatetime | None = None
+    cooldown_until: AwareDatetime | None = None
+    open_positions_count: int = 0
     trading_mode: Literal["PAPER", "BACKTEST", "SEMI_AUTO", "LIVE"] = "PAPER"
-    source: Literal["CONFIGURED_TEST", "PAPER_SNAPSHOT", "UNAVAILABLE"] = "CONFIGURED_TEST"
+    source: Literal[
+        "CONFIGURED_TEST",
+        "CONFIGURED_PAPER",
+        "PAPER_SNAPSHOT",
+        "UNAVAILABLE",
+        "MT5_DEMO",
+        "MT5_REAL",
+    ] = "CONFIGURED_TEST"
     as_of: AwareDatetime
 
     @field_validator("as_of")
@@ -217,6 +227,7 @@ class RiskDecision(BaseModel):
     blocked_reasons_th: tuple[str, ...] = ()
     as_of: AwareDatetime
     expires_at: AwareDatetime
+    dependency_fingerprint: str = ""
     market_provenance: MarketProvenance | None = None
     news_provenance: NewsRiskProvenance | None = None
     execution_blocked: Literal["NO_EXECUTION_ANALYSIS_ONLY"] = "NO_EXECUTION_ANALYSIS_ONLY"
@@ -264,6 +275,7 @@ class PortfolioRiskSummary(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     account_id: str
+    account_source: str = "CONFIGURED_PAPER"
     as_of: AwareDatetime
     open_risk_pct: Decimal = Field(ge=0)
     reserved_risk_pct: Decimal = Field(ge=0)
@@ -280,6 +292,7 @@ class PortfolioRiskSummary(BaseModel):
     weekly_loss_pct: Decimal = Field(ge=0)
     drawdown_pct: Decimal = Field(ge=0)
     in_cooldown: bool = False
+    cooldown_until: AwareDatetime | None = None
 
 
 class RiskEvaluationRequest(BaseModel):

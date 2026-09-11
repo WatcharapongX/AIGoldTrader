@@ -249,3 +249,52 @@ test('risk contracts enforce analysis-only safety (no execution mutations)', () 
   assert.ok(!('ticket' in d));
   assert.ok(!('execute' in d));
 });
+
+test('parseKillSwitch handles UNKNOWN fail-closed state', () => {
+  const unknown = parseKillSwitch({
+    ...sampleKillSwitch,
+    state: 'UNKNOWN',
+    trigger_type: 'AUTOMATIC_SYSTEM_HEALTH',
+    reason_th: 'ไม่สามารถระบุสถานะได้ Fail-Closed',
+  });
+  assert.equal(unknown.state, 'UNKNOWN');
+  assert.equal(unknown.reason_th, 'ไม่สามารถระบุสถานะได้ Fail-Closed');
+});
+
+test('parseRiskPolicy handles exact backend field names and aliases', () => {
+  const exactPolicy = {
+    ...samplePolicy,
+    news_high_impact_blackout_pre_minutes: 10,
+    news_high_impact_pre_minutes: 20,
+    news_high_impact_post_minutes: 25,
+    news_blackout_minutes: undefined,
+    news_reduction_window_minutes: undefined,
+  };
+  const parsed = parseRiskPolicy(exactPolicy);
+  assert.equal(parsed.news_high_impact_blackout_pre_minutes, 10);
+  assert.equal(parsed.news_high_impact_pre_minutes, 20);
+  assert.equal(parsed.news_high_impact_post_minutes, 25);
+  assert.equal(parsed.news_blackout_minutes, 10);
+  assert.equal(parsed.news_reduction_window_minutes, 20);
+});
+
+test('parsePortfolioRisk preserves account source and cooldown_until', () => {
+  const port = parsePortfolioRisk({
+    ...samplePortfolio,
+    account_source: 'MT5_DEMO',
+    cooldown_until: '2026-09-10T13:00:00Z',
+    in_cooldown: true,
+  });
+  assert.equal(port.account_source, 'MT5_DEMO');
+  assert.equal(port.cooldown_until, '2026-09-10T13:00:00Z');
+  assert.equal(port.in_cooldown, true);
+});
+
+test('parseRiskDecision preserves dependency_fingerprint', () => {
+  const dec = parseRiskDecision({
+    ...sampleDecision,
+    dependency_fingerprint: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+  });
+  assert.equal(dec.dependency_fingerprint, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
+});
+

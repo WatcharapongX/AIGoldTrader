@@ -5,7 +5,6 @@ Never changes TradePlan geometry, Setup Score, or direction.
 """
 
 import datetime as dt
-import uuid
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +13,7 @@ from app.services.market_data.domain import Quote
 from app.services.news.domain import NewsStrategyContext
 from app.services.risk.domain import (
     AccountSnapshot,
+    Decision,
     Direction,
     MarketProvenance,
     NewsRiskProvenance,
@@ -21,8 +21,10 @@ from app.services.risk.domain import (
     RiskPolicy,
     SymbolSpecification,
 )
+from app.services.risk.fingerprint import compute_risk_dependency_fingerprint
 from app.services.risk.kill_switch import kill_switch_manager
 from app.services.risk.portfolio import portfolio_manager
+from app.services.risk.repository import find_existing_decision
 from app.services.risk.sizing import calculate_position_size
 from app.services.strategy.domain import SetupCandidate, TradePlanSuggestion
 
@@ -42,7 +44,6 @@ class RiskEngine:
         as_of: dt.datetime | None = None,
     ) -> RiskDecision:
         now = as_of or dt.datetime.now(dt.UTC)
-        decision_id = f"dec_{uuid.uuid4().hex[:24]}"
         reasons_th: list[str] = []
         warnings_th: list[str] = []
         blocked_reasons_th: list[str] = []
@@ -52,9 +53,22 @@ class RiskEngine:
         entry_upper = Decimal(str(plan.entry_upper))
         stop_loss = Decimal(str(plan.stop_loss))
 
-        # Market provenance tracking
+        # 1. Market quote provenance & staleness evaluation
         market_prov = None
-        if quote:
+        quote_is_stale = False
+        quote_stale_reason = ""
+        if quote is None:
+            quote_is_stale = True
+            quote_stale_reason = "ไม่พบข้อมูลราคาตลาดล่าสุด (Market Quote Unavailable)"
+        else:
+            quote_age = (now - quote.timestamp).total_seconds()
+            quote_is_stale = quote_age > policy.quote_freshness_seconds
+            if quote_is_stale:
+                quote_stale_reason = f"ราคาตลาดล้าสมัย ({quote_age:.1f}s > {policy.quote_freshness_seconds}s)"
+            elif quote.spread > policy.max_spread_absolute:
+                quote_is_stale = True
+                quote_stale_reason = f"ค่าสเปรด (${quote.spread:.2f}) สูงกว่าเพดาน (${policy.max_spread_absolute:.2f})"
+
             market_prov = MarketProvenance(
                 source=quote.source,
                 mode=quote.mode,
@@ -62,120 +76,25 @@ class RiskEngine:
                 quote_bid=quote.bid,
                 quote_ask=quote.ask,
                 quote_spread=quote.spread,
-                is_stale=(now - quote.timestamp).total_seconds() > policy.quote_freshness_seconds,
+                is_stale=quote_is_stale,
             )
 
-        # -------------------------------------------------------------
-        # 1. FAIL CLOSED GATE: Kill Switch
-        # -------------------------------------------------------------
+        # 2. Evaluate automatic safety triggers (daily loss, drawdown, data health)
+        await kill_switch_manager.evaluate_automatic_triggers(
+            session=session,
+            account=account,
+            policy=policy,
+            quote_stale=quote_is_stale,
+            quote_stale_reason=quote_stale_reason,
+        )
+
+        # 3. Kill Switch check (dominates all evaluations, fail-closed on UNKNOWN)
         ks_check = await kill_switch_manager.check(session)
+        ks_state = ks_check.state or await kill_switch_manager.get_state(session)
         if ks_check.is_active:
             blocked_reasons_th.append(ks_check.blocked_reason_th or "ไม่อนุมัติเนื่องจาก Kill Switch ทำงาน")
-            return self._blocked_decision(
-                decision_id=decision_id,
-                candidate=candidate,
-                plan=plan,
-                account=account,
-                policy=policy,
-                spec=spec,
-                now=now,
-                market_prov=market_prov,
-                blocked_reasons=blocked_reasons_th,
-                reasons=["การประเมินถูกปฏิเสธโดยระบบ Kill Switch ฉุกเฉิน"],
-            )
 
-        # -------------------------------------------------------------
-        # 2. FAIL CLOSED GATE: Account Health & Freshness
-        # -------------------------------------------------------------
-        if (now - account.as_of).total_seconds() > policy.account_freshness_seconds:
-            age_sec = (now - account.as_of).total_seconds()
-            blocked_reasons_th.append(
-                f"ข้อมูลบัญชีล้าสมัย (Snapshot อายุ {age_sec:.0f} วินาที เกินเพดาน {policy.account_freshness_seconds} วินาที)"
-            )
-
-        if account.equity <= Decimal("0"):
-            blocked_reasons_th.append("มูลค่าสุทธิของบัญชี (Equity) ต้องมากกว่า 0")
-
-        # Daily loss limit check
-        daily_loss_amount = Decimal("0")
-        if account.daily_realized_pnl < Decimal("0"):
-            daily_loss_amount = abs(account.daily_realized_pnl)
-            max_daily_loss = (policy.daily_loss_limit_pct / Decimal("100")) * account.equity
-            if daily_loss_amount >= max_daily_loss:
-                blocked_reasons_th.append(
-                    f"การขาดทุนสะสมรายวัน (${daily_loss_amount:.2f}) ถึงเพดานจำกัดความเสี่ยง "
-                    f"({policy.daily_loss_limit_pct:.1f}% หรือ ${max_daily_loss:.2f})"
-                )
-
-        # Weekly loss limit check
-        if account.weekly_realized_pnl < Decimal("0"):
-            weekly_loss_amount = abs(account.weekly_realized_pnl)
-            max_weekly_loss = (policy.weekly_loss_limit_pct / Decimal("100")) * account.equity
-            if weekly_loss_amount >= max_weekly_loss:
-                blocked_reasons_th.append(
-                    f"การขาดทุนสะสมรายสัปดาห์ (${weekly_loss_amount:.2f}) ถึงเพดานจำกัดความเสี่ยง "
-                    f"({policy.weekly_loss_limit_pct:.1f}% หรือ ${max_weekly_loss:.2f})"
-                )
-
-        # Maximum drawdown check
-        if account.peak_equity > Decimal("0") and account.equity < account.peak_equity:
-            dd_pct = ((account.peak_equity - account.equity) / account.peak_equity) * Decimal("100")
-            if dd_pct >= policy.max_drawdown_pct:
-                blocked_reasons_th.append(
-                    f"ระดับ Drawdown ปัจจุบัน ({dd_pct:.2f}%) ถึงเพดานสูงสุดที่อนุญาต ({policy.max_drawdown_pct:.1f}%)"
-                )
-
-        # Cooldown check
-        if account.consecutive_losses >= policy.cooldown_consecutive_losses:
-            blocked_reasons_th.append(
-                f"บัญชีอยู่ในช่วงพักการเทรด (Cooldown) เนื่องจากขาดทุนต่อเนื่อง {account.consecutive_losses} ครั้ง"
-            )
-
-        # -------------------------------------------------------------
-        # 3. FAIL CLOSED GATE: Symbol Spec & Market Quote
-        # -------------------------------------------------------------
-        if spec.tick_size <= Decimal("0") or spec.tick_value <= Decimal("0") or spec.contract_size <= Decimal("0"):
-            blocked_reasons_th.append("ข้อมูลสเปกสัญลักษณ์ (Symbol Specification) ไม่สมบูรณ์หรือไม่ถูกต้อง")
-
-        if quote is None:
-            blocked_reasons_th.append("ไม่พบข้อมูลราคาตลาดล่าสุด (Market Quote Unavailable)")
-        else:
-            quote_age = (now - quote.timestamp).total_seconds()
-            if quote_age > policy.quote_freshness_seconds:
-                blocked_reasons_th.append(
-                    f"ราคาตลาดล้าสมัย (Quote อายุ {quote_age:.1f} วินาที เกินเกณฑ์ {policy.quote_freshness_seconds} วินาที)"
-                )
-            if quote.spread > policy.max_spread_absolute:
-                blocked_reasons_th.append(
-                    f"ค่าสเปรด (${quote.spread:.2f}) สูงกว่าเพดานสูงสุด (${policy.max_spread_absolute:.2f})"
-                )
-
-        # -------------------------------------------------------------
-        # 4. FAIL CLOSED GATE: TradePlan Validation
-        # -------------------------------------------------------------
-        if plan.status != "SUGGESTION_ONLY":
-            blocked_reasons_th.append("สถานะแผนเทรดไม่ถูกต้อง ต้องเป็น SUGGESTION_ONLY")
-
-        if plan.expires_at <= now:
-            blocked_reasons_th.append("แผนเทรดหมดอายุความถูกต้องแล้ว (Plan Expired)")
-
-        if blocked_reasons_th:
-            return self._blocked_decision(
-                decision_id=decision_id,
-                candidate=candidate,
-                plan=plan,
-                account=account,
-                policy=policy,
-                spec=spec,
-                now=now,
-                market_prov=market_prov,
-                blocked_reasons=blocked_reasons_th,
-                reasons=["การตรวจสอบเบื้องต้นไม่ผ่านเกณฑ์ความปลอดภัยของ Risk Policy"],
-            )
-
-        # -------------------------------------------------------------
-        # 5. INDEPENDENT NEWS RISK CHECK
-        # -------------------------------------------------------------
+        # 4. News Risk evaluation
         news_prov = None
         news_reduced = False
         target_risk_pct = requested_risk_pct or policy.max_risk_per_trade_pct
@@ -230,37 +149,103 @@ class RiskEngine:
                 description_th=desc,
             )
 
-            if blocked_reasons_th:
-                return self._blocked_decision(
-                    decision_id=decision_id,
-                    candidate=candidate,
-                    plan=plan,
-                    account=account,
-                    policy=policy,
-                    spec=spec,
-                    now=now,
-                    market_prov=market_prov,
-                    news_prov=news_prov,
-                    blocked_reasons=blocked_reasons_th,
-                    reasons=["การอนุมัติถูกระงับเนื่องจากความเสี่ยงทางเศรษฐกิจ/ข่าวสาร"],
+        # 5. Calculate current portfolio exposure for fingerprint
+        active_reservations = await portfolio_manager.get_active_reservations(session, account.account_id, now)
+        db_reserved = sum((Decimal(str(r.risk_pct)) for r in active_reservations), Decimal("0"))
+        current_reserved = max(account.reserved_risk_pct, db_reserved)
+        current_exposure = account.open_risk_pct + current_reserved
+
+        # 6. Compute canonical deterministic dependency fingerprint & ID
+        fingerprint = compute_risk_dependency_fingerprint(
+            candidate=candidate,
+            plan=plan,
+            profile_id=candidate.profile_id,
+            account=account,
+            policy=policy,
+            spec=spec,
+            kill_switch=ks_state,
+            quote=quote,
+            news_prov=news_prov,
+            portfolio_exposure_before=current_exposure,
+            requested_risk_pct=target_risk_pct,
+        )
+        decision_id = f"dec_{fingerprint[:24]}"
+
+        # 7. Check idempotency cache with full dependency fingerprint (SOL-P5-P1-001)
+        existing_decision = await find_existing_decision(
+            session=session,
+            candidate_id=candidate.id,
+            profile_id=candidate.profile_id,
+            dependency_fingerprint=fingerprint,
+            now=now,
+        )
+        if existing_decision is not None:
+            return existing_decision
+
+        # 8. Check gate conditions
+        # Account Health & Freshness
+        if (now - account.as_of).total_seconds() > policy.account_freshness_seconds:
+            age_sec = (now - account.as_of).total_seconds()
+            blocked_reasons_th.append(
+                f"ข้อมูลบัญชีล้าสมัย (Snapshot อายุ {age_sec:.0f} วินาที เกินเพดาน {policy.account_freshness_seconds} วินาที)"
+            )
+
+        if account.equity <= Decimal("0"):
+            blocked_reasons_th.append("มูลค่าสุทธิของบัญชี (Equity) ต้องมากกว่า 0")
+
+        # Daily loss limit check
+        if account.daily_realized_pnl < Decimal("0"):
+            daily_loss_amount = abs(account.daily_realized_pnl)
+            max_daily_loss = (policy.daily_loss_limit_pct / Decimal("100")) * account.equity
+            if daily_loss_amount >= max_daily_loss:
+                blocked_reasons_th.append(
+                    f"การขาดทุนสะสมรายวัน (${daily_loss_amount:.2f}) ถึงเพดานจำกัดความเสี่ยง "
+                    f"({policy.daily_loss_limit_pct:.1f}% หรือ ${max_daily_loss:.2f})"
                 )
 
-        # -------------------------------------------------------------
-        # 6. PORTFOLIO BUDGET & ATOMIC RESERVATION
-        # -------------------------------------------------------------
-        # Preliminary position sizing with requested risk to test sizing feasibility
-        initial_risk_amount = (target_risk_pct / Decimal("100") * account.equity).quantize(Decimal("0.01"))
-        prelim_sizing = calculate_position_size(
-            direction=direction,
-            entry_lower=entry_lower,
-            entry_upper=entry_upper,
-            stop_loss=stop_loss,
-            approved_risk_amount=initial_risk_amount,
-            account_equity=account.equity,
-            spec=spec,
+        # Weekly loss limit check
+        if account.weekly_realized_pnl < Decimal("0"):
+            weekly_loss_amount = abs(account.weekly_realized_pnl)
+            max_weekly_loss = (policy.weekly_loss_limit_pct / Decimal("100")) * account.equity
+            if weekly_loss_amount >= max_weekly_loss:
+                blocked_reasons_th.append(
+                    f"การขาดทุนสะสมรายสัปดาห์ (${weekly_loss_amount:.2f}) ถึงเพดานจำกัดความเสี่ยง "
+                    f"({policy.weekly_loss_limit_pct:.1f}% หรือ ${max_weekly_loss:.2f})"
+                )
+
+        # Maximum drawdown check
+        if account.peak_equity > Decimal("0") and account.equity < account.peak_equity:
+            dd_pct = ((account.peak_equity - account.equity) / account.peak_equity) * Decimal("100")
+            if dd_pct >= policy.max_drawdown_pct:
+                blocked_reasons_th.append(
+                    f"ระดับ Drawdown ปัจจุบัน ({dd_pct:.2f}%) ถึงเพดานสูงสุดที่อนุญาต ({policy.max_drawdown_pct:.1f}%)"
+                )
+
+        # Cooldown check
+        is_cooldown = (account.cooldown_until is not None and account.cooldown_until > now) or (
+            account.consecutive_losses >= policy.cooldown_consecutive_losses
         )
-        if not prelim_sizing.is_valid:
-            blocked_reasons_th.append(prelim_sizing.error_th or "การคำนวณขนาดสัญญาเบื้องต้นไม่ผ่านเกณฑ์")
+        if is_cooldown:
+            blocked_reasons_th.append(
+                f"บัญชีอยู่ในช่วงพักการเทรด (Cooldown) เนื่องจากขาดทุนต่อเนื่อง {account.consecutive_losses} ครั้ง"
+            )
+
+        # Symbol Spec & Quote Gates
+        if spec.tick_size <= Decimal("0") or spec.tick_value <= Decimal("0") or spec.contract_size <= Decimal("0"):
+            blocked_reasons_th.append("ข้อมูลสเปกสัญลักษณ์ (Symbol Specification) ไม่สมบูรณ์หรือไม่ถูกต้อง")
+
+        if quote_is_stale:
+            blocked_reasons_th.append(quote_stale_reason)
+
+        # TradePlan Validation
+        if plan.status != "SUGGESTION_ONLY":
+            blocked_reasons_th.append("สถานะแผนเทรดไม่ถูกต้อง ต้องเป็น SUGGESTION_ONLY")
+
+        if plan.expires_at <= now:
+            blocked_reasons_th.append("แผนเทรดหมดอายุความถูกต้องแล้ว (Plan Expired)")
+
+        # If any gate failed, fail closed (ZERO reservation created)
+        if blocked_reasons_th:
             return self._blocked_decision(
                 decision_id=decision_id,
                 candidate=candidate,
@@ -270,21 +255,20 @@ class RiskEngine:
                 spec=spec,
                 now=now,
                 market_prov=market_prov,
-                news_prov=news_prov,
                 blocked_reasons=blocked_reasons_th,
-                reasons=["ไม่สามารถกำหนดขนาดสัญญาที่ปลอดภัยได้"],
+                reasons=["การตรวจสอบเบื้องต้นไม่ผ่านเกณฑ์ความปลอดภัยของ Risk Policy"],
+                news_prov=news_prov,
+                dependency_fingerprint=fingerprint,
             )
 
-        budget_check = await portfolio_manager.check_budget_and_reserve(
+        # 9. Portfolio budget capacity check (pure check, no reservation yet - SOL-P5-P1-008)
+        budget_check = await portfolio_manager.check_budget_capacity(
             session=session,
             account=account,
             policy=policy,
             symbol=candidate.symbol,
             direction=direction,
             requested_risk_pct=target_risk_pct,
-            profile_id=candidate.profile_id,
-            decision_id=decision_id,
-            position_size=prelim_sizing.position_size,
             now=now,
         )
 
@@ -302,9 +286,10 @@ class RiskEngine:
                 news_prov=news_prov,
                 blocked_reasons=blocked_reasons_th,
                 reasons=["ความเสี่ยงรวมของพอร์ตโฟลิโอเกินเกณฑ์ที่กำหนด"],
+                dependency_fingerprint=fingerprint,
             )
 
-        # Recalculate exact position size with the final approved risk amount
+        # 10. Position sizing with approved risk amount
         approved_pct = budget_check.approved_risk_pct
         approved_amount = budget_check.approved_risk_amount
 
@@ -332,19 +317,31 @@ class RiskEngine:
                 news_prov=news_prov,
                 blocked_reasons=blocked_reasons_th,
                 reasons=["ไม่สามารถจัดสรรขนาดสัญญาให้สอดคล้องกับงบความเสี่ยงที่ได้รับการอนุมัติ"],
+                dependency_fingerprint=fingerprint,
             )
 
-        # Successful decision (APPROVED or REDUCED)
-        decision_type = "REDUCED" if (budget_check.is_reduced or news_reduced) else "APPROVED"
+        # 11. Final Sizing Succeeded: Atomically create reservation in DB
+        await portfolio_manager.create_reservation(
+            session=session,
+            decision_id=decision_id,
+            account_id=account.account_id,
+            profile_id=candidate.profile_id,
+            symbol=candidate.symbol,
+            direction=direction,
+            risk_pct=approved_pct,
+            risk_amount=approved_amount,
+            position_size=final_sizing.position_size,
+            policy=policy,
+            now=now,
+        )
+
+        # 12. Construct APPROVED or REDUCED Decision
+        decision_type: Decision = "REDUCED" if (budget_check.is_reduced or news_reduced) else "APPROVED"
 
         if decision_type == "APPROVED":
-            reasons_th.append(
-                f"อนุมัติแผนเทรดตามปกติ ขนาดความเสี่ยง {approved_pct:.2f}% (${approved_amount:.2f})"
-            )
+            reasons_th.append(f"อนุมัติแผนเทรดตามปกติ ขนาดความเสี่ยง {approved_pct:.2f}% (${approved_amount:.2f})")
         else:
-            reasons_th.append(
-                f"อนุมัติแบบลดความเสี่ยงเหลือ {approved_pct:.2f}% (${approved_amount:.2f})"
-            )
+            reasons_th.append(f"อนุมัติแบบลดความเสี่ยงเหลือ {approved_pct:.2f}% (${approved_amount:.2f})")
             if budget_check.reason_th:
                 warnings_th.append(budget_check.reason_th)
 
@@ -383,6 +380,7 @@ class RiskEngine:
             blocked_reasons_th=(),
             as_of=now,
             expires_at=min(plan.expires_at, now + dt.timedelta(seconds=policy.reservation_ttl_seconds)),
+            dependency_fingerprint=fingerprint,
             market_provenance=market_prov,
             news_provenance=news_prov,
             execution_blocked="NO_EXECUTION_ANALYSIS_ONLY",
@@ -401,6 +399,7 @@ class RiskEngine:
         blocked_reasons: list[str],
         reasons: list[str],
         news_prov: NewsRiskProvenance | None = None,
+        dependency_fingerprint: str = "",
     ) -> RiskDecision:
         entry_lower = Decimal(str(plan.entry_lower))
         entry_upper = Decimal(str(plan.entry_upper))
@@ -419,17 +418,17 @@ class RiskEngine:
             decision="BLOCKED",
             requested_risk_pct=policy.max_risk_per_trade_pct,
             approved_risk_pct=Decimal("0.0000"),
-            requested_risk_amount=(
-                policy.max_risk_per_trade_pct / Decimal("100") * account.equity
-            ).quantize(Decimal("0.01")),
+            requested_risk_amount=(policy.max_risk_per_trade_pct / Decimal("100") * account.equity).quantize(
+                Decimal("0.01")
+            ),
             approved_risk_amount=Decimal("0.00"),
             position_size=Decimal("0.0000"),
             entry_lower=entry_lower,
             entry_upper=entry_upper,
             stop_loss=stop_loss,
             stop_distance=stop_distance,
-            portfolio_exposure_before=account.open_risk_pct + account.reserved_risk_pct,
-            portfolio_exposure_after=account.open_risk_pct + account.reserved_risk_pct,
+            portfolio_exposure_before=account.open_risk_pct,
+            portfolio_exposure_after=account.open_risk_pct,
             account_snapshot_id=account.id,
             symbol_specification_id=spec.id,
             policy_version=policy.version,
@@ -438,6 +437,7 @@ class RiskEngine:
             blocked_reasons_th=tuple(blocked_reasons),
             as_of=now,
             expires_at=now + dt.timedelta(seconds=policy.reservation_ttl_seconds),
+            dependency_fingerprint=dependency_fingerprint,
             market_provenance=market_prov,
             news_provenance=news_prov,
             execution_blocked="NO_EXECUTION_ANALYSIS_ONLY",

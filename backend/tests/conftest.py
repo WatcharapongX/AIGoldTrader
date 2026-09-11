@@ -32,6 +32,22 @@ async def db_session() -> AsyncIterator[tuple]:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
+        import datetime as dt
+
+        from app.models.risk import KillSwitchRecord
+
+        bootstrap_ks = KillSwitchRecord(
+            id="ks_test_bootstrap",
+            state="INACTIVE",
+            trigger_type="MANUAL",
+            reason_th="ระบบพร้อมทำงานตามปกติ",
+            activated_at=dt.datetime(2020, 1, 1, 0, 0, 0, tzinfo=dt.UTC),
+            activated_by="system",
+            policy_version="risk-policy-1.0.0",
+            payload={"source": "test_bootstrap"},
+        )
+        session.add(bootstrap_ks)
+        await session.commit()
         yield session, factory
     await engine.dispose()
 

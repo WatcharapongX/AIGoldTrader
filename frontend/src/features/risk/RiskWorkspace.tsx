@@ -120,6 +120,7 @@ export function RiskWorkspace() {
   };
 
   const isKillSwitchActive = killSwitch?.state === 'ACTIVE' || portfolio?.kill_switch_active;
+  const isKillSwitchUnknown = killSwitch?.state === 'UNKNOWN';
 
   // Portfolio budget calculation
   const totalRiskPct = Number(portfolio?.total_risk_pct || '0');
@@ -165,7 +166,9 @@ export function RiskWorkspace() {
       {/* 2. EMERGENCY KILL SWITCH HERO BANNER */}
       <div
         className={`rounded-xl border p-6 transition-all ${
-          isKillSwitchActive
+          isKillSwitchUnknown
+            ? 'bg-amber-950/40 border-amber-500/60 shadow-lg shadow-amber-950/50'
+            : isKillSwitchActive
             ? 'bg-red-950/40 border-red-500/60 shadow-lg shadow-red-950/50'
             : 'bg-emerald-950/20 border-emerald-500/30'
         }`}
@@ -174,34 +177,46 @@ export function RiskWorkspace() {
           <div className="flex items-start md:items-center space-x-4">
             <div
               className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0 ${
-                isKillSwitchActive ? 'bg-red-500/20 border border-red-500/40 animate-pulse' : 'bg-emerald-500/20 border border-emerald-500/30'
+                isKillSwitchUnknown
+                  ? 'bg-amber-500/20 border border-amber-500/40 animate-pulse'
+                  : isKillSwitchActive
+                  ? 'bg-red-500/20 border border-red-500/40 animate-pulse'
+                  : 'bg-emerald-500/20 border border-emerald-500/30'
               }`}
             >
-              {isKillSwitchActive ? '🚨' : '🟢'}
+              {isKillSwitchUnknown ? '⚠️' : isKillSwitchActive ? '🚨' : '🟢'}
             </div>
             <div>
               <div className="flex items-center space-x-3">
                 <h2 className="text-xl font-bold text-white">Emergency Kill Switch</h2>
                 <span
                   className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                    isKillSwitchActive
+                    isKillSwitchUnknown
+                      ? 'bg-amber-500 text-gray-950'
+                      : isKillSwitchActive
                       ? 'bg-red-500 text-white'
                       : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   }`}
                 >
-                  {isKillSwitchActive ? 'ACTIVE (ปิดระบบฉุกเฉิน)' : 'INACTIVE (ระบบพร้อมทำงาน)'}
+                  {isKillSwitchUnknown
+                    ? 'UNKNOWN (ไม่สามารถตรวจสอบสถานะได้ - Fail Closed)'
+                    : isKillSwitchActive
+                    ? 'ACTIVE (ปิดระบบฉุกเฉิน)'
+                    : 'INACTIVE (ระบบพร้อมทำงาน)'}
                 </span>
               </div>
               <p className="text-sm text-gray-300 mt-1">
-                {isKillSwitchActive
+                {isKillSwitchUnknown
+                  ? `ระบบปฏิเสธคำสั่งทั้งหมดเนื่องจากไม่สามารถยืนยันสถานะ Kill Switch ได้ (Fail-Closed): ${killSwitch?.reason_th || 'ฐานข้อมูลยังไม่พร้อม'}`
+                  : isKillSwitchActive
                   ? `ระบบถูกระงับ: ${killSwitch?.reason_th || 'ไม่สามารถทำการประเมินแผนการเทรดได้'}`
                   : 'ระบบทำงานปกติ ไม่มีการเปิดสวิตช์ฉุกเฉิน คำสั่งประเมินความเสี่ยงสามารถดำเนินการได้ตามเกณฑ์ที่กำหนด'}
               </p>
-              {isKillSwitchActive && killSwitch && (
+              {(isKillSwitchActive || isKillSwitchUnknown) && killSwitch && (
                 <div className="flex flex-wrap gap-4 mt-2 text-xs text-gray-400">
                   <span>ผู้สั่งการ: <strong className="text-gray-200">{killSwitch.activated_by}</strong></span>
                   <span>สาเหตุ: <strong className="text-red-300">{killSwitch.trigger_type}</strong></span>
-                  <span>เวลาเปิด: <strong className="text-gray-200">{new Date(killSwitch.activated_at).toLocaleString('th-TH')}</strong></span>
+                  <span>เวลาบันทึก: <strong className="text-gray-200">{new Date(killSwitch.activated_at).toLocaleString('th-TH')}</strong></span>
                 </div>
               )}
             </div>
@@ -240,7 +255,10 @@ export function RiskWorkspace() {
         {/* Account Capacity Card */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-gray-300">เพดานความเสี่ยงบัญชี (Account Risk)</h3>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-300">เพดานความเสี่ยงบัญชี (Account Risk)</h3>
+              <span className="text-[10px] text-gray-500 font-mono">Source: {portfolio?.account_source || 'CONFIGURED_PAPER'}</span>
+            </div>
             <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">
               Max {maxAccountRiskPct.toFixed(2)}%
             </span>

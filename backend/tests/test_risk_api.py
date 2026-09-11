@@ -90,9 +90,7 @@ def test_get_kill_switch_is_read_only(client: TestClient, auth_headers: dict[str
 
 def test_kill_switch_admin_authorization(client: TestClient, auth_headers: dict[str, str], trader_user):
     # 1. Non-admin (Trader) tries to activate Kill Switch -> 403 Forbidden
-    trader_login = client.post(
-        "/api/auth/login", json={"email": "trader@example.com", "password": "trader-pass-123"}
-    )
+    trader_login = client.post("/api/auth/login", json={"email": "trader@example.com", "password": "trader-pass-123"})
     assert trader_login.status_code == 200
     trader_token = trader_login.json()["access_token"]
     trader_headers = {"Authorization": f"Bearer {trader_token}"}
