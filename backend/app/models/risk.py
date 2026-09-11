@@ -13,6 +13,7 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,6 +31,14 @@ class RiskPolicyRecord(Base):
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False)
+    __table_args__ = (
+        Index(
+            "uq_risk_policy_single_active",
+            "is_active",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+        ),
+    )
 
 
 class SymbolSpecificationRecord(Base):

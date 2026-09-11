@@ -58,6 +58,7 @@ class RiskPolicy(BaseModel):
     max_spread_absolute: Decimal = Field(default=Decimal("1.50"), gt=0, le=10)
     quote_freshness_seconds: int = Field(default=5, ge=1, le=60)
     account_freshness_seconds: int = Field(default=60, ge=5, le=3600)
+    symbol_spec_freshness_seconds: int = Field(default=86400, ge=60, le=604800)
     news_risk_enabled: bool = True
     news_high_impact_blackout_pre_minutes: int = Field(default=5, ge=1, le=60)
     news_high_impact_pre_minutes: int = Field(default=15, ge=1, le=120)
@@ -99,6 +100,7 @@ class SymbolSpecification(BaseModel):
     volume_step: Decimal = Field(gt=0)
     digits: int = Field(ge=0, le=5)
     observed_at: AwareDatetime
+    broker_server: str | None = None
 
     @field_validator("observed_at")
     @classmethod

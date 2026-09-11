@@ -77,10 +77,14 @@ export function Dashboard() {
   const [ws, setWs] = useState<ConnectionState>('CONNECTING');
   const [clock, setClock] = useState(0);
 
-  // Phase 5 Risk states
+  // Phase 5 Risk states with authoritative lifecycle
   const [portfolioRisk, setPortfolioRisk] = useState<PortfolioRiskData | null>(null);
   const [killSwitch, setKillSwitch] = useState<KillSwitchData | null>(null);
   const [riskPolicy, setRiskPolicy] = useState<RiskPolicyData | null>(null);
+
+  const [portfolioRiskState, setPortfolioRiskState] = useState<'LOADING' | 'READY' | 'STALE' | 'UNAVAILABLE'>('LOADING');
+  const [killSwitchState, setKillSwitchState] = useState<'LOADING' | 'READY' | 'STALE' | 'UNAVAILABLE'>('LOADING');
+  const [riskPolicyState, setRiskPolicyState] = useState<'LOADING' | 'READY' | 'STALE' | 'UNAVAILABLE'>('LOADING');
 
   useEffect(() => {
     const abort = new AbortController();
@@ -101,12 +105,35 @@ export function Dashboard() {
           } else {
             setError('โหลดข้อมูลไม่สำเร็จ');
           }
-          if (portRes.status === 'fulfilled') setPortfolioRisk(portRes.value);
-          if (ksRes.status === 'fulfilled') setKillSwitch(ksRes.value);
-          if (polRes.status === 'fulfilled') setRiskPolicy(polRes.value);
+
+          if (portRes.status === 'fulfilled') {
+            setPortfolioRisk(portRes.value);
+            setPortfolioRiskState('READY');
+          } else {
+            setPortfolioRiskState(portfolioRisk ? 'STALE' : 'UNAVAILABLE');
+          }
+
+          if (ksRes.status === 'fulfilled') {
+            setKillSwitch(ksRes.value);
+            setKillSwitchState(ksRes.value.state === 'UNKNOWN' ? 'UNAVAILABLE' : 'READY');
+          } else {
+            setKillSwitchState(killSwitch ? 'STALE' : 'UNAVAILABLE');
+          }
+
+          if (polRes.status === 'fulfilled') {
+            setRiskPolicy(polRes.value);
+            setRiskPolicyState('READY');
+          } else {
+            setRiskPolicyState(riskPolicy ? 'STALE' : 'UNAVAILABLE');
+          }
         }
       } catch {
-        if (!abort.signal.aborted) setError('โหลดข้อมูลไม่สำเร็จ');
+        if (!abort.signal.aborted) {
+          setError('โหลดข้อมูลไม่สำเร็จ');
+          setPortfolioRiskState(portfolioRisk ? 'STALE' : 'UNAVAILABLE');
+          setKillSwitchState(killSwitch ? 'STALE' : 'UNAVAILABLE');
+          setRiskPolicyState(riskPolicy ? 'STALE' : 'UNAVAILABLE');
+        }
       } finally {
         busy = false;
       }
@@ -141,8 +168,11 @@ export function Dashboard() {
       ws={ws}
       clock={clock}
       portfolioRisk={portfolioRisk}
+      portfolioRiskState={portfolioRiskState}
       killSwitch={killSwitch}
+      killSwitchState={killSwitchState}
       riskPolicy={riskPolicy}
+      riskPolicyState={riskPolicyState}
     />
   );
 }
@@ -156,8 +186,11 @@ export function DashboardView({
   ws,
   clock,
   portfolioRisk,
+  portfolioRiskState = 'READY',
   killSwitch,
+  killSwitchState = 'READY',
   riskPolicy,
+  riskPolicyState = 'READY',
 }: {
   data: DashboardSummary | null;
   error: string;
@@ -167,8 +200,11 @@ export function DashboardView({
   ws: ConnectionState;
   clock: number;
   portfolioRisk?: PortfolioRiskData | null;
+  portfolioRiskState?: 'LOADING' | 'READY' | 'STALE' | 'UNAVAILABLE';
   killSwitch?: KillSwitchData | null;
+  killSwitchState?: 'LOADING' | 'READY' | 'STALE' | 'UNAVAILABLE';
   riskPolicy?: RiskPolicyData | null;
+  riskPolicyState?: 'LOADING' | 'READY' | 'STALE' | 'UNAVAILABLE';
 }) {
   const market = marketStatus || data?.market;
   const current = market && quote?.source === market.source && quote.symbol === 'XAUUSD' ? quote
@@ -181,10 +217,11 @@ export function DashboardView({
   const marketLabel = market?.mode === 'SIMULATED' ? 'SIMULATED DATA' : liveMarket ? 'Live Market Data'
     : market ? 'Market Data: ' + market.status + ' · ' + (staleQuote ? 'STALE / ไม่พร้อม' : 'ข้อมูลล่าสุด') : 'Market Data: UNKNOWN';
   const visibleCandles = market ? marketCandles.filter(c => c.source === market.source && c.symbol === 'XAUUSD' && c.timeframe === 'M5') : [];
+  const closedM5Candles = visibleCandles.filter(c => c.is_closed);
   const latestCandle = visibleCandles.at(-1);
   const calcMA = (period: number): number | null => {
-    if (visibleCandles.length < period) return null;
-    const slice = visibleCandles.slice(-period);
+    if (closedM5Candles.length < period) return null;
+    const slice = closedM5Candles.slice(-period);
     const sum = slice.reduce((acc, c) => acc + Number(c.close), 0);
     return sum / period;
   };
@@ -354,6 +391,7 @@ export function DashboardView({
             <span className="text-blue-400">MA 20: {ma20 !== null ? fmtPrice(ma20) : '—'}</span>
             <span className="text-amber-400">MA 50: {ma50 !== null ? fmtPrice(ma50) : '—'}</span>
             <span className="text-purple-400">MA 200: {ma200 !== null ? fmtPrice(ma200) : '—'}</span>
+            {staleQuote && <span className="text-red-400 font-medium">(STALE)</span>}
           </div>
         </div>
 
@@ -460,11 +498,21 @@ export function DashboardView({
                 <span>🛡️</span> Portfolio & Risk Gate
               </h2>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                killSwitch?.state === 'ACTIVE'
+                killSwitchState === 'UNAVAILABLE' || !killSwitch || killSwitch.state === 'UNKNOWN'
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                  : killSwitch.state === 'ACTIVE'
                   ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                  : killSwitchState === 'STALE'
+                  ? 'bg-gray-500/20 text-gray-400 border-gray-500/30'
                   : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
               }`}>
-                {killSwitch?.state === 'ACTIVE' ? 'KILL SWITCH: ACTIVE' : 'KILL SWITCH: NORMAL'}
+                {killSwitchState === 'UNAVAILABLE' || !killSwitch || killSwitch.state === 'UNKNOWN'
+                  ? 'KILL SWITCH: UNKNOWN'
+                  : killSwitch.state === 'ACTIVE'
+                  ? 'KILL SWITCH: ACTIVE'
+                  : killSwitchState === 'STALE'
+                  ? 'KILL SWITCH: STALE / LAST KNOWN'
+                  : 'KILL SWITCH: NORMAL'}
               </span>
             </div>
 
@@ -476,15 +524,21 @@ export function DashboardView({
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">
                 <span className="text-gray-400">ความเสี่ยงรวมพอร์ต:</span>
                 <span className="font-mono text-white font-bold">
-                  {portfolioRisk?.total_risk_pct && Number(portfolioRisk.total_risk_pct) > 0
-                    ? `${Number(portfolioRisk.total_risk_pct).toFixed(2)}`
-                    : '0.00 / ปกติ'}
+                  {portfolioRiskState === 'UNAVAILABLE' || !portfolioRisk
+                    ? 'UNAVAILABLE'
+                    : portfolioRiskState === 'STALE'
+                    ? `${Number(portfolioRisk.total_risk_pct).toFixed(2)}% (STALE)`
+                    : `${Number(portfolioRisk.total_risk_pct).toFixed(2)}%`}
                 </span>
               </div>
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">
                 <span className="text-gray-400">เพดานขาดทุนรายวัน:</span>
                 <span className="font-mono text-gray-200">
-                  {riskPolicy?.daily_loss_limit_pct ? `${Math.round(Number(riskPolicy.daily_loss_limit_pct))}%` : '3%'}
+                  {riskPolicyState === 'UNAVAILABLE' || !riskPolicy
+                    ? 'UNKNOWN'
+                    : riskPolicyState === 'STALE'
+                    ? `${Math.round(Number(riskPolicy.daily_loss_limit_pct))}% (STALE)`
+                    : `${Math.round(Number(riskPolicy.daily_loss_limit_pct))}%`}
                 </span>
               </div>
             </div>
@@ -522,7 +576,11 @@ export function DashboardView({
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">
                 <span className="text-gray-400">ความเสี่ยงต่อไม้:</span>
                 <span className="font-mono text-gray-200">
-                  {riskPolicy?.max_risk_per_trade_pct ? `${Math.round(Number(riskPolicy.max_risk_per_trade_pct))}%` : '1%'}
+                  {riskPolicyState === 'UNAVAILABLE' || !riskPolicy
+                    ? 'UNKNOWN'
+                    : riskPolicyState === 'STALE'
+                    ? `${Math.round(Number(riskPolicy.max_risk_per_trade_pct))}% (STALE)`
+                    : `${Math.round(Number(riskPolicy.max_risk_per_trade_pct))}%`}
                 </span>
               </div>
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">

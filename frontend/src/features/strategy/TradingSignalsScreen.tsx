@@ -44,7 +44,7 @@ export function TradingSignalsScreen() {
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
             <p className="market-eyebrow tracking-widest text-xs font-semibold text-gray-400">
-              AI SIGNALS & STRATEGY EVALUATION
+              RULE-BASED TRADING SIGNALS & STRATEGY EVALUATION
             </p>
           </div>
           <h1 className="text-2xl lg:text-3xl font-bold text-white tracking-tight mt-1">Trading Signals</h1>
@@ -80,14 +80,14 @@ export function TradingSignalsScreen() {
           </div>
         </div>
         <span className="text-xs text-gray-400">
-          แหล่งข้อมูลราคา: <b className="text-amber-400 font-mono">{provider?.source || 'mt5_demo_iux'}</b>
+          แหล่งข้อมูลราคา: <b className="text-amber-400 font-mono">{provider?.source || 'UNKNOWN'}</b>
         </span>
       </div>
 
       {/* Strategy Workspace Component */}
       <StrategyWorkspace
         timeframe={timeframe}
-        source={provider?.source || 'mt5_demo_iux'}
+        source={provider?.source || 'UNKNOWN'}
         revision={revision}
         primitive={primitive}
       />

@@ -57,10 +57,8 @@ class PortfolioRiskManager:
         as_of = now or dt.datetime.now(dt.UTC)
         reservations = await self.get_active_reservations(session, account.account_id, as_of)
 
-        # Database table risk_reservations is the primary source of truth;
-        # use max with snapshot to prevent additive double counting (SOL-P5-P2-011)
-        db_reserved = sum((Decimal(str(r.risk_pct)) for r in reservations), Decimal("0"))
-        reserved_risk_pct = max(account.reserved_risk_pct, db_reserved)
+        # Database table risk_reservations is the sole source of truth for active reserved risk (SOL-P5-P2-011)
+        reserved_risk_pct = sum((Decimal(str(r.risk_pct)) for r in reservations), Decimal("0"))
         open_risk_pct = account.open_risk_pct
         total_risk_pct = (open_risk_pct + reserved_risk_pct).quantize(Decimal("0.0001"))
 
@@ -159,10 +157,14 @@ class PortfolioRiskManager:
                 {"lock_key": f"risk_account_{account.account_id}"},
             )
 
-        # Check account cooldown
-        is_cooldown = (account.cooldown_until is not None and account.cooldown_until > now) or (
-            account.consecutive_losses >= policy.cooldown_consecutive_losses
-        )
+        # Check account cooldown lifecycle (SOL-P5-P1-010)
+        is_cooldown = False
+        if account.cooldown_until is not None:
+            is_cooldown = now < account.cooldown_until
+        elif account.consecutive_losses >= policy.cooldown_consecutive_losses:
+            calc_until = account.as_of + dt.timedelta(minutes=policy.cooldown_period_minutes)
+            is_cooldown = now < calc_until
+
         if is_cooldown:
             return ReservationBudgetCheck(
                 allowed=False,
@@ -177,11 +179,24 @@ class PortfolioRiskManager:
         # Row-level lock active reservations for this account to prevent concurrency races
         active_rows = await self.get_active_reservations(session, account.account_id, now, for_update=True)
 
-        # Database table risk_reservations is primary;
-        # use max with snapshot to prevent additive double counting (SOL-P5-P2-011)
-        db_reserved = sum((Decimal(str(r.risk_pct)) for r in active_rows), Decimal("0"))
-        current_reserved = max(account.reserved_risk_pct, db_reserved)
+        # Database table risk_reservations is the sole source of truth (SOL-P5-P2-011)
+        current_reserved = sum((Decimal(str(r.risk_pct)) for r in active_rows), Decimal("0"))
         current_total = account.open_risk_pct + current_reserved
+
+        # Open position risk safety check (SOL-P5-P2-012)
+        if account.open_risk_pct > Decimal("0"):
+            return ReservationBudgetCheck(
+                allowed=False,
+                approved_risk_pct=Decimal("0"),
+                approved_risk_amount=Decimal("0"),
+                portfolio_exposure_before=current_total,
+                portfolio_exposure_after=current_total,
+                reason_th=(
+                    "ไม่อนุมัติเนื่องจากมีสถานะเปิดความเสี่ยงคงค้างที่ไม่สามารถแจกแจงสัญลักษณ์/ทิศทางได้ "
+                    "(Open Risk Breakdown Unavailable)"
+                ),
+                is_reduced=False,
+            )
 
         # Concurrent trade count check (including open positions and pending reservations)
         total_concurrent = len(active_rows) + account.open_positions_count

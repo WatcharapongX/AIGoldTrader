@@ -40,6 +40,7 @@ def compute_risk_dependency_fingerprint(
     """
     quote_payload = None
     if quote:
+        quote_age = (account.as_of - quote.timestamp).total_seconds() if account.as_of else 0
         quote_payload = {
             "source": quote.source,
             "mode": quote.mode,
@@ -47,6 +48,7 @@ def compute_risk_dependency_fingerprint(
             "ask": format(Decimal(str(quote.ask)), ".5f"),
             "spread": format(Decimal(str(quote.spread)), ".5f"),
             "timestamp": quote.timestamp.isoformat(),
+            "is_stale": quote_age > policy.quote_freshness_seconds or quote.spread > policy.max_spread_absolute,
         }
 
     news_payload = None
@@ -57,7 +59,41 @@ def compute_risk_dependency_fingerprint(
             "in_pre_news_window": news_prov.in_pre_news_window,
             "in_post_news_window": news_prov.in_post_news_window,
             "event_ids": sorted(news_prov.event_ids),
+            "description_th": news_prov.description_th,
         }
+
+    plan_payload = {
+        "id": plan.id,
+        "direction": plan.direction,
+        "entry_lower": format(Decimal(str(plan.entry_lower)), ".5f"),
+        "entry_upper": format(Decimal(str(plan.entry_upper)), ".5f"),
+        "stop_loss": format(Decimal(str(plan.stop_loss)), ".5f"),
+        "score": candidate.score,
+        "risk_reward": (
+            format(Decimal(str(plan.risk_reward)), ".2f")
+            if hasattr(plan, "risk_reward") and plan.risk_reward is not None
+            else None
+        ),
+        "expires_at": plan.expires_at.isoformat() if plan.expires_at else None,
+    }
+
+    account_payload = {
+        "id": account.id,
+        "account_id": account.account_id,
+        "balance": format(account.balance, ".2f"),
+        "equity": format(account.equity, ".2f"),
+        "free_margin": format(account.free_margin, ".2f") if account.free_margin is not None else None,
+        "daily_realized_pnl": format(account.daily_realized_pnl, ".2f"),
+        "weekly_realized_pnl": format(account.weekly_realized_pnl, ".2f"),
+        "peak_equity": format(account.peak_equity, ".2f"),
+        "open_risk_pct": format(account.open_risk_pct, ".4f"),
+        "reserved_risk_pct": format(account.reserved_risk_pct, ".4f"),
+        "consecutive_losses": account.consecutive_losses,
+        "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
+        "open_positions_count": account.open_positions_count,
+        "source": account.source,
+        "as_of": account.as_of.isoformat(),
+    }
 
     canonical_obj = {
         "candidate": {
@@ -67,45 +103,15 @@ def compute_risk_dependency_fingerprint(
             "symbol": candidate.symbol,
             "profile_id": profile_id,
         },
-        "plan": {
-            "id": plan.id,
-            "direction": plan.direction,
-            "entry_lower": format(Decimal(str(plan.entry_lower)), ".5f"),
-            "entry_upper": format(Decimal(str(plan.entry_upper)), ".5f"),
-            "stop_loss": format(Decimal(str(plan.stop_loss)), ".5f"),
-        },
-        "account": {
-            "id": account.id,
-            "account_id": account.account_id,
-            "equity": format(account.equity, ".2f"),
-            "open_risk_pct": format(account.open_risk_pct, ".4f"),
-            "as_of": account.as_of.isoformat(),
-            "source": account.source,
-        },
-        "policy": {
-            "version": policy.version,
-            "max_risk_per_trade_pct": format(policy.max_risk_per_trade_pct, ".4f"),
-            "max_account_risk_pct": format(policy.max_account_risk_pct, ".4f"),
-            "max_symbol_risk_pct": format(policy.max_symbol_risk_pct, ".4f"),
-            "max_directional_risk_pct": format(policy.max_directional_risk_pct, ".4f"),
-            "max_concurrent_trades": policy.max_concurrent_trades,
-            "daily_loss_limit_pct": format(policy.daily_loss_limit_pct, ".4f"),
-            "max_spread_absolute": format(policy.max_spread_absolute, ".4f"),
-            "news_reduction_factor": format(policy.news_reduction_factor, ".4f"),
-        },
-        "spec": {
-            "id": spec.id,
-            "symbol": spec.symbol,
-            "source": spec.source,
-            "tick_size": format(spec.tick_size, ".5f"),
-            "volume_step": format(spec.volume_step, ".4f"),
-            "observed_at": spec.observed_at.isoformat(),
-        },
+        "plan": plan_payload,
+        "account": account_payload,
+        "policy": policy.model_dump(mode="json"),
+        "spec": spec.model_dump(mode="json"),
         "kill_switch": {
             "id": kill_switch.id,
             "state": kill_switch.state,
             "trigger_type": kill_switch.trigger_type,
-            "activated_at": kill_switch.activated_at.isoformat(),
+            "activated_at": kill_switch.activated_at.isoformat() if kill_switch.activated_at else None,
         },
         "market": quote_payload,
         "news": news_payload,

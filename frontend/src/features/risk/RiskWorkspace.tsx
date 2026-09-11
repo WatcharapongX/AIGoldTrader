@@ -119,8 +119,8 @@ export function RiskWorkspace() {
     }
   };
 
-  const isKillSwitchActive = killSwitch?.state === 'ACTIVE' || portfolio?.kill_switch_active;
-  const isKillSwitchUnknown = killSwitch?.state === 'UNKNOWN';
+  const isKillSwitchUnknown = !killSwitch || killSwitch?.state === 'UNKNOWN' || !!error;
+  const isKillSwitchActive = !isKillSwitchUnknown && (killSwitch?.state === 'ACTIVE' || portfolio?.kill_switch_active);
 
   // Portfolio budget calculation
   const totalRiskPct = Number(portfolio?.total_risk_pct || '0');

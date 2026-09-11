@@ -33,9 +33,17 @@ async def db_session() -> AsyncIterator[tuple]:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         import datetime as dt
+        from decimal import Decimal
 
-        from app.models.risk import KillSwitchRecord
+        from app.models.risk import (
+            AccountSnapshotRecord,
+            KillSwitchRecord,
+            RiskPolicyRecord,
+            SymbolSpecificationRecord,
+        )
+        from app.services.risk.domain import RiskPolicy, default_gold_spec
 
+        now = dt.datetime.now(dt.UTC)
         bootstrap_ks = KillSwitchRecord(
             id="ks_test_bootstrap",
             state="INACTIVE",
@@ -47,6 +55,68 @@ async def db_session() -> AsyncIterator[tuple]:
             payload={"source": "test_bootstrap"},
         )
         session.add(bootstrap_ks)
+
+        pol = RiskPolicy()
+        policy_rec = RiskPolicyRecord(
+            id="pol_test_bootstrap",
+            version="risk-policy-1.0.0",
+            is_active=True,
+            created_at=dt.datetime(2020, 1, 1, 0, 0, 0, tzinfo=dt.UTC),
+            payload=pol.model_dump(mode="json"),
+        )
+        session.add(policy_rec)
+
+        snap = AccountSnapshotRecord(
+            id="snap_default_paper_account_init",
+            account_id="default_paper_account",
+            balance=Decimal("10000.00"),
+            equity=Decimal("10000.00"),
+            free_margin=Decimal("10000.00"),
+            daily_realized_pnl=Decimal("0.00"),
+            weekly_realized_pnl=Decimal("0.00"),
+            peak_equity=Decimal("10000.00"),
+            open_risk_pct=Decimal("0.0000"),
+            reserved_risk_pct=Decimal("0.0000"),
+            consecutive_losses=0,
+            trading_mode="PAPER",
+            source="CONFIGURED_PAPER",
+            as_of=now,
+            payload={
+                "id": "snap_default_paper_account_init",
+                "account_id": "default_paper_account",
+                "balance": "10000.00",
+                "equity": "10000.00",
+                "free_margin": "10000.00",
+                "daily_realized_pnl": "0.00",
+                "weekly_realized_pnl": "0.00",
+                "peak_equity": "10000.00",
+                "open_risk_pct": "0.0000",
+                "reserved_risk_pct": "0.0000",
+                "consecutive_losses": 0,
+                "trading_mode": "PAPER",
+                "source": "CONFIGURED_PAPER",
+                "as_of": now.isoformat(),
+            },
+        )
+        session.add(snap)
+
+        spec = default_gold_spec(source="mt5_demo_iux", observed_at=now)
+        spec_rec = SymbolSpecificationRecord(
+            id="sym_xauusd_mt5_demo_iux_seed",
+            symbol="XAUUSD",
+            source="mt5_demo_iux",
+            tick_size=spec.tick_size,
+            tick_value=spec.tick_value,
+            contract_size=spec.contract_size,
+            volume_min=spec.volume_min,
+            volume_max=spec.volume_max,
+            volume_step=spec.volume_step,
+            digits=spec.digits,
+            observed_at=now,
+            payload=spec.model_dump(mode="json"),
+        )
+        session.add(spec_rec)
+
         await session.commit()
         yield session, factory
     await engine.dispose()
@@ -89,6 +159,16 @@ async def admin_user(db_session) -> User:
     user = await create_user(
         session, email="admin@example.com", password="admin-pass-123", role=Role.ADMIN
     )
+    from app.models.account import Account, TradingMode
+    acc = Account(
+        name="default_paper_account",
+        user_id=user.id,
+        trading_mode=TradingMode.PAPER,
+        starting_balance=10000.00,
+        base_currency="USD",
+        is_active=True,
+    )
+    session.add(acc)
     await session.commit()
     return user
 

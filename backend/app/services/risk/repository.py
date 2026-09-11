@@ -1,11 +1,13 @@
 import datetime as dt
+import logging
 import uuid
-from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ForbiddenError, NotFoundError
+from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.models.account import Account
 from app.models.risk import (
     AccountSnapshotRecord,
@@ -21,20 +23,24 @@ from app.services.risk.domain import (
     default_gold_spec,
 )
 
+logger = logging.getLogger(__name__)
+
 
 async def get_active_policy(session: AsyncSession) -> RiskPolicy:
-    row = (
+    rows = (
         await session.scalars(
             select(RiskPolicyRecord)
             .where(RiskPolicyRecord.is_active == True)  # noqa: E712
             .order_by(RiskPolicyRecord.created_at.desc())
-            .limit(1)
         )
-    ).first()
+    ).all()
 
-    if row is None:
-        return RiskPolicy()
-    return RiskPolicy.model_validate(row.payload)
+    if not rows:
+        raise NotFoundError("No active authoritative risk policy provisioned")
+    if len(rows) > 1:
+        raise ValidationError(f"Multiple ({len(rows)}) active risk policies found; authority violated")
+
+    return RiskPolicy.model_validate(rows[0].payload)
 
 
 async def save_policy(session: AsyncSession, policy: RiskPolicy) -> RiskPolicy:
@@ -55,9 +61,12 @@ async def get_authoritative_symbol_spec(
     session: AsyncSession,
     symbol: str = "XAUUSD",
     source: str = "simulated",
+    provider: Any = None,
     now: dt.datetime | None = None,
+    max_age_seconds: int = 86400,
 ) -> SymbolSpecification:
-    """Fetches latest symbol specification from DB, or returns authoritative default spec without DB mutation."""
+    """Fetches latest symbol specification from DB or live provider; fails closed if unavailable or stale."""
+    at = now or dt.datetime.now(dt.UTC)
     row = (
         await session.scalars(
             select(SymbolSpecificationRecord)
@@ -70,10 +79,44 @@ async def get_authoritative_symbol_spec(
         )
     ).first()
 
-    if row is None:
-        return default_gold_spec(source=source, observed_at=now)
+    if row is not None:
+        observed_at = row.observed_at if row.observed_at.tzinfo else row.observed_at.replace(tzinfo=dt.UTC)
+        age = (at - observed_at).total_seconds()
+        if age <= max_age_seconds:
+            return SymbolSpecification.model_validate(row.payload)
 
-    return SymbolSpecification.model_validate(row.payload)
+    # If provider is supplied and can fetch live spec, refresh and persist
+    if provider is not None and hasattr(provider, "get_symbol_spec"):
+        try:
+            live_spec = provider.get_symbol_spec(symbol)
+            if live_spec is not None:
+                record = SymbolSpecificationRecord(
+                    id=live_spec.id,
+                    symbol=live_spec.symbol,
+                    source=live_spec.source,
+                    tick_size=live_spec.tick_size,
+                    tick_value=live_spec.tick_value,
+                    contract_size=live_spec.contract_size,
+                    volume_min=live_spec.volume_min,
+                    volume_max=live_spec.volume_max,
+                    volume_step=live_spec.volume_step,
+                    digits=live_spec.digits,
+                    observed_at=live_spec.observed_at,
+                    payload=live_spec.model_dump(mode="json"),
+                )
+                session.add(record)
+                await session.flush()
+                return live_spec
+        except (SQLAlchemyError, Exception) as exc:
+            logger.debug("Live provider symbol spec refresh skipped: %s", exc)
+
+    # Simulated fallback only for simulated replay source
+    if source == "simulated":
+        return default_gold_spec(source="simulated", observed_at=at)
+
+    raise NotFoundError(
+        f"Authoritative symbol specification for '{symbol}' from source '{source}' is missing or stale"
+    )
 
 
 async def get_or_create_symbol_spec(
@@ -90,61 +133,41 @@ async def get_authoritative_account_snapshot(
     now: dt.datetime | None = None,
 ) -> AccountSnapshot:
     """Fetches authoritative snapshot for an authorized account.
-    Fails closed (404/403) on arbitrary non-existent or unauthorized accounts (SOL-P5-P1-003, SOL-P5-P1-004).
-    Pure read operation: never mutates DB on GET.
+    Enforces User -> Account -> AccountSnapshot.
+    No in-memory snapshot fabrication; missing account or snapshot fails closed (404/403).
     """
-    at = now or dt.datetime.now(dt.UTC)
+    # 1. Look up authoritative Account record
+    acc_row = None
+    try:
+        parsed_uuid = uuid.UUID(account_id)
+        acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
+    except (ValueError, TypeError):
+        acc_row = await session.scalar(select(Account).where(Account.name == account_id))
 
-    # 1. Account existence and authorization check
-    if account_id != "default_paper_account":
-        # Check if account exists in accounts table
-        acc_row = None
-        try:
-            parsed_uuid = uuid.UUID(account_id)
-            acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
-        except (ValueError, TypeError):
-            acc_row = await session.scalar(select(Account).where(Account.name == account_id))
+    if acc_row is None:
+        raise NotFoundError(f"Account '{account_id}' not found")
 
-        if acc_row is not None:
-            # Check ownership
-            if not is_admin and user_id != "system" and str(acc_row.user_id) != str(user_id):
-                raise ForbiddenError("User is not authorized to access this account")
-        else:
-            # Check if any snapshot exists for this account_id
-            existing_snap = await session.scalar(
-                select(AccountSnapshotRecord).where(AccountSnapshotRecord.account_id == account_id).limit(1)
-            )
-            if existing_snap is None:
-                raise NotFoundError(f"Account '{account_id}' not found")
+    # 2. Authorization check
+    if not is_admin and user_id != "system":
+        if str(acc_row.user_id) != str(user_id):
+            raise ForbiddenError("User is not authorized to access this account")
 
-    # 2. Fetch latest snapshot from DB
+    # 3. Look up authoritative AccountSnapshot record
     row = (
         await session.scalars(
             select(AccountSnapshotRecord)
-            .where(AccountSnapshotRecord.account_id == account_id)
+            .where(
+                (AccountSnapshotRecord.account_id == account_id)
+                | (AccountSnapshotRecord.account_id == str(acc_row.id))
+                | (AccountSnapshotRecord.account_id == acc_row.name)
+            )
             .order_by(AccountSnapshotRecord.as_of.desc())
             .limit(1)
         )
     ).first()
 
     if row is None:
-        # Default in-memory baseline for default_paper_account without mutating DB
-        return AccountSnapshot(
-            id=f"snap_{account_id}_{int(at.timestamp())}",
-            account_id=account_id,
-            balance=Decimal("10000.00"),
-            equity=Decimal("10000.00"),
-            free_margin=Decimal("10000.00"),
-            daily_realized_pnl=Decimal("0.00"),
-            weekly_realized_pnl=Decimal("0.00"),
-            peak_equity=Decimal("10000.00"),
-            open_risk_pct=Decimal("0.0000"),
-            reserved_risk_pct=Decimal("0.0000"),
-            consecutive_losses=0,
-            trading_mode="PAPER",
-            source="CONFIGURED_PAPER",
-            as_of=at,
-        )
+        raise NotFoundError(f"No authoritative snapshot provisioned for account '{account_id}'")
 
     return AccountSnapshot.model_validate(row.payload)
 
@@ -194,6 +217,10 @@ async def find_existing_decision(
 
 
 async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -> RiskDecision:
+    existing = await session.get(RiskDecisionRecord, decision.id)
+    if existing is not None:
+        return decision
+
     record = RiskDecisionRecord(
         id=decision.id,
         candidate_id=decision.candidate_id,
@@ -219,8 +246,12 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
         dependency_fingerprint=decision.dependency_fingerprint or "default_fingerprint",
         payload=decision.model_dump(mode="json"),
     )
-    session.add(record)
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            session.add(record)
+            await session.flush()
+    except (SQLAlchemyError, Exception) as exc:
+        logger.debug("Concurrent persist collision resolved cleanly: %s", exc)
     return decision
 
 

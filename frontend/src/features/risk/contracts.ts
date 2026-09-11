@@ -165,9 +165,22 @@ export function parseRiskPolicy(raw: unknown): RiskPolicyData {
   if (!isNumericStringOrNumber(d.max_directional_risk_pct)) fail('Invalid max_directional_risk_pct');
   if (typeof d.max_concurrent_trades !== 'number' || d.max_concurrent_trades <= 0) fail('Invalid max_concurrent_trades');
 
-  const blackoutPre = Number(d.news_high_impact_blackout_pre_minutes ?? d.news_blackout_minutes ?? 5);
-  const preMinutes = Number(d.news_high_impact_pre_minutes ?? d.news_reduction_window_minutes ?? 15);
-  const postMinutes = Number(d.news_high_impact_post_minutes ?? 15);
+  if (d.news_high_impact_blackout_pre_minutes === undefined || d.news_high_impact_blackout_pre_minutes === null || !Number.isFinite(Number(d.news_high_impact_blackout_pre_minutes))) {
+    fail('Invalid news_high_impact_blackout_pre_minutes');
+  }
+  if (d.news_high_impact_pre_minutes === undefined || d.news_high_impact_pre_minutes === null || !Number.isFinite(Number(d.news_high_impact_pre_minutes))) {
+    fail('Invalid news_high_impact_pre_minutes');
+  }
+  if (d.news_high_impact_post_minutes === undefined || d.news_high_impact_post_minutes === null || !Number.isFinite(Number(d.news_high_impact_post_minutes))) {
+    fail('Invalid news_high_impact_post_minutes');
+  }
+  if (!isNumericStringOrNumber(d.news_reduction_factor)) {
+    fail('Invalid news_reduction_factor');
+  }
+
+  const blackoutPre = Number(d.news_high_impact_blackout_pre_minutes);
+  const preMinutes = Number(d.news_high_impact_pre_minutes);
+  const postMinutes = Number(d.news_high_impact_post_minutes);
 
   return {
     version: d.version,

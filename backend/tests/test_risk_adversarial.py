@@ -36,6 +36,7 @@ from app.services.news.domain import NewsConfig
 from app.services.news.engine import build_context as build_news_context
 from app.services.risk.domain import (
     AccountSnapshot,
+    KillSwitchState,
     RiskPolicy,
     default_gold_spec,
 )
@@ -164,6 +165,17 @@ async def test_cached_approval_bypasses_safety_prevented(
 ):
     """SOL-P5-P1-001: Changing safety context (e.g. activating Kill Switch) must invalidate cached approval."""
     session, _ = db_session
+    calm_news = build_news_context(
+        events=[],
+        as_of=now_time,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
 
     # Step 1: Initial evaluation -> APPROVED
     dec1 = await risk_engine.evaluate_candidate(
@@ -174,6 +186,7 @@ async def test_cached_approval_bypasses_safety_prevented(
         policy=test_policy,
         spec=test_spec,
         quote=test_quote,
+        news_context=calm_news,
         as_of=now_time,
     )
     assert dec1.decision == "APPROVED"
@@ -198,6 +211,7 @@ async def test_cached_approval_bypasses_safety_prevented(
         policy=test_policy,
         spec=test_spec,
         quote=test_quote,
+        news_context=calm_news,
         as_of=now_time,
     )
     assert dec2.decision == "BLOCKED"
@@ -684,3 +698,337 @@ async def test_reservation_uniqueness_prevents_duplicate_allocation(db_session, 
     with pytest.raises(IntegrityError):
         await session.commit()
     await session.rollback()
+
+
+def test_fingerprint_sensitivity_across_all_safety_dependencies(test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time):
+    """Section 36 & SOL-P5-P1-001: Changing ANY risk dependency MUST alter the fingerprint."""
+    ks_inactive = KillSwitchState(
+        id="ks_test_01",
+        state="INACTIVE",
+        trigger_type="MANUAL",
+        reason_th="ระบบทำงานปกติ",
+        activated_at=now_time,
+        activated_by="system",
+        policy_version=test_policy.version,
+    )
+    base_fp = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec,
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+
+    # 1. Account daily loss
+    fp_daily = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account.model_copy(update={"daily_realized_pnl": Decimal("-50.00")}),
+        policy=test_policy,
+        spec=test_spec,
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_daily != base_fp
+
+    # 2. Account weekly loss
+    fp_weekly = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account.model_copy(update={"weekly_realized_pnl": Decimal("-100.00")}),
+        policy=test_policy,
+        spec=test_spec,
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_weekly != base_fp
+
+    # 3. Peak equity
+    fp_peak = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account.model_copy(update={"peak_equity": Decimal("12000.00")}),
+        policy=test_policy,
+        spec=test_spec,
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_peak != base_fp
+
+    # 4. Cooldown until
+    fp_cd = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account.model_copy(update={"cooldown_until": now_time + dt.timedelta(hours=1)}),
+        policy=test_policy,
+        spec=test_spec,
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_cd != base_fp
+
+    # 5. Policy weekly limit
+    fp_pol_week = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account,
+        policy=test_policy.model_copy(update={"weekly_loss_limit_pct": Decimal("5.0")}),
+        spec=test_spec,
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_pol_week != base_fp
+
+    # 6. Policy drawdown
+    fp_pol_dd = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account,
+        policy=test_policy.model_copy(update={"max_drawdown_pct": Decimal("8.0")}),
+        spec=test_spec,
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_pol_dd != base_fp
+
+    # 7. Quote freshness policy
+    fp_fresh = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account,
+        policy=test_policy.model_copy(update={"quote_freshness_seconds": 10}),
+        spec=test_spec,
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_fresh != base_fp
+
+    # 8. Symbol spec tick_value
+    fp_tick = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec.model_copy(update={"tick_value": Decimal("1.50")}),
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_tick != base_fp
+
+    # 9. Symbol spec contract_size
+    fp_contract = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec.model_copy(update={"contract_size": Decimal("50.0")}),
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_contract != base_fp
+
+    # 10. Symbol spec volume_max
+    fp_vol = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id=test_candidate.profile_id,
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec.model_copy(update={"volume_max": Decimal("20.00")}),
+        kill_switch=ks_inactive,
+        quote=test_quote,
+        news_prov=None,
+        portfolio_exposure_before=Decimal("0.0000"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp_vol != base_fp
+
+
+@pytest.mark.asyncio
+async def test_cooldown_lifecycle_deterministic_boundary(
+    db_session, test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time
+):
+    """Section 27 & 41: Test cooldown lifecycle before expiry, at expiry, and after expiry."""
+    session, _ = db_session
+    calm_news = build_news_context(
+        events=[],
+        as_of=now_time,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+
+    expiry_time = now_time + dt.timedelta(minutes=30)
+    # Consecutive losses at threshold with active cooldown_until
+    cd_account = test_account.model_copy(
+        update={
+            "consecutive_losses": 3,
+            "cooldown_until": expiry_time,
+        }
+    )
+
+    # 1. Before expiry (now_time < expiry_time) -> BLOCKED
+    dec_before = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan,
+        account=cd_account,
+        policy=test_policy,
+        spec=test_spec,
+        quote=test_quote,
+        news_context=calm_news,
+        as_of=now_time,
+    )
+    assert dec_before.decision == "BLOCKED"
+    assert any("Cooldown" in r for r in dec_before.blocked_reasons_th)
+
+    # 2. At expiry (as_of = expiry_time) -> Not blocked by cooldown (boundary cleared)
+    calm_news_at = build_news_context(
+        events=[],
+        as_of=expiry_time,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+    dec_at = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan.model_copy(update={"as_of": expiry_time, "expires_at": expiry_time + dt.timedelta(hours=2)}),
+        account=cd_account.model_copy(update={"as_of": expiry_time}),
+        policy=test_policy,
+        spec=test_spec.model_copy(update={"observed_at": expiry_time}),
+        quote=test_quote.model_copy(update={"timestamp": expiry_time}),
+        news_context=calm_news_at,
+        as_of=expiry_time,
+    )
+    assert dec_at.decision in ("APPROVED", "REDUCED")
+    assert not any("Cooldown" in r for r in dec_at.blocked_reasons_th)
+
+    # 3. After expiry (as_of = expiry_time + 5m) -> ALLOWED, not blocked by historical consecutive_losses alone
+    after_time = expiry_time + dt.timedelta(minutes=5)
+    calm_news_after = build_news_context(
+        events=[],
+        as_of=after_time,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+    dec_after = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan.model_copy(update={"as_of": after_time, "expires_at": after_time + dt.timedelta(hours=2)}),
+        account=cd_account.model_copy(update={"as_of": after_time}),
+        policy=test_policy,
+        spec=test_spec.model_copy(update={"observed_at": after_time}),
+        quote=test_quote.model_copy(update={"timestamp": after_time}),
+        news_context=calm_news_after,
+        as_of=after_time,
+    )
+    assert dec_after.decision in ("APPROVED", "REDUCED")
+    assert not any("Cooldown" in r for r in dec_after.blocked_reasons_th)
+
+
+@pytest.mark.asyncio
+async def test_news_failure_fails_closed_when_enabled(
+    db_session, test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time
+):
+    """Section 16 & 40: When policy.news_risk_enabled=True, news unavailability MUST FAIL CLOSED."""
+    session, _ = db_session
+
+    # Case A: news_context is None
+    dec_none = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan,
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec,
+        quote=test_quote,
+        news_context=None,
+        as_of=now_time,
+    )
+    assert dec_none.decision == "BLOCKED"
+    assert dec_none.news_provenance is not None
+    assert dec_none.news_provenance.news_state == "UNAVAILABLE"
+
+    # Case B: news_context indicates STALE calendar
+    stale_news = build_news_context(
+        events=[],
+        as_of=now_time,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+    stale_news = stale_news.model_copy(update={"calendar_state": "STALE"})
+
+    dec_stale = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan,
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec,
+        quote=test_quote,
+        news_context=stale_news,
+        as_of=now_time,
+    )
+    assert dec_stale.decision == "BLOCKED"
+    assert dec_stale.news_provenance.news_state == "UNAVAILABLE"

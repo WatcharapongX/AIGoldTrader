@@ -131,8 +131,26 @@ def candidate(base_time, plan):
     )
 
 
+@pytest.fixture
+def news_context(base_time):
+    from app.services.news.domain import NewsConfig
+    from app.services.news.engine import build_context as build_news_context
+
+    return build_news_context(
+        events=[],
+        as_of=base_time,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+
+
 @pytest.mark.asyncio
-async def test_normal_approved_decision(db_session, candidate, plan, account, policy, spec, quote, base_time):
+async def test_normal_approved_decision(db_session, candidate, plan, account, policy, spec, quote, news_context, base_time):
     session, _ = db_session
     decision = await risk_engine.evaluate_candidate(
         session=session,
@@ -142,6 +160,7 @@ async def test_normal_approved_decision(db_session, candidate, plan, account, po
         policy=policy,
         spec=spec,
         quote=quote,
+        news_context=news_context,
         as_of=base_time,
     )
     assert decision.decision == "APPROVED"
@@ -308,35 +327,60 @@ async def test_news_risk_separation_blackout_and_reduction(
 
 
 @pytest.mark.asyncio
-async def test_portfolio_risk_capacity_exceeded(db_session, candidate, plan, account, policy, spec, quote, base_time):
+async def test_portfolio_risk_capacity_exceeded(db_session, candidate, plan, account, policy, spec, quote, news_context, base_time):
     session, _ = db_session
 
-    # Account already has 2.5% reserved risk; max_account_risk_pct = 3.0%
+    from app.models.risk import RiskReservationRecord
+
+    # Account already has 2.5% reserved risk in DB; max_account_risk_pct = 3.0%
     # Next trade requests 1.0%. Available is 0.5% >= min_risk (0.1%) -> REDUCED to 0.5%!
-    busy_account = account.model_copy(update={"reserved_risk_pct": Decimal("2.5000")})
+    r1 = RiskReservationRecord(
+        id="res_test_capacity_001",
+        decision_id="dec_test_capacity_001",
+        account_id=account.account_id,
+        profile_id="day_trader",
+        symbol="EURUSD",
+        direction="SHORT",
+        risk_pct=Decimal("2.5000"),
+        risk_amount=Decimal("250.00"),
+        position_size=Decimal("0.50"),
+        status="ACTIVE",
+        reserved_at=base_time,
+        reserved_until=base_time + dt.timedelta(minutes=10),
+    )
+    session.add(r1)
+    await session.flush()
+
     decision = await risk_engine.evaluate_candidate(
         session=session,
         candidate=candidate,
         plan=plan,
-        account=busy_account,
+        account=account,
         policy=policy,
         spec=spec,
         quote=quote,
+        news_context=news_context,
         as_of=base_time,
     )
     assert decision.decision == "REDUCED"
     assert decision.approved_risk_pct == Decimal("0.5000")
 
     # Account already at 2.95% reserved risk (only 0.05% available, < min 0.1%) -> BLOCKED!
-    full_account = account.model_copy(update={"reserved_risk_pct": Decimal("2.9500")})
+    r1.risk_pct = Decimal("2.9500")
+    r1.risk_amount = Decimal("295.00")
+    await session.flush()
+
+    cand_next = candidate.model_copy(update={"id": "cand_test_002"})
+    plan_next = plan.model_copy(update={"id": "plan_test_002", "candidate_id": "cand_test_002"})
     decision_blocked = await risk_engine.evaluate_candidate(
         session=session,
-        candidate=candidate,
-        plan=plan,
-        account=full_account,
+        candidate=cand_next,
+        plan=plan_next,
+        account=account,
         policy=policy,
         spec=spec,
         quote=quote,
+        news_context=news_context,
         as_of=base_time,
     )
     assert decision_blocked.decision == "BLOCKED"

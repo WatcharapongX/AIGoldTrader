@@ -53,6 +53,14 @@ class RiskEngine:
         entry_upper = Decimal(str(plan.entry_upper))
         stop_loss = Decimal(str(plan.stop_loss))
 
+        # 0. Transaction-level advisory lock on account to prevent concurrency races across workers (SOL-P5-P1-004)
+        if session.get_bind().dialect.name == "postgresql":
+            from sqlalchemy import text
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": f"risk_account_{account.account_id}"},
+            )
+
         # 1. Market quote provenance & staleness evaluation
         market_prov = None
         quote_is_stale = False
@@ -94,68 +102,116 @@ class RiskEngine:
         if ks_check.is_active:
             blocked_reasons_th.append(ks_check.blocked_reason_th or "ไม่อนุมัติเนื่องจาก Kill Switch ทำงาน")
 
-        # 4. News Risk evaluation
+        # 4. News Risk evaluation (Fail closed when enabled and unavailable/stale - SOL-P5-P1-009)
         news_prov = None
         news_reduced = False
         target_risk_pct = requested_risk_pct or policy.max_risk_per_trade_pct
 
-        if policy.news_risk_enabled and news_context and news_context.events:
-            blackout_pre = dt.timedelta(minutes=policy.news_high_impact_blackout_pre_minutes)
-            window_pre = dt.timedelta(minutes=policy.news_high_impact_pre_minutes)
-            window_post = dt.timedelta(minutes=policy.news_high_impact_post_minutes)
+        if policy.news_risk_enabled:
+            if news_context is None or getattr(news_context, "calendar_state", "AVAILABLE") != "AVAILABLE":
+                desc = "ไม่สามารถประเมินความเสี่ยงข่าวได้ (News Provider Unavailable / Stale)"
+                blocked_reasons_th.append(desc)
+                news_prov = NewsRiskProvenance(
+                    news_state="UNAVAILABLE",
+                    in_blackout=False,
+                    in_pre_news_window=False,
+                    in_post_news_window=False,
+                    event_ids=(),
+                    description_th=desc,
+                )
+            elif news_context.events:
+                blackout_pre = dt.timedelta(minutes=policy.news_high_impact_blackout_pre_minutes)
+                window_pre = dt.timedelta(minutes=policy.news_high_impact_pre_minutes)
+                window_post = dt.timedelta(minutes=policy.news_high_impact_post_minutes)
 
-            in_blackout = False
-            in_pre = False
-            in_post = False
-            relevant_event_ids: list[str] = []
+                in_blackout = False
+                in_pre = False
+                in_post = False
+                relevant_event_ids: list[str] = []
 
-            for event in news_context.events:
-                if event.impact == "HIGH":
-                    # Blackout: e.g. 5m before release
-                    if event.scheduled_at - blackout_pre <= now <= event.scheduled_at:
-                        in_blackout = True
-                        relevant_event_ids.append(event.id)
-                    # Pre-news window: e.g. 15m before release
-                    elif event.scheduled_at - window_pre <= now < event.scheduled_at:
-                        in_pre = True
-                        relevant_event_ids.append(event.id)
-                    # Post-news window: e.g. 15m after release
-                    elif event.scheduled_at < now <= event.scheduled_at + window_post:
-                        in_post = True
-                        relevant_event_ids.append(event.id)
+                for event in news_context.events:
+                    if event.impact == "HIGH":
+                        # Blackout: e.g. 5m before release
+                        if event.scheduled_at - blackout_pre <= now <= event.scheduled_at:
+                            in_blackout = True
+                            relevant_event_ids.append(event.id)
+                        # Pre-news window: e.g. 15m before release
+                        elif event.scheduled_at - window_pre <= now < event.scheduled_at:
+                            in_pre = True
+                            relevant_event_ids.append(event.id)
+                        # Post-news window: e.g. 15m after release
+                        elif event.scheduled_at < now <= event.scheduled_at + window_post:
+                            in_post = True
+                            relevant_event_ids.append(event.id)
 
-            desc = "สภาวะข่าวปกติ"
-            if in_blackout:
-                desc = "อยู่ในช่วงห้ามเทรดก่อนประกาศข่าวสำคัญ (News Blackout)"
-                blocked_reasons_th.append("ไม่อนุมัติแผนเทรดเนื่องจากอยู่ในช่วงเวลาก่อนประกาศข่าว High-Impact (Blackout Window)")
-            elif in_pre:
-                desc = f"ใกล้เวลาประกาศข่าวสำคัญ ปรับลดความเสี่ยงเหลือ {policy.news_reduction_factor * Decimal('100'):.0f}%"
-                warnings_th.append(desc)
-                target_risk_pct = target_risk_pct * policy.news_reduction_factor
-                news_reduced = True
-            elif in_post:
-                desc = "ช่วงหลังข่าวประกาศ อยู่ระหว่างเฝ้าระวังสเปรดและความผันผวน"
-                if quote and quote.spread > policy.max_spread_absolute * Decimal("0.8"):
-                    blocked_reasons_th.append("ไม่อนุมัติเนื่องจากสเปรดหลังประกาศข่าวยังไม่เสถียร")
-                else:
+                desc = "สภาวะข่าวปกติ"
+                if in_blackout:
+                    desc = "อยู่ในช่วงห้ามเทรดก่อนประกาศข่าวสำคัญ (News Blackout)"
+                    blocked_reasons_th.append(
+                        "ไม่อนุมัติแผนเทรดเนื่องจากอยู่ในช่วงเวลาก่อนประกาศข่าว High-Impact (Blackout Window)"
+                    )
+                elif in_pre:
+                    reduction_pct = (policy.news_reduction_factor * Decimal("100")).quantize(Decimal("1"))
+                    desc = f"ใกล้เวลาประกาศข่าวสำคัญ ปรับลดความเสี่ยงเหลือ {reduction_pct:.0f}%"
                     warnings_th.append(desc)
+                    target_risk_pct = target_risk_pct * policy.news_reduction_factor
+                    news_reduced = True
+                elif in_post:
+                    desc = "ช่วงหลังข่าวประกาศ อยู่ระหว่างเฝ้าระวังสเปรดและความผันผวน"
+                    if quote and quote.spread > policy.max_spread_absolute * Decimal("0.8"):
+                        blocked_reasons_th.append("ไม่อนุมัติเนื่องจากสเปรดหลังประกาศข่าวยังไม่เสถียร")
+                    else:
+                        warnings_th.append(desc)
 
-            news_prov = NewsRiskProvenance(
-                news_state="EVENT_RISK_ACTIVE" if (in_blackout or in_pre or in_post) else "CALM",
-                in_blackout=in_blackout,
-                in_pre_news_window=in_pre,
-                in_post_news_window=in_post,
-                event_ids=tuple(relevant_event_ids),
-                description_th=desc,
+                news_prov = NewsRiskProvenance(
+                    news_state="EVENT_RISK_ACTIVE" if (in_blackout or in_pre or in_post) else "CALM",
+                    in_blackout=in_blackout,
+                    in_pre_news_window=in_pre,
+                    in_post_news_window=in_post,
+                    event_ids=tuple(relevant_event_ids),
+                    description_th=desc,
+                )
+            else:
+                news_prov = NewsRiskProvenance(
+                    news_state="CALM",
+                    in_blackout=False,
+                    in_pre_news_window=False,
+                    in_post_news_window=False,
+                    event_ids=(),
+                    description_th="สภาวะข่าวปกติ ไม่มีเหตุการณ์สำคัญ",
+                )
+
+        # 5. Check idempotency first inside lock: if unexpired decision already exists (SOL-P5-P1-001, 004)
+        existing_candidate_decision = await find_existing_decision(
+            session=session,
+            candidate_id=candidate.id,
+            profile_id=candidate.profile_id,
+            now=now,
+        )
+        if existing_candidate_decision is not None:
+            # Check if all safety dependencies are unchanged
+            candidate_fp = compute_risk_dependency_fingerprint(
+                candidate=candidate,
+                plan=plan,
+                profile_id=candidate.profile_id,
+                account=account,
+                policy=policy,
+                spec=spec,
+                kill_switch=ks_state,
+                quote=quote,
+                news_prov=news_prov,
+                portfolio_exposure_before=existing_candidate_decision.portfolio_exposure_before,
+                requested_risk_pct=target_risk_pct,
             )
+            if existing_candidate_decision.dependency_fingerprint == candidate_fp:
+                return existing_candidate_decision
 
-        # 5. Calculate current portfolio exposure for fingerprint
+        # 6. Calculate current portfolio exposure for fingerprint (sole source: DB reservations)
         active_reservations = await portfolio_manager.get_active_reservations(session, account.account_id, now)
-        db_reserved = sum((Decimal(str(r.risk_pct)) for r in active_reservations), Decimal("0"))
-        current_reserved = max(account.reserved_risk_pct, db_reserved)
+        current_reserved = sum((Decimal(str(r.risk_pct)) for r in active_reservations), Decimal("0"))
         current_exposure = account.open_risk_pct + current_reserved
 
-        # 6. Compute canonical deterministic dependency fingerprint & ID
+        # 7. Compute canonical deterministic dependency fingerprint & ID
         fingerprint = compute_risk_dependency_fingerprint(
             candidate=candidate,
             plan=plan,
@@ -171,7 +227,7 @@ class RiskEngine:
         )
         decision_id = f"dec_{fingerprint[:24]}"
 
-        # 7. Check idempotency cache with full dependency fingerprint (SOL-P5-P1-001)
+        # 8. Check idempotency cache with full dependency fingerprint inside lock (SOL-P5-P1-001, 004)
         existing_decision = await find_existing_decision(
             session=session,
             candidate_id=candidate.id,
@@ -221,10 +277,14 @@ class RiskEngine:
                     f"ระดับ Drawdown ปัจจุบัน ({dd_pct:.2f}%) ถึงเพดานสูงสุดที่อนุญาต ({policy.max_drawdown_pct:.1f}%)"
                 )
 
-        # Cooldown check
-        is_cooldown = (account.cooldown_until is not None and account.cooldown_until > now) or (
-            account.consecutive_losses >= policy.cooldown_consecutive_losses
-        )
+        # Cooldown check lifecycle (SOL-P5-P1-010)
+        is_cooldown = False
+        if account.cooldown_until is not None:
+            is_cooldown = now < account.cooldown_until
+        elif account.consecutive_losses >= policy.cooldown_consecutive_losses:
+            calc_until = account.as_of + dt.timedelta(minutes=policy.cooldown_period_minutes)
+            is_cooldown = now < calc_until
+
         if is_cooldown:
             blocked_reasons_th.append(
                 f"บัญชีอยู่ในช่วงพักการเทรด (Cooldown) เนื่องจากขาดทุนต่อเนื่อง {account.consecutive_losses} ครั้ง"
@@ -233,6 +293,18 @@ class RiskEngine:
         # Symbol Spec & Quote Gates
         if spec.tick_size <= Decimal("0") or spec.tick_value <= Decimal("0") or spec.contract_size <= Decimal("0"):
             blocked_reasons_th.append("ข้อมูลสเปกสัญลักษณ์ (Symbol Specification) ไม่สมบูรณ์หรือไม่ถูกต้อง")
+
+        spec_age = (now - spec.observed_at).total_seconds()
+        if spec_age > policy.symbol_spec_freshness_seconds:
+            blocked_reasons_th.append(
+                f"ข้อมูลสเปกสัญลักษณ์ล้าสมัย (SymbolSpec อายุ {spec_age:.0f}s > {policy.symbol_spec_freshness_seconds}s)"
+            )
+
+        # Open Position Risk check (SOL-P5-P2-012)
+        if account.open_risk_pct > Decimal("0"):
+            blocked_reasons_th.append(
+                "ไม่อนุมัติเนื่องจากมีสถานะเปิดความเสี่ยงคงค้างที่ไม่สามารถแจกแจงสัญลักษณ์/ทิศทางได้ (Open Risk Breakdown Unavailable)"
+            )
 
         if quote_is_stale:
             blocked_reasons_th.append(quote_stale_reason)

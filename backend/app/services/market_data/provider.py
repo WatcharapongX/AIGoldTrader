@@ -83,6 +83,10 @@ class MarketDataProvider(ABC):
     @abstractmethod
     def health(self) -> bool: ...
 
+    def get_symbol_spec(self, symbol: str = "XAUUSD"):
+        from app.services.risk.domain import default_gold_spec
+        return default_gold_spec(source=self.source)
+
 
 class ReplayProvider(MarketDataProvider):
     def __init__(self):
@@ -96,6 +100,10 @@ class ReplayProvider(MarketDataProvider):
 
     def health(self) -> bool:
         return self.connected
+
+    def get_symbol_spec(self, symbol: str = "XAUUSD"):
+        from app.services.risk.domain import default_gold_spec
+        return default_gold_spec(source="simulated")
 
     async def subscribe_ticks(self, symbol: str) -> AsyncIterator[Tick]:
         if symbol != "XAUUSD":

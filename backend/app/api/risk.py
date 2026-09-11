@@ -34,6 +34,7 @@ from app.services.risk.engine import risk_engine
 from app.services.risk.kill_switch import kill_switch_manager
 from app.services.risk.portfolio import portfolio_manager
 from app.services.risk.repository import (
+    find_existing_decision,
     get_active_policy,
     get_authoritative_account_snapshot,
     get_authoritative_symbol_spec,
@@ -101,6 +102,7 @@ async def evaluate_risk(
     quote = market.quote
 
     news = None
+    news_unavailable = False
     try:
         ns = await news_service(request)
         events = await event_vintages(session, ns.provider.source, now)
@@ -115,9 +117,17 @@ async def evaluate_risk(
         )
     except Exception as exc:
         logger.warning("Failed to fetch news context for risk evaluation: %s", exc)
+        news_unavailable = True
 
     policy = await get_active_policy(session)
-    spec = await get_authoritative_symbol_spec(session, symbol=candidate.symbol, source=market.provider.source, now=now)
+    spec = await get_authoritative_symbol_spec(
+        session,
+        symbol=candidate.symbol,
+        source=market.provider.source,
+        provider=market.provider,
+        now=now,
+        max_age_seconds=policy.symbol_spec_freshness_seconds,
+    )
     account = await get_authoritative_account_snapshot(
         session=session,
         account_id=body.account_id,
@@ -125,6 +135,9 @@ async def evaluate_risk(
         is_admin=(user.role == Role.ADMIN),
         now=now,
     )
+
+    if news_unavailable and policy.news_risk_enabled:
+        news = None  # engine fails closed when news is None while policy.news_risk_enabled is True
 
     # 3. Evaluate candidate (handles KillSwitch, automatic triggers,
     # idempotency cache with fingerprint, sizing, and atomic reservation)
@@ -141,8 +154,24 @@ async def evaluate_risk(
         as_of=now,
     )
 
-    await persist_risk_decision(session, decision)
-    await session.commit()
+    from sqlalchemy.exc import IntegrityError
+    try:
+        await persist_risk_decision(session, decision)
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        # Recover canonical committed decision from concurrent worker race (SOL-P5-NEW-P1-018)
+        existing = await find_existing_decision(
+            session=session,
+            candidate_id=candidate.id,
+            profile_id=candidate.profile_id,
+            dependency_fingerprint=decision.dependency_fingerprint,
+            now=now,
+        )
+        if existing is not None:
+            return existing
+        raise
+
     return decision
 
 

@@ -48,6 +48,9 @@ const samplePolicy = {
   max_drawdown_pct: '10.0',
   cooldown_consecutive_losses: 3,
   max_spread_absolute: '0.60',
+  news_high_impact_blackout_pre_minutes: 5,
+  news_high_impact_pre_minutes: 15,
+  news_high_impact_post_minutes: 15,
   news_blackout_minutes: 5,
   news_reduction_window_minutes: 15,
   news_reduction_factor: '0.50',
@@ -160,6 +163,11 @@ test('parseRiskPolicy parses authoritative policy and enforces constraints', () 
   assert.throws(() => parseRiskPolicy({ ...samplePolicy, max_account_risk_pct: 'NaN' }), RiskContractError);
   // Rejects negative/zero concurrent trades
   assert.throws(() => parseRiskPolicy({ ...samplePolicy, max_concurrent_trades: 0 }), RiskContractError);
+  // Rejects missing news fields (no client-side fallback)
+  assert.throws(() => parseRiskPolicy({ ...samplePolicy, news_high_impact_blackout_pre_minutes: undefined }), RiskContractError);
+  assert.throws(() => parseRiskPolicy({ ...samplePolicy, news_high_impact_pre_minutes: undefined }), RiskContractError);
+  assert.throws(() => parseRiskPolicy({ ...samplePolicy, news_high_impact_post_minutes: undefined }), RiskContractError);
+  assert.throws(() => parseRiskPolicy({ ...samplePolicy, news_reduction_factor: undefined }), RiskContractError);
 });
 
 test('parseKillSwitch parses active and inactive states with Thai reasons', () => {

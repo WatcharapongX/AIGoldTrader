@@ -143,6 +143,33 @@ class MT5MarketDataProvider(MarketDataProvider):
     def health(self) -> bool:
         return self.connected
 
+    def get_symbol_spec(self, symbol: str = "XAUUSD"):
+        if not self.connected or self._gateway is None:
+            raise MT5Unavailable("MT5_SESSION_REQUIRED")
+        g = self._session()
+        info = g.call("symbol_info", self.provider_symbol)
+        if not info:
+            raise MT5Unavailable("MT5_SYMBOL_UNAVAILABLE")
+        account = g.call("account_info")
+        server = account.server if account else None
+        now = dt.datetime.now(dt.UTC)
+        spec_id = f"sym_{symbol.lower()}_{self.source}_{int(now.timestamp())}"
+        from app.services.risk.domain import SymbolSpecification
+        return SymbolSpecification(
+            id=spec_id,
+            symbol=symbol,
+            source=self.source,
+            tick_size=Decimal(str(info.trade_tick_size)),
+            tick_value=Decimal(str(info.trade_tick_value)),
+            contract_size=Decimal(str(info.trade_contract_size)),
+            volume_min=Decimal(str(info.volume_min)),
+            volume_max=Decimal(str(info.volume_max)),
+            volume_step=Decimal(str(info.volume_step)),
+            digits=int(info.digits),
+            observed_at=now,
+            broker_server=server,
+        )
+
     def _session(self):
         if not self.connected or self._gateway is None:
             raise MT5Unavailable("MT5_SESSION_REQUIRED")
