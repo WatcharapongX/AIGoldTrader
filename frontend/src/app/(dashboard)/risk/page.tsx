@@ -1,19 +1,24 @@
+import { RiskWorkspace } from '@/features/risk/RiskWorkspace';
+
 export default function RiskPage() {
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-100">Risk Management</h1>
-        <span className="px-3 py-1 bg-amber-500/20 text-amber-500 text-xs font-semibold rounded-full border border-amber-500/30">
-          Coming in Phase 5
+    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">
+            <span>🛡️</span>
+            <span>Risk Management & Kill Switch</span>
+          </h1>
+          <p className="text-sm text-gray-400 mt-1">
+            ระบบบริหารจัดการความเสี่ยงระดับพอร์ตโฟลิโอ Fail-Closed Protection และสวิตช์ฉุกเฉิน (Phase 5)
+          </p>
+        </div>
+        <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-full border border-emerald-500/30">
+          Phase 5 Active
         </span>
       </div>
-      
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-8">
-        <h2 className="text-xl font-semibold text-gray-200 mb-4">Risk Controls</h2>
-        <p className="text-gray-400">
-          Risk dashboard, kill switch status, and risk configuration will be built here.
-        </p>
-      </div>
+
+      <RiskWorkspace />
     </div>
   );
 }

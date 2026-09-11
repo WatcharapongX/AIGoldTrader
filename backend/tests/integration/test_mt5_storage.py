@@ -25,7 +25,7 @@ def test_unknown_ask_migration_preserves_sources_and_refuses_lossy_downgrade(iso
     _alembic("check")
     _alembic("downgrade", "0003_phase2_market_data", success=False)
     assert conn.execute("SELECT source,ask_close FROM candles ORDER BY source").fetchall() == before
-    assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == ("0006_strategy",)
+    assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == ("0007_risk_engine",)
     # In this owned disposable fixture only, provide known asks to exercise reversible DDL.
     conn.execute("UPDATE candles SET ask_close=2350.30 WHERE ask_close IS NULL")
     known = conn.execute("SELECT * FROM candles ORDER BY source").fetchall()

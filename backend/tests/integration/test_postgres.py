@@ -95,6 +95,8 @@ def test_postgresql_migrations_auth_and_audit(isolated_postgres, capfd):
         "users", "sessions", "accounts", "symbols", "audit_logs", "system_events",
         "ticks", "candles", "economic_events", "economic_event_revisions",
         "trader_profiles", "strategy_evaluations", "trade_candidates", "candidate_transitions",
+        "risk_policies", "symbol_specifications", "account_snapshots",
+        "risk_decisions", "risk_reservations", "kill_switch_records",
     }
     for action, target in (("upgrade", "head"), ("downgrade", "base"), ("upgrade", "head")):
         _alembic(action, target)
@@ -221,7 +223,7 @@ def _verify_schema(conn, schema, expected):
     revision = conn.execute(
         sql.SQL("SELECT version_num FROM {}.alembic_version").format(sql.Identifier(schema))
     ).fetchone()
-    assert revision == ("0006_strategy",)
+    assert revision == ("0007_risk_engine",)
     indexes = {
         row[0]: row[1] for row in conn.execute(
             "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = %s", (schema,)
@@ -238,7 +240,7 @@ def _verify_schema(conn, schema, expected):
     assert {table for table, kind in constraints if kind == "PRIMARY KEY"} == expected | {"alembic_version"}
     foreign_tables = {table for table, kind in constraints if kind == "FOREIGN KEY"}
     assert foreign_tables == {"sessions", "accounts", "ticks", "candles", "economic_event_revisions",
-                              "trade_candidates", "candidate_transitions"}
+                              "trade_candidates", "candidate_transitions", "risk_reservations"}
 
 
 async def _verify_auth():

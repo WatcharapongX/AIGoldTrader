@@ -12,6 +12,7 @@ from sqlalchemy.exc import ArgumentError
 
 from app.services.analysis.domain import AnalysisConfig
 from app.services.news.domain import NewsConfig
+from app.services.risk.domain import RiskPolicy
 from app.services.strategy.domain import StrategyConfig
 
 
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     strategy_config: StrategyConfig = Field(default_factory=StrategyConfig)
+    risk_policy: RiskPolicy = Field(default_factory=RiskPolicy)
 
     news_calendar_provider: Literal["fixture", "unavailable", "xoomar", "forex_factory"] = "unavailable"
     news_real_poll_seconds: int = Field(default=300, ge=60, le=3600)

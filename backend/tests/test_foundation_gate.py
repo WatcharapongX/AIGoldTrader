@@ -19,6 +19,8 @@ def test_migration_upgrade_downgrade_upgrade(tmp_path):
         "users", "sessions", "accounts", "symbols", "audit_logs", "system_events",
         "ticks", "candles", "economic_events", "economic_event_revisions",
         "trader_profiles", "strategy_evaluations", "trade_candidates", "candidate_transitions",
+        "risk_policies", "symbol_specifications", "account_snapshots",
+        "risk_decisions", "risk_reservations", "kill_switch_records",
     }
     try:
         for target in ("head", "base", "head"):

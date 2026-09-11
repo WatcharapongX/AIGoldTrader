@@ -24,6 +24,14 @@ __all__ = [
     "User",
 ]
 
+from app.models.risk import (  # noqa: F401, E402
+    AccountSnapshotRecord,
+    KillSwitchRecord,
+    RiskDecisionRecord,
+    RiskPolicyRecord,
+    RiskReservationRecord,
+    SymbolSpecificationRecord,
+)
 from app.models.strategy import (  # noqa: F401, E402
     CandidateTransitionRecord,
     StrategyEvaluationRecord,

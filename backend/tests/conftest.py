@@ -43,7 +43,12 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch):
     client = fakeredis_aioredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(redis_client, "_client", client)
     yield client
-    asyncio.get_event_loop().run_until_complete(client.aclose())
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(client.aclose())
 
 
 @pytest.fixture
