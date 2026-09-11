@@ -14,6 +14,9 @@ async function main(){
   page.setDefaultTimeout(60000);
   const base=process.env.E2E_BASE_URL||'http://localhost:3001';
   await page.goto(base+'/login');
+  const illustration=await page.request.get(base+'/images/login-bg.jpg');
+  assert.equal(illustration.status(),200);
+  assert.match(illustration.headers()['content-type'],/image/);
   for(const width of [1440,820,390]){
    await page.setViewportSize({width,height:1000});
    await page.getByLabel('Username',{exact:true}).waitFor();
@@ -31,17 +34,24 @@ async function main(){
   await page.locator('header').getByTestId('trading-status').filter({hasText:'PAPER'}).waitFor();
   for(const route of ['dashboard','trading','analysis']){
    stage=route;
+   const summaryResponse=route==='dashboard'?page.waitForResponse(r=>new URL(r.url()).pathname==='/api/dashboard/summary'&&r.status()===200):null;
    await page.goto(base+'/'+route);
+   if(summaryResponse)await summaryResponse;
    await page.locator('header').getByTestId('trading-status').filter({hasText:'PAPER'}).waitFor();
    await page.locator('header').getByText('Auto Trading: OFF',{exact:true}).waitFor();
-   if(route==='dashboard')await page.getByTestId('quote-provenance').filter({hasText:/mt5|simulated|UNKNOWN/}).waitFor();
+   if(route==='dashboard'){
+    await page.getByTestId('quote-provenance').filter({hasText:/mt5|simulated/}).waitFor();
+    await page.getByText(/^M5 candle:.*(CLOSED|FORMING)/).waitFor();
+    await page.locator('img').evaluateAll(images=>Promise.all(images.map(img=>img.decode())));
+   }
    if(route==='trading')await page.locator('.strategy-workspace').waitFor();
-   if(route==='analysis')await page.locator('canvas').first().waitFor();
+   if(route==='analysis')await page.getByTestId('analysis-summary').waitFor();
    for(const width of [1440,820,390]){
     await page.setViewportSize({width,height:1000});
     await page.locator('header').getByTestId('trading-status').waitFor();
+    await page.evaluate(()=>{window.scrollTo(0,0);document.querySelector('main').scrollTop=0;});
     const body=await page.locator('body').innerText();
-    assert.doesNotMatch(body,/AI Trading Signal|AI Confidence|Live Mode|12,450.32|57,321|68% Bullish/);
+    assert.doesNotMatch(body,/AI Trading Signal|AI Confidence|Live Mode|12,450.32|57,321|68% Bullish|Coming in Phase 3/);
     const overflow=await page.evaluate(()=>({document:document.documentElement.scrollWidth>innerWidth,main:document.querySelector('main').scrollWidth>document.querySelector('main').clientWidth+1}));
     assert.deepEqual(overflow,{document:false,main:false},route+' '+width+' overflow');
     await page.screenshot({path:path.join(out,route+'-'+width+'.png'),fullPage:true});
@@ -51,7 +61,7 @@ async function main(){
   assert.deepEqual(result.errors,[]);assert.deepEqual(result.assets,[]);
   // A separate, explicitly failed-data scenario must never display fake values.
   stage='unavailable';
-  const failures=await browser.newPage();
+  const failures=await browser.newPage();activePage=failures;
   await failures.context().addCookies(await page.context().cookies());
   await failures.addInitScript(tokens=>{
    for(const [k,v] of Object.entries(tokens))if(v)localStorage.setItem(k,v);
@@ -64,7 +74,8 @@ async function main(){
   });
   await failures.routeWebSocket('**/ws/market',socket=>socket.close());
   await failures.goto(base+'/dashboard');
-  await failures.getByRole('alert').waitFor({timeout:60000});
+  await failures.getByTestId('dashboard').waitFor({timeout:60000});
+  await failures.getByTestId('dashboard').getByRole('alert').waitFor({timeout:60000});
   const failedBody=await failures.locator('body').innerText();
   assert.match(failedBody,/Trading: UNKNOWN/);assert.match(failedBody,/Auto Trading: UNKNOWN/);
   assert.match(failedBody,/Setup Score/);assert.doesNotMatch(failedBody,/Live Market Data|12,450|3,642|HEALTHY/);

@@ -10,6 +10,8 @@ import type { NextRequest } from "next/server";
  * server-side on every API call.
  */
 const PUBLIC_PATHS = ["/login"];
+// Also allow unauthenticated requests from image optimization for this asset.
+const PUBLIC_ASSETS = new Set(["/images/login-bg.jpg"]);
 
 /** Paths that should be excluded from middleware entirely. */
 const EXCLUDED_PREFIXES = ["/_next", "/favicon.ico", "/api"];
@@ -18,7 +20,7 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Skip Next.js internals and static assets
-  if (EXCLUDED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+  if (PUBLIC_ASSETS.has(pathname) || EXCLUDED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return NextResponse.next();
   }
 
