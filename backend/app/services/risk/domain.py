@@ -153,6 +153,7 @@ class AccountSnapshot(BaseModel):
     last_loss_at: AwareDatetime | None = None
     cooldown_until: AwareDatetime | None = None
     open_positions_count: int = 0
+    state_version: int = 1
     trading_mode: Literal["PAPER", "BACKTEST", "SEMI_AUTO", "LIVE"] = "PAPER"
     source: Literal[
         "CONFIGURED_TEST",
@@ -199,6 +200,8 @@ class NewsEventAudit(BaseModel):
     scheduled_at: AwareDatetime
     available_at: AwareDatetime | None = None
     window_state: str = ""
+    provider: str = ""
+    revision_id: str = ""
 
     @field_validator("scheduled_at", "available_at")
     @classmethod
@@ -216,6 +219,8 @@ class NewsRiskProvenance(BaseModel):
     event_ids: tuple[str, ...] = ()
     description_th: str = ""
     events: tuple[NewsEventAudit, ...] = ()
+    provider: str = ""
+    revision_id: str = ""
 
 
 class RiskDecision(BaseModel):

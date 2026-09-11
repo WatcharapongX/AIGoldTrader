@@ -49,9 +49,7 @@ class PortfolioRiskManager:
             RiskReservationRecord.reserved_until > now,
         )
         if exclude_candidate_id is not None:
-            stmt = stmt.outerjoin(
-                RiskDecisionRecord, RiskReservationRecord.decision_id == RiskDecisionRecord.id
-            ).where(
+            stmt = stmt.outerjoin(RiskDecisionRecord, RiskReservationRecord.decision_id == RiskDecisionRecord.id).where(
                 or_(
                     RiskDecisionRecord.candidate_id.is_(None),
                     RiskDecisionRecord.candidate_id != exclude_candidate_id,
@@ -115,8 +113,8 @@ class PortfolioRiskManager:
         in_cooldown = False
         if account.cooldown_until is not None:
             in_cooldown = as_of < account.cooldown_until
-        elif account.consecutive_losses >= policy.cooldown_consecutive_losses:
-            calc_until = account.as_of + dt.timedelta(minutes=policy.cooldown_period_minutes)
+        elif account.consecutive_losses >= policy.cooldown_consecutive_losses and account.last_loss_at is not None:
+            calc_until = account.last_loss_at + dt.timedelta(minutes=policy.cooldown_period_minutes)
             in_cooldown = as_of < calc_until
 
         active_res = tuple(
@@ -182,8 +180,8 @@ class PortfolioRiskManager:
         is_cooldown = False
         if account.cooldown_until is not None:
             is_cooldown = now < account.cooldown_until
-        elif account.consecutive_losses >= policy.cooldown_consecutive_losses:
-            calc_until = account.as_of + dt.timedelta(minutes=policy.cooldown_period_minutes)
+        elif account.consecutive_losses >= policy.cooldown_consecutive_losses and account.last_loss_at is not None:
+            calc_until = account.last_loss_at + dt.timedelta(minutes=policy.cooldown_period_minutes)
             is_cooldown = now < calc_until
 
         if is_cooldown:
@@ -215,8 +213,7 @@ class PortfolioRiskManager:
                 portfolio_exposure_before=current_total,
                 portfolio_exposure_after=current_total,
                 reason_th=(
-                    "ไม่อนุมัติเนื่องจากมีสถานะเปิดความเสี่ยงคงค้างที่ไม่สามารถแจกแจงสัญลักษณ์/ทิศทางได้ "
-                    "(Open Risk Breakdown Unavailable)"
+                    "ไม่อนุมัติเนื่องจากมีสถานะเปิดความเสี่ยงคงค้างที่ไม่สามารถแจกแจงสัญลักษณ์/ทิศทางได้ (Open Risk Breakdown Unavailable)"
                 ),
                 is_reduced=False,
             )

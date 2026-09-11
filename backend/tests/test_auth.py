@@ -6,9 +6,7 @@ from fastapi.testclient import TestClient
 
 
 def test_login_success_returns_token_pair(client: TestClient, admin_user) -> None:
-    response = client.post(
-        "/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"}
-    )
+    response = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"})
     assert response.status_code == 200
     body = response.json()
     assert body["access_token"]
@@ -17,17 +15,13 @@ def test_login_success_returns_token_pair(client: TestClient, admin_user) -> Non
 
 
 def test_login_wrong_password_rejected(client: TestClient, admin_user) -> None:
-    response = client.post(
-        "/api/auth/login", json={"email": "admin@example.com", "password": "wrong-pass-999"}
-    )
+    response = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "wrong-pass-999"})
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "AUTH_FAILED"
 
 
 def test_login_unknown_user_same_error_as_wrong_password(client: TestClient) -> None:
-    response = client.post(
-        "/api/auth/login", json={"email": "ghost@example.com", "password": "whatever-123"}
-    )
+    response = client.post("/api/auth/login", json={"email": "ghost@example.com", "password": "whatever-123"})
     assert response.status_code == 401  # ไม่เปิดเผยว่า email มีจริงหรือไม่
 
 
@@ -46,9 +40,7 @@ def test_me_returns_profile(client: TestClient, auth_headers: dict[str, str]) ->
 
 
 def test_refresh_rotates_session(client: TestClient, admin_user) -> None:
-    login = client.post(
-        "/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"}
-    ).json()
+    login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"}).json()
 
     refreshed = client.post("/api/auth/refresh", json={"refresh_token": login["refresh_token"]})
     assert refreshed.status_code == 200
@@ -64,9 +56,7 @@ def test_refresh_rotates_session(client: TestClient, admin_user) -> None:
 
 
 def test_logout_revokes_sessions(client: TestClient, admin_user) -> None:
-    login = client.post(
-        "/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"}
-    ).json()
+    login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"}).json()
     headers = {"Authorization": f"Bearer {login['access_token']}"}
     assert client.post("/api/auth/logout", headers=headers).status_code == 200
     # refresh หลัง logout = revoked
@@ -79,9 +69,7 @@ async def test_audit_log_records_login(client: TestClient, admin_user, db_sessio
 
     from app.models import AuditLog
 
-    client.post(
-        "/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"}
-    )
+    client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"})
     session, _ = db_session
     result = await session.execute(select(AuditLog).where(AuditLog.action == "LOGIN"))
     logs = result.scalars().all()

@@ -157,3 +157,17 @@ class KillSwitchRecord(Base):
     policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False)
     __table_args__ = (Index("ix_kill_switch_active", "state", "activated_at"),)
+
+
+class DataHealthRecord(Base):
+    __tablename__ = "data_health_records"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    consecutive_failures: Mapped[int] = mapped_column(default=0, nullable=False)
+    last_failure_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_healthy_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False, default=dict)
+    __table_args__ = (Index("ix_data_health_provider_source", "provider", "source"),)

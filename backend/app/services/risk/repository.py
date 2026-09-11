@@ -43,16 +43,16 @@ async def get_active_policy(session: AsyncSession) -> RiskPolicy:
     return RiskPolicy.model_validate(rows[0].payload)
 
 
-async def activate_policy(
-    session: AsyncSession, policy: RiskPolicy, activated_by: str = "admin"
-) -> RiskPolicy:
+async def activate_policy(session: AsyncSession, policy: RiskPolicy, activated_by: str = "admin") -> RiskPolicy:
     """Atomically deactivates existing active policies and activates the new policy under lock."""
     if session.get_bind().dialect.name == "postgresql":
         from sqlalchemy import text
+
         await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('risk_policy_activation'))"))
 
     now = dt.datetime.now(dt.UTC)
     from sqlalchemy import update
+
     await session.execute(
         update(RiskPolicyRecord).where(RiskPolicyRecord.is_active == True).values(is_active=False)  # noqa: E712
     )
@@ -89,6 +89,8 @@ async def get_authoritative_symbol_spec(
 ) -> SymbolSpecification:
     """Fetches latest symbol specification from DB or live provider; fails closed if unavailable or stale."""
     at = now or dt.datetime.now(dt.UTC)
+    expected_server = getattr(provider, "broker_server", None) or getattr(provider, "server", None)
+
     row = (
         await session.scalars(
             select(SymbolSpecificationRecord)
@@ -104,7 +106,9 @@ async def get_authoritative_symbol_spec(
     if row is not None:
         observed_at = row.observed_at if row.observed_at.tzinfo else row.observed_at.replace(tzinfo=dt.UTC)
         age = (at - observed_at).total_seconds()
-        if age <= max_age_seconds:
+        stored_server = row.payload.get("broker_server") if row.payload else None
+        server_matches = expected_server is None or stored_server == expected_server
+        if age <= max_age_seconds and server_matches:
             return SymbolSpecification.model_validate(row.payload)
 
     # If provider is supplied and can fetch live spec, refresh and persist
@@ -112,6 +116,8 @@ async def get_authoritative_symbol_spec(
         try:
             live_spec = provider.get_symbol_spec(symbol)
             if live_spec is not None:
+                if expected_server and not getattr(live_spec, "broker_server", None):
+                    live_spec = live_spec.model_copy(update={"broker_server": expected_server})
                 record = SymbolSpecificationRecord(
                     id=live_spec.id,
                     symbol=live_spec.symbol,
@@ -132,12 +138,13 @@ async def get_authoritative_symbol_spec(
         except (SQLAlchemyError, Exception) as exc:
             logger.debug("Live provider symbol spec refresh skipped: %s", exc)
 
-    # Simulated fallback only for simulated replay source
-    if source == "simulated":
+    # Simulated fallback only for simulated replay source with no explicit server
+    if source == "simulated" and expected_server is None:
         return default_gold_spec(source="simulated", observed_at=at)
 
+    server_detail = f" for server '{expected_server}'" if expected_server else ""
     raise NotFoundError(
-        f"Authoritative symbol specification for '{symbol}' from source '{source}' is missing or stale"
+        f"Authoritative symbol specification for '{symbol}' from source '{source}'{server_detail} is missing or stale"
     )
 
 
@@ -290,6 +297,7 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
         row = (await session.scalars(stmt)).first()
         if row is not None:
             return RiskDecision.model_validate(row.payload)
+        raise exc
     return decision
 
 

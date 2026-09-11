@@ -1,4 +1,5 @@
 """Explicit real MT5 acceptance: LIVE_EXTERNAL_TEST=true pytest -m live_external -o addopts= -q."""
+
 import asyncio
 import datetime as dt
 import os
@@ -26,8 +27,9 @@ async def test_real_mt5_history_300(timeframe):
     provider = real_provider()
     try:
         await provider.connect()
-        bars = await asyncio.to_thread(provider.get_historical_candles, "XAUUSD", timeframe,
-                                       dt.datetime.now(dt.UTC), 300)
+        bars = await asyncio.to_thread(
+            provider.get_historical_candles, "XAUUSD", timeframe, dt.datetime.now(dt.UTC), 300
+        )
         assert len(bars) == 300, f"INSUFFICIENT REAL HISTORY: {timeframe.value} has {len(bars)}/300 bars"
         assert all(c.source == provider.source and c.source != "simulated" for c in bars)
     finally:

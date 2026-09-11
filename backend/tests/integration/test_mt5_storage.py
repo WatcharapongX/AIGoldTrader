@@ -1,4 +1,5 @@
 """Real PostgreSQL storage checks with OFFLINE price fixtures (not live acceptance)."""
+
 import uuid
 
 import pytest
@@ -18,7 +19,8 @@ def test_unknown_ask_migration_preserves_sources_and_refuses_lossy_downgrade(iso
         conn.execute(
             "INSERT INTO candles (symbol_id,source,timeframe,bucket_start,open,high,low,close,volume,"
             "bid_close,ask_close,is_closed) VALUES (%s,%s,'M1','2026-09-09T12:00:00Z',"
-            "2350,2351,2349,2350,7,2350,%s,true)", (symbol, source, ask),
+            "2350,2351,2349,2350,7,2350,%s,true)",
+            (symbol, source, ask),
         )
     before = conn.execute("SELECT source,ask_close FROM candles ORDER BY source").fetchall()
     assert len(before) == 3 and sum(row[1] is None for row in before) == 2

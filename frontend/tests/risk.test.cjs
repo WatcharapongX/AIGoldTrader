@@ -70,6 +70,7 @@ const sampleKillSwitch = {
 
 const samplePortfolio = {
   account_id: 'acc_001',
+  account_source: 'CONFIGURED_PAPER',
   as_of: '2026-09-10T12:00:00Z',
   open_risk_pct: '0.0000',
   reserved_risk_pct: '1.0000',
@@ -203,6 +204,16 @@ test('parsePortfolioRisk verifies gross directional exposure and reservations', 
   assert.throws(() => parsePortfolioRisk({ ...samplePortfolio, as_of: 'invalid' }), RiskContractError);
   // Rejects non-numeric available risk
   assert.throws(() => parsePortfolioRisk({ ...samplePortfolio, available_risk_pct: 'abc' }), RiskContractError);
+  // Rejects missing account_source (no silent default)
+  assert.throws(() => parsePortfolioRisk({ ...samplePortfolio, account_source: undefined }), RiskContractError);
+  // Rejects invalid directional_risk_pct missing LONG
+  assert.throws(() => parsePortfolioRisk({ ...samplePortfolio, directional_risk_pct: { SHORT: '0.0000' } }), RiskContractError);
+  // Rejects non-array active_reservations
+  assert.throws(() => parsePortfolioRisk({ ...samplePortfolio, active_reservations: null }), RiskContractError);
+  // Rejects missing daily_loss_pct
+  assert.throws(() => parsePortfolioRisk({ ...samplePortfolio, daily_loss_pct: undefined }), RiskContractError);
+  // Rejects missing drawdown_pct
+  assert.throws(() => parsePortfolioRisk({ ...samplePortfolio, drawdown_pct: undefined }), RiskContractError);
 });
 
 test('parseRiskDecision parses APPROVED, REDUCED, and BLOCKED decisions', () => {

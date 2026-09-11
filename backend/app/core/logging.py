@@ -9,10 +9,29 @@ from pathlib import Path
 from app.core.correlation import get_correlation_id
 
 _RESERVED = {
-    "args", "asctime", "created", "exc_info", "exc_text", "filename", "funcName",
-    "levelname", "levelno", "lineno", "module", "msecs", "message", "msg", "name",
-    "pathname", "process", "processName", "relativeCreated", "stack_info",
-    "thread", "threadName", "taskName",
+    "args",
+    "asctime",
+    "created",
+    "exc_info",
+    "exc_text",
+    "filename",
+    "funcName",
+    "levelname",
+    "levelno",
+    "lineno",
+    "module",
+    "msecs",
+    "message",
+    "msg",
+    "name",
+    "pathname",
+    "process",
+    "processName",
+    "relativeCreated",
+    "stack_info",
+    "thread",
+    "threadName",
+    "taskName",
 }
 
 
@@ -65,9 +84,7 @@ def setup_logging(level: str = "INFO", log_format: str = "json") -> None:
     if log_format == "json":
         handler.setFormatter(JsonFormatter())
     else:
-        handler.setFormatter(
-            SafeFormatter("%(asctime)s %(levelname)s [%(correlation_id)s] %(name)s %(message)s")
-        )
+        handler.setFormatter(SafeFormatter("%(asctime)s %(levelname)s [%(correlation_id)s] %(name)s %(message)s"))
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level.upper())

@@ -4,6 +4,7 @@ Quote snapshots are sampled once per configured interval. Authoritative broker
 rates (not sampled quotes) supply OHLC/tick volume, so missed quote changes cannot
 corrupt candle extrema. M3 is folded from M1 using canonical UTC buckets.
 """
+
 import asyncio
 import datetime as dt
 import importlib
@@ -17,10 +18,18 @@ from app.services.market_data.provider import MarketDataProvider
 
 # Provider constants stay in this adapter, never in domain/service/frontend.
 RATE_TIMEFRAMES = {tf: "TIMEFRAME_" + tf.value for tf in Timeframe if tf != Timeframe.M3}
-READ_METHODS = frozenset({
-    "initialize", "shutdown", "terminal_info", "account_info", "symbol_select",
-    "symbol_info", "symbol_info_tick", "copy_rates_from",
-})
+READ_METHODS = frozenset(
+    {
+        "initialize",
+        "shutdown",
+        "terminal_info",
+        "account_info",
+        "symbol_select",
+        "symbol_info",
+        "symbol_info_tick",
+        "copy_rates_from",
+    }
+)
 
 
 class MT5Unavailable(RuntimeError):
@@ -54,18 +63,26 @@ def aggregate_rates(bases: list[Candle], timeframe: Timeframe, now: dt.datetime)
         key = bucket(base.open_time, timeframe)
         previous = groups.get(key)
         if previous is None:
-            groups[key] = base.model_copy(update={
-                "timeframe": timeframe, "open_time": key,
-                "is_closed": key + dt.timedelta(seconds=SECONDS[timeframe]) <= now,
-            })
+            groups[key] = base.model_copy(
+                update={
+                    "timeframe": timeframe,
+                    "open_time": key,
+                    "is_closed": key + dt.timedelta(seconds=SECONDS[timeframe]) <= now,
+                }
+            )
         else:
             if base.source != previous.source or base.symbol != previous.symbol:
                 raise MT5Unavailable("MT5_MIXED_SOURCE")
-            groups[key] = previous.model_copy(update={
-                "high": max(previous.high, base.high), "low": min(previous.low, base.low),
-                "close": base.close, "bid_close": base.bid_close, "ask_close": base.ask_close,
-                "volume": previous.volume + base.volume,
-            })
+            groups[key] = previous.model_copy(
+                update={
+                    "high": max(previous.high, base.high),
+                    "low": min(previous.low, base.low),
+                    "close": base.close,
+                    "bid_close": base.bid_close,
+                    "ask_close": base.ask_close,
+                    "volume": previous.volume + base.volume,
+                }
+            )
     # The oldest requested bucket may have a truncated prefix; never publish it.
     if bases and bases[0].open_time != bucket(bases[0].open_time, timeframe):
         groups.pop(bucket(bases[0].open_time, timeframe), None)
@@ -127,9 +144,12 @@ class MT5MarketDataProvider(MarketDataProvider):
         self.digits = int(info.digits)
         self.tick_size = Decimal(str(info.trade_tick_size))
         point = Decimal(str(info.point))
-        if (not self.tick_size.is_finite() or self.tick_size <= 0
-                or point != Decimal(1).scaleb(-self.digits)
-                or self.tick_size % point != 0):
+        if (
+            not self.tick_size.is_finite()
+            or self.tick_size <= 0
+            or point != Decimal(1).scaleb(-self.digits)
+            or self.tick_size % point != 0
+        ):
             raise MT5Unavailable("MT5_PRECISION_UNSUPPORTED")
         self.mode = s.mt5_account_mode
         self.description = "Real market data / " + self.mode + " connection; PAPER execution disabled"
@@ -155,6 +175,7 @@ class MT5MarketDataProvider(MarketDataProvider):
         now = dt.datetime.now(dt.UTC)
         spec_id = f"sym_{symbol.lower()}_{self.source}_{int(now.timestamp())}"
         from app.services.risk.domain import SymbolSpecification
+
         return SymbolSpecification(
             id=spec_id,
             symbol=symbol,
@@ -177,10 +198,14 @@ class MT5MarketDataProvider(MarketDataProvider):
         terminal = self._gateway.call("terminal_info")
         account = self._gateway.call("account_info")
         expected = 0 if self.settings.mt5_account_mode == "DEMO" else 2
-        if (not terminal or not terminal.connected or not account or account.trade_mode != expected
-                or account.server != self.settings.mt5_expected_server
-                or (self.settings.mt5_expected_login is not None
-                    and account.login != self.settings.mt5_expected_login)):
+        if (
+            not terminal
+            or not terminal.connected
+            or not account
+            or account.trade_mode != expected
+            or account.server != self.settings.mt5_expected_server
+            or (self.settings.mt5_expected_login is not None and account.login != self.settings.mt5_expected_login)
+        ):
             self.connected = False
             raise MT5Unavailable("MT5_SESSION_CHANGED")
         return self._gateway
@@ -211,8 +236,14 @@ class MT5MarketDataProvider(MarketDataProvider):
         if value is None:
             return None
         timestamp = self._utc(int(value.time_msc) / 1000)
-        result = Tick(symbol=symbol, timestamp=timestamp, bid=self._price(value.bid),
-                      ask=self._price(value.ask), volume=Decimal(0), source=self.source)
+        result = Tick(
+            symbol=symbol,
+            timestamp=timestamp,
+            bid=self._price(value.bid),
+            ask=self._price(value.ask),
+            volume=Decimal(0),
+            source=self.source,
+        )
         self.last_quote = result.timestamp
         return result
 
@@ -229,8 +260,13 @@ class MT5MarketDataProvider(MarketDataProvider):
         if symbol != "XAUUSD" or not 1 <= limit <= 10080 or now.tzinfo is None:
             raise MT5Unavailable("MT5_INVALID_HISTORY_REQUEST")
         g = self._session()
-        native = (Timeframe.M1 if timeframe == Timeframe.M3 else
-                  Timeframe.H1 if timeframe in (Timeframe.H4, Timeframe.D1, Timeframe.W1) else timeframe)
+        native = (
+            Timeframe.M1
+            if timeframe == Timeframe.M3
+            else Timeframe.H1
+            if timeframe in (Timeframe.H4, Timeframe.D1, Timeframe.W1)
+            else timeframe
+        )
         ratio = SECONDS[timeframe] // SECONDS[native]
         count = min(100000, limit * ratio + ratio if native != timeframe else limit)
         anchor = now.astimezone(self._timezone).replace(tzinfo=dt.UTC)
@@ -246,13 +282,22 @@ class MT5MarketDataProvider(MarketDataProvider):
             if start != bucket(start, native):
                 raise MT5Unavailable("MT5_NONCANONICAL_BAR_BOUNDARY")
             closing = self._price(row["close"])
-            candles.append(Candle(
-                symbol=symbol, timeframe=native, open_time=start,
-                open=self._price(row["open"]), high=self._price(row["high"]),
-                low=self._price(row["low"]), close=closing, volume=Decimal(str(row["tick_volume"])),
-                bid_close=closing, ask_close=None, source=self.source,
-                is_closed=start + dt.timedelta(seconds=SECONDS[native]) <= now,
-            ))
+            candles.append(
+                Candle(
+                    symbol=symbol,
+                    timeframe=native,
+                    open_time=start,
+                    open=self._price(row["open"]),
+                    high=self._price(row["high"]),
+                    low=self._price(row["low"]),
+                    close=closing,
+                    volume=Decimal(str(row["tick_volume"])),
+                    bid_close=closing,
+                    ask_close=None,
+                    source=self.source,
+                    is_closed=start + dt.timedelta(seconds=SECONDS[native]) <= now,
+                )
+            )
         if native != timeframe:
             candles = aggregate_rates(candles, timeframe, now)
         return candles[-limit:]
@@ -264,4 +309,5 @@ class MT5MarketDataProvider(MarketDataProvider):
                 # Last closed plus forming bar: replace authoritative OHLC, never add sampled volume.
                 values.extend(self.get_historical_candles("XAUUSD", timeframe, now, 2))
             return values
+
         return await asyncio.to_thread(snapshot)

@@ -129,6 +129,7 @@ async def test_strategy_invariance_and_risk_independence_under_news_variation(db
     # If the candidate doesn't have a plan in the synthetic empty candle context, manufacture a valid plan
     # to test the risk engine's independent reaction
     from app.services.strategy.domain import Evidence, Target, TradePlanSuggestion
+
     test_plan = TradePlanSuggestion(
         id="plan_inv_001",
         candidate_id=cand_calm.id,

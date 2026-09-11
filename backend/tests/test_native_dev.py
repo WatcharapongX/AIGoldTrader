@@ -23,7 +23,11 @@ def test_database_url_normalizes_driver_and_preserves_encoded_password(monkeypat
     url = make_url(settings.database_url)
     assert url.drivername == "postgresql+psycopg"
     assert (url.host, url.port, url.database, url.username, url.password) == (
-        "localhost", 5544, "testdb", "dev", "p@ss%word",
+        "localhost",
+        5544,
+        "testdb",
+        "dev",
+        "p@ss%word",
     )
     assert "p%40ss" not in repr(settings)
 
@@ -32,16 +36,19 @@ def test_compose_fields_escape_special_credentials(monkeypatch):
     monkeypatch.delenv("DATABASE_URL_OVERRIDE")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     settings = Settings(
-        _env_file=None, postgres_host="localhost", postgres_port=5544,
-        postgres_db="testdb", postgres_user="dev@user", postgres_password="p@ss%:/word",
+        _env_file=None,
+        postgres_host="localhost",
+        postgres_port=5544,
+        postgres_db="testdb",
+        postgres_user="dev@user",
+        postgres_password="p@ss%:/word",
     )
     url = make_url(settings.database_url)
     assert url.username == "dev@user"
     assert url.password == "p@ss%:/word"
 
 
-@pytest.mark.parametrize("value", ["bad-secret-url", "sqlite:///data.db",
-                                  "postgresql://dev:secret@localhost/db"])
+@pytest.mark.parametrize("value", ["bad-secret-url", "sqlite:///data.db", "postgresql://dev:secret@localhost/db"])
 def test_invalid_database_url_fails_without_echoing_secret(monkeypatch, value):
     monkeypatch.delenv("DATABASE_URL_OVERRIDE")
     monkeypatch.setenv("DATABASE_URL", value)
@@ -51,8 +58,15 @@ def test_invalid_database_url_fails_without_echoing_secret(monkeypatch, value):
 
 
 def test_missing_database_configuration_has_no_implicit_credentials(monkeypatch):
-    for name in ("DATABASE_URL_OVERRIDE", "DATABASE_URL", "POSTGRES_HOST", "POSTGRES_PORT",
-                 "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"):
+    for name in (
+        "DATABASE_URL_OVERRIDE",
+        "DATABASE_URL",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+    ):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(ValueError, match="Set DATABASE_URL"):
         _ = Settings(_env_file=None).database_url
@@ -119,7 +133,10 @@ def test_windows_db_loop_supports_io_watchers():
 
         for reload in (False, True):
             config = Config(
-                "app.main:app", loop="app.core.event_loop:new_event_loop", reload=reload, proxy_headers=False,
+                "app.main:app",
+                loop="app.core.event_loop:new_event_loop",
+                reload=reload,
+                proxy_headers=False,
             )
             assert config.get_loop_factory() is new_event_loop
     finally:
@@ -131,7 +148,10 @@ def test_postgresql_offline_migration_handles_percent_encoded_password():
     env.pop("DATABASE_URL_OVERRIDE", None)
     result = subprocess.run(  # noqa: S603 — offline SQL only, never connects
         [sys.executable, "-m", "alembic", "upgrade", "head", "--sql"],
-        env=env, capture_output=True, text=True, timeout=30,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert result.returncode == 0, result.stderr
     assert "CREATE TABLE users" in result.stdout

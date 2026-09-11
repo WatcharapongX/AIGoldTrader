@@ -156,10 +156,9 @@ def client(db_session, fake_redis) -> TestClient:
 @pytest_asyncio.fixture
 async def admin_user(db_session) -> User:
     session, _ = db_session
-    user = await create_user(
-        session, email="admin@example.com", password="admin-pass-123", role=Role.ADMIN
-    )
+    user = await create_user(session, email="admin@example.com", password="admin-pass-123", role=Role.ADMIN)
     from app.models.account import Account, TradingMode
+
     acc = Account(
         name="default_paper_account",
         user_id=user.id,
@@ -176,9 +175,7 @@ async def admin_user(db_session) -> User:
 @pytest_asyncio.fixture
 async def trader_user(db_session) -> User:
     session, _ = db_session
-    user = await create_user(
-        session, email="trader@example.com", password="trader-pass-123", role=Role.TRADER
-    )
+    user = await create_user(session, email="trader@example.com", password="trader-pass-123", role=Role.TRADER)
     await session.commit()
     return user
 

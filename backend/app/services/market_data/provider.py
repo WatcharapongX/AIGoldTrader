@@ -1,4 +1,5 @@
 """Replay feed with periodic synthetic M1 history; no external credentials or execution."""
+
 import asyncio
 import datetime as dt
 import math
@@ -47,9 +48,17 @@ def synthetic_candle(symbol: str, timeframe: Timeframe, start: dt.datetime, end:
     opening, closing = price(first), price(stop - 1)
     points.extend((opening, closing))
     return Candle(
-        symbol=symbol, timeframe=timeframe, open_time=start, open=opening,
-        high=max(points), low=min(points), close=closing, volume=Decimal(stop - first),
-        bid_close=closing, ask_close=closing + Decimal("0.30"), source="simulated",
+        symbol=symbol,
+        timeframe=timeframe,
+        open_time=start,
+        open=opening,
+        high=max(points),
+        low=min(points),
+        close=closing,
+        volume=Decimal(stop - first),
+        bid_close=closing,
+        ask_close=closing + Decimal("0.30"),
+        source="simulated",
         is_closed=stop >= first + SECONDS[timeframe],
     )
 
@@ -66,7 +75,6 @@ class MarketDataProvider(ABC):
     async def candle_updates(self, now: dt.datetime) -> list[Candle]:
         return []
 
-
     @abstractmethod
     async def connect(self) -> None: ...
 
@@ -77,14 +85,16 @@ class MarketDataProvider(ABC):
     def subscribe_ticks(self, symbol: str) -> AsyncIterator[Tick]: ...
 
     @abstractmethod
-    def get_historical_candles(self, symbol: str, timeframe: Timeframe, now: dt.datetime,
-                               limit: int = 300) -> list[Candle]: ...
+    def get_historical_candles(
+        self, symbol: str, timeframe: Timeframe, now: dt.datetime, limit: int = 300
+    ) -> list[Candle]: ...
 
     @abstractmethod
     def health(self) -> bool: ...
 
     def get_symbol_spec(self, symbol: str = "XAUUSD"):
         from app.services.risk.domain import default_gold_spec
+
         return default_gold_spec(source=self.source)
 
 
@@ -103,6 +113,7 @@ class ReplayProvider(MarketDataProvider):
 
     def get_symbol_spec(self, symbol: str = "XAUUSD"):
         from app.services.risk.domain import default_gold_spec
+
         return default_gold_spec(source="simulated")
 
     async def subscribe_ticks(self, symbol: str) -> AsyncIterator[Tick]:
@@ -114,12 +125,19 @@ class ReplayProvider(MarketDataProvider):
             if now > last:
                 last = now
                 bid = price(now)
-                yield Tick(symbol=symbol, timestamp=dt.datetime.fromtimestamp(now, dt.UTC),
-                           bid=bid, ask=bid + Decimal("0.30"), volume=Decimal(1), source="simulated")
+                yield Tick(
+                    symbol=symbol,
+                    timestamp=dt.datetime.fromtimestamp(now, dt.UTC),
+                    bid=bid,
+                    ask=bid + Decimal("0.30"),
+                    volume=Decimal(1),
+                    source="simulated",
+                )
             await asyncio.sleep(0.2)
 
-    def get_historical_candles(self, symbol: str, timeframe: Timeframe, now: dt.datetime,
-                               limit: int = 300) -> list[Candle]:
+    def get_historical_candles(
+        self, symbol: str, timeframe: Timeframe, now: dt.datetime, limit: int = 300
+    ) -> list[Candle]:
         if symbol != "XAUUSD":
             raise ValueError("Replay source only supplies XAUUSD")
         start = bucket(now, timeframe)
@@ -140,6 +158,7 @@ def create_provider(name: str, settings=None) -> MarketDataProvider:
     if name == "mt5":
         from app.core.config import Settings
         from app.services.market_data.mt5 import MT5MarketDataProvider
+
         return MT5MarketDataProvider(settings or Settings())
 
     if name not in PROVIDERS:

@@ -1,4 +1,5 @@
 """Offline MT5 contract tests use a fake official SDK, never real prices or credentials."""
+
 import asyncio
 import datetime as dt
 from decimal import Decimal
@@ -58,10 +59,17 @@ class FakeSDK:
     def copy_rates_from(self, symbol, timeframe, now, count):
         self.calls.append(("rates", symbol, timeframe, count))
         first = bucket(now, timeframe)
-        result = [{
-            "time": int((first - dt.timedelta(seconds=SECONDS[timeframe] * i)).timestamp()) + self.shift,
-            "open": 2350.111, "high": 2353.333, "low": 2349.999, "close": 2351.123, "tick_volume": 7,
-        } for i in range((1 if self.short else count) - 1, -1, -1)]
+        result = [
+            {
+                "time": int((first - dt.timedelta(seconds=SECONDS[timeframe] * i)).timestamp()) + self.shift,
+                "open": 2350.111,
+                "high": 2353.333,
+                "low": 2349.999,
+                "close": 2351.123,
+                "tick_volume": 7,
+            }
+            for i in range((1 if self.short else count) - 1, -1, -1)
+        ]
         return list(reversed(result)) if self.reverse else result
 
 
@@ -69,9 +77,15 @@ class FakeSDK:
 def configured(tmp_path):
     terminal = tmp_path / "terminal64.exe"
     terminal.touch()
-    settings = Settings(_env_file=None, market_data_provider="mt5", mt5_terminal_path=str(terminal),
-                        mt5_symbol_xauusd="XAUUSD", mt5_feed_id="fixture",
-                        mt5_expected_server="fixture-server", mt5_expected_login=42)
+    settings = Settings(
+        _env_file=None,
+        market_data_provider="mt5",
+        mt5_terminal_path=str(terminal),
+        mt5_symbol_xauusd="XAUUSD",
+        mt5_feed_id="fixture",
+        mt5_expected_server="fixture-server",
+        mt5_expected_login=42,
+    )
     sdk = FakeSDK()
     return settings, sdk, MT5MarketDataProvider(settings, sdk)
 
@@ -122,11 +136,18 @@ async def test_m3_utc_fold_extrema_volume_and_partial_prefix(configured):
     assert all(call[2] == Timeframe.M1 for call in sdk.calls if isinstance(call, tuple) and call[0] == "rates")
 
 
-@pytest.mark.parametrize("mutation,reason", [
-    ("mode", "ACCOUNT_MISMATCH"), ("server", "ACCOUNT_MISMATCH"), ("login", "ACCOUNT_MISMATCH"),
-    ("precision", "PRECISION_UNSUPPORTED"), ("point", "PRECISION_UNSUPPORTED"),
-    ("terminal", "SESSION_REQUIRED"), ("mapping", "SYMBOL_UNAVAILABLE"),
-])
+@pytest.mark.parametrize(
+    "mutation,reason",
+    [
+        ("mode", "ACCOUNT_MISMATCH"),
+        ("server", "ACCOUNT_MISMATCH"),
+        ("login", "ACCOUNT_MISMATCH"),
+        ("precision", "PRECISION_UNSUPPORTED"),
+        ("point", "PRECISION_UNSUPPORTED"),
+        ("terminal", "SESSION_REQUIRED"),
+        ("mapping", "SYMBOL_UNAVAILABLE"),
+    ],
+)
 async def test_connect_validates_identity_and_metadata(configured, mutation, reason):
     settings, sdk, provider = configured
     if mutation == "mode":
@@ -171,8 +192,10 @@ def test_gateway_allowlist_and_error_masking():
     for name in ("order_send", "order_check", "positions_get", "login", "last_error"):
         with pytest.raises(MT5Unavailable, match="READ_ONLY_GUARD"):
             gateway.call(name)
+
     def fail(*args, **kwargs):
         raise RuntimeError("private-account-password-fixture")
+
     sdk.initialize = fail
     with pytest.raises(MT5Unavailable) as error:
         gateway.call("initialize")
@@ -258,24 +281,37 @@ async def test_short_history_blocks_bootstrap_atomically(configured, db_session)
 
 def test_mode_cannot_mislabel_simulation():
     with pytest.raises(ValidationError):
-        MarketDataStatus(source="simulated", mode="DEMO", status="CONNECTED", last_quote=NOW,
-                         server_time=NOW, stale_after_seconds=5, detail="fixture", subscriptions=0)
+        MarketDataStatus(
+            source="simulated",
+            mode="DEMO",
+            status="CONNECTED",
+            last_quote=NOW,
+            server_time=NOW,
+            stale_after_seconds=5,
+            detail="fixture",
+            subscriptions=0,
+        )
 
 
 async def test_provider_failure_retries_bounded_and_masks_logs(configured, monkeypatch, caplog):
     from unittest.mock import AsyncMock
+
     settings, _, provider = configured
     market = MarketService(None, settings)
     market.provider = provider
+
     async def fail_connect():
         raise RuntimeError("sensitive-fixture-password-server")
+
     provider.connect = fail_connect
     market.event = AsyncMock()
     delays = []
+
     async def sleep(seconds):
         delays.append(seconds)
         if len(delays) == 7:
             raise asyncio.CancelledError
+
     monkeypatch.setattr(asyncio, "sleep", sleep)
     with pytest.raises(asyncio.CancelledError):
         await market.run()
@@ -287,6 +323,7 @@ async def test_provider_failure_retries_bounded_and_masks_logs(configured, monke
 
 async def test_rest_and_first_frame_ws_use_selected_source(configured, db_session, client, auth_headers):
     from unittest.mock import AsyncMock
+
     settings, _, provider = configured
     session, factory = db_session
     market = MarketService(factory, settings)
@@ -295,8 +332,7 @@ async def test_rest_and_first_frame_ws_use_selected_source(configured, db_sessio
     market.start = AsyncMock()  # Read-only snapshot test; fixture is explicitly OFFLINE.
     client.app.state.market = market
     symbol = await session.scalar(select(Symbol).where(Symbol.name == "XAUUSD"))
-    await upsert_candles(session, symbol.id,
-                         ReplayProvider().get_historical_candles("XAUUSD", Timeframe.M5, NOW))
+    await upsert_candles(session, symbol.id, ReplayProvider().get_historical_candles("XAUUSD", Timeframe.M5, NOW))
     await session.commit()
     page = client.get("/api/market/candles?timeframe=M5", headers=auth_headers).json()
     assert len(page["candles"]) == 300
@@ -313,6 +349,7 @@ async def test_rest_and_first_frame_ws_use_selected_source(configured, db_sessio
         assert settings.mt5_terminal_path not in rendered
     assert client.get("/healthz").status_code == 200
     assert client.get("/healthz").json()["live_auto_trading"] is False
+
 
 def test_explicit_broker_timezone_dst_and_ambiguity(configured):
     settings, sdk, _ = configured

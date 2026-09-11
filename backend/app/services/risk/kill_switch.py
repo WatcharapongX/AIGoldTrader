@@ -11,7 +11,7 @@ from typing import NamedTuple, cast
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.risk import KillSwitchRecord
+from app.models.risk import DataHealthRecord, KillSwitchRecord
 from app.services.risk.domain import (
     POLICY_VERSION,
     AccountSnapshot,
@@ -41,8 +41,17 @@ class KillSwitchManager:
 
     async def get_state(self, session: AsyncSession) -> KillSwitchState:
         """Fetch latest kill switch state from DB; fallback to UNKNOWN (fail-closed) if empty (SOL-P5-P1-009)."""
+        from sqlalchemy import func
+
         row = (
-            await session.scalars(select(KillSwitchRecord).order_by(KillSwitchRecord.activated_at.desc()).limit(1))
+            await session.scalars(
+                select(KillSwitchRecord)
+                .order_by(
+                    func.coalesce(KillSwitchRecord.cleared_at, KillSwitchRecord.activated_at).desc(),
+                    KillSwitchRecord.activated_at.desc(),
+                )
+                .limit(1)
+            )
         ).first()
 
         if row is None:
@@ -109,13 +118,19 @@ class KillSwitchManager:
             # Already active; idempotent return
             return current
 
+        effective_now = now
+        if current.state != "UNKNOWN" and current.activated_at and effective_now <= current.activated_at:
+            effective_now = current.activated_at + dt.timedelta(microseconds=1)
+        if current.cleared_at and effective_now <= current.cleared_at:
+            effective_now = current.cleared_at + dt.timedelta(microseconds=1)
+
         record_id = f"ks_{uuid.uuid4().hex[:24]}"
         payload = {
             "id": record_id,
             "state": "ACTIVE",
             "trigger_type": trigger_type,
             "reason_th": reason_th,
-            "activated_at": now.isoformat(),
+            "activated_at": effective_now.isoformat(),
             "activated_by": activated_by,
             "cleared_at": None,
             "cleared_by": None,
@@ -126,7 +141,7 @@ class KillSwitchManager:
             state="ACTIVE",
             trigger_type=trigger_type,
             reason_th=reason_th,
-            activated_at=now,
+            activated_at=effective_now,
             activated_by=activated_by,
             cleared_at=None,
             cleared_by=None,
@@ -141,7 +156,7 @@ class KillSwitchManager:
             state="ACTIVE",
             trigger_type=trigger_type,
             reason_th=reason_th,
-            activated_at=now,
+            activated_at=effective_now,
             activated_by=activated_by,
             cleared_at=None,
             cleared_by=None,
@@ -165,15 +180,21 @@ class KillSwitchManager:
         if current.state == "INACTIVE":
             return current
 
+        effective_now = now
+        if current.state != "UNKNOWN" and current.activated_at and effective_now <= current.activated_at:
+            effective_now = current.activated_at + dt.timedelta(microseconds=1)
+        if current.cleared_at and effective_now <= current.cleared_at:
+            effective_now = current.cleared_at + dt.timedelta(microseconds=1)
+
         record_id = f"ks_{uuid.uuid4().hex[:24]}"
         payload = {
             "id": record_id,
             "state": "INACTIVE",
             "trigger_type": current.trigger_type,
             "reason_th": reason_th,
-            "activated_at": now.isoformat(),
+            "activated_at": effective_now.isoformat(),
             "activated_by": current.activated_by,
-            "cleared_at": now.isoformat(),
+            "cleared_at": effective_now.isoformat(),
             "cleared_by": cleared_by,
             "policy_version": current.policy_version,
         }
@@ -182,9 +203,9 @@ class KillSwitchManager:
             state="INACTIVE",
             trigger_type=current.trigger_type,
             reason_th=reason_th,
-            activated_at=now,
+            activated_at=effective_now,
             activated_by=current.activated_by,
-            cleared_at=now,
+            cleared_at=effective_now,
             cleared_by=cleared_by,
             policy_version=current.policy_version,
             payload=payload,
@@ -199,7 +220,7 @@ class KillSwitchManager:
             reason_th=reason_th,
             activated_at=current.activated_at,
             activated_by=current.activated_by,
-            cleared_at=now,
+            cleared_at=effective_now,
             cleared_by=cleared_by,
             policy_version=current.policy_version,
         )
@@ -246,21 +267,47 @@ class KillSwitchManager:
                     policy_version=policy.version,
                 )
 
-        # Data health trigger with hysteresis
+        # Data health trigger with cross-process persistent tracking (SOL-P5-P2-038)
+        now_utc = dt.datetime.now(dt.UTC)
+        threshold = getattr(policy, "data_health_consecutive_failures", 3)
+        stmt = select(DataHealthRecord).where(DataHealthRecord.id == "dh_default")
+        if session.get_bind().dialect.name == "postgresql":
+            stmt = stmt.with_for_update()
+        dh_row = (await session.scalars(stmt)).first()
+        if dh_row is None:
+            dh_row = DataHealthRecord(
+                id="dh_default",
+                provider="default",
+                source="market_data",
+                consecutive_failures=0,
+                updated_at=now_utc,
+                payload={},
+            )
+            session.add(dh_row)
+            await session.flush()
+
         if quote_stale:
-            self._consecutive_data_health_failures += 1
-            if self._consecutive_data_health_failures >= getattr(policy, "data_health_consecutive_failures", 3):
+            dh_row.consecutive_failures += 1
+            dh_row.last_failure_at = now_utc
+            dh_row.updated_at = now_utc
+            self._consecutive_data_health_failures = dh_row.consecutive_failures
+            await session.flush()
+            if dh_row.consecutive_failures >= threshold:
                 return await self.activate(
                     session=session,
                     trigger_type="AUTOMATIC_DATA_HEALTH",
                     reason_th=(
-                        f"ข้อมูลราคาผิดปกติหรือไม่สดใหม่ต่อเนื่อง {self._consecutive_data_health_failures} ครั้ง: "
-                        f"{quote_stale_reason}"
+                        f"ข้อมูลราคาผิดปกติหรือไม่สดใหม่ต่อเนื่อง {dh_row.consecutive_failures} ครั้ง: {quote_stale_reason}"
                     ),
                     activated_by="system_data_health",
                     policy_version=policy.version,
                 )
         else:
+            if dh_row.consecutive_failures > 0:
+                dh_row.consecutive_failures = 0
+                dh_row.last_healthy_at = now_utc
+                dh_row.updated_at = now_utc
+                await session.flush()
             self._consecutive_data_health_failures = 0
 
         return None

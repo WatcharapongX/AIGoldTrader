@@ -57,6 +57,7 @@ class RiskEngine:
         # 0. Transaction-level advisory lock on account to prevent concurrency races across workers (SOL-P5-P1-004)
         if session.get_bind().dialect.name == "postgresql":
             from sqlalchemy import text
+
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
                 {"lock_key": f"risk_account_{account.account_id}"},
@@ -181,6 +182,8 @@ class RiskEngine:
                                 else ("POST" if ev.id in relevant_event_ids and in_post else "CALM")
                             )
                         ),
+                        provider=getattr(ev, "provider", "") or getattr(news_context, "provider", ""),
+                        revision_id=getattr(ev, "revision_id", "") or getattr(news_context, "revision_id", ""),
                     )
                     for ev in news_context.events
                 ]
@@ -192,6 +195,10 @@ class RiskEngine:
                     event_ids=tuple(relevant_event_ids),
                     description_th=desc,
                     events=tuple(events_audit),
+                    provider=getattr(news_context, "provider", "")
+                    or (events_audit[0].provider if events_audit else ""),
+                    revision_id=getattr(news_context, "revision_id", "")
+                    or (events_audit[0].revision_id if events_audit else ""),
                 )
             else:
                 news_prov = NewsRiskProvenance(
@@ -201,6 +208,8 @@ class RiskEngine:
                     in_post_news_window=False,
                     event_ids=(),
                     description_th="สภาวะข่าวปกติ ไม่มีเหตุการณ์สำคัญ",
+                    provider=getattr(news_context, "provider", ""),
+                    revision_id=getattr(news_context, "revision_id", ""),
                 )
 
         # 5. Evaluate temporal safety flags
@@ -209,8 +218,8 @@ class RiskEngine:
         cooldown_active = False
         if account.cooldown_until is not None:
             cooldown_active = now < account.cooldown_until
-        elif account.consecutive_losses >= policy.cooldown_consecutive_losses:
-            calc_until = account.as_of + dt.timedelta(minutes=policy.cooldown_period_minutes)
+        elif account.consecutive_losses >= policy.cooldown_consecutive_losses and account.last_loss_at is not None:
+            calc_until = account.last_loss_at + dt.timedelta(minutes=policy.cooldown_period_minutes)
             cooldown_active = now < calc_until
 
         # 6. Calculate current portfolio exposure for fingerprint (sole source: DB reservations)
@@ -290,12 +299,12 @@ class RiskEngine:
                     f"ระดับ Drawdown ปัจจุบัน ({dd_pct:.2f}%) ถึงเพดานสูงสุดที่อนุญาต ({policy.max_drawdown_pct:.1f}%)"
                 )
 
-        # Cooldown check lifecycle (SOL-P5-P1-010)
+        # Cooldown check lifecycle (SOL-P5-P1-010, SOL-P5-P2-038)
         is_cooldown = False
         if account.cooldown_until is not None:
             is_cooldown = now < account.cooldown_until
-        elif account.consecutive_losses >= policy.cooldown_consecutive_losses:
-            calc_until = account.as_of + dt.timedelta(minutes=policy.cooldown_period_minutes)
+        elif account.consecutive_losses >= policy.cooldown_consecutive_losses and account.last_loss_at is not None:
+            calc_until = account.last_loss_at + dt.timedelta(minutes=policy.cooldown_period_minutes)
             is_cooldown = now < calc_until
 
         if is_cooldown:

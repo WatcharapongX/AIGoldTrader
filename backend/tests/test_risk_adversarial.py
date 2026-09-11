@@ -1044,3 +1044,331 @@ async def test_news_failure_fails_closed_when_enabled(
     )
     assert dec_stale.decision == "BLOCKED"
     assert dec_stale.news_provenance.news_state == "UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_paper_account_state_open_risk_preservation(
+    db_session, test_candidate, test_plan, test_policy, test_spec, test_quote, now_time
+):
+    """P1-030: Paper account state refresh must preserve open risk and block over-exposure."""
+    session, _ = db_session
+    from app.models.account import Account, TradingMode
+    from app.models.risk import AccountSnapshotRecord
+    from app.services.risk.account_state import PaperAccountStateService
+
+    acc_id = uuid.uuid4()
+    account = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_paper_preserve_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account)
+    await session.flush()
+
+    # Seed snapshot with 3.0% open risk and 2 open positions
+    snap_record = AccountSnapshotRecord(
+        id=f"snap_preserve_init_{acc_id.hex[:6]}",
+        account_id=str(acc_id),
+        balance=Decimal("10000.00"),
+        equity=Decimal("10000.00"),
+        free_margin=Decimal("9700.00"),
+        daily_realized_pnl=Decimal("0.00"),
+        weekly_realized_pnl=Decimal("0.00"),
+        peak_equity=Decimal("10000.00"),
+        open_risk_pct=Decimal("3.0000"),
+        reserved_risk_pct=Decimal("0.0000"),
+        consecutive_losses=0,
+        trading_mode="PAPER",
+        source="PAPER_ACCOUNT_STATE",
+        as_of=now_time - dt.timedelta(minutes=5),
+        payload={
+            "open_positions_count": 2,
+            "floating_pnl": "-50.00",
+            "state_version": 2,
+        },
+    )
+    session.add(snap_record)
+    await session.commit()
+
+    # Call refresh_paper_account_snapshot
+    refreshed = await PaperAccountStateService.refresh_paper_account_snapshot(
+        session, account_id=str(acc_id), force=True, now=now_time
+    )
+    assert refreshed.open_risk_pct == Decimal("3.0000"), "Open risk MUST NOT be zeroed out on refresh"
+    assert refreshed.open_positions_count == 2
+    assert refreshed.floating_pnl == Decimal("-50.00")
+    assert refreshed.state_version == 2
+
+    calm_news = build_news_context(
+        events=[],
+        as_of=now_time,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+
+    # Verify that risk evaluation for new trade on this account is BLOCKED due to budget limit (3% max)
+    dec = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan,
+        account=refreshed,
+        policy=test_policy,
+        spec=test_spec,
+        quote=test_quote,
+        news_context=calm_news,
+        as_of=now_time,
+    )
+    assert dec.decision == "BLOCKED"
+    assert dec.approved_risk_pct == Decimal("0.0000")
+    assert dec.portfolio_exposure_before == Decimal("3.0000")
+    assert len(dec.blocked_reasons_th) >= 1
+
+
+@pytest.mark.asyncio
+async def test_symbol_spec_server_authority_switch(db_session, test_spec, now_time):
+    """P1-033: Switching broker server must fetch live spec and refuse stale stored spec from previous server."""
+    session, _ = db_session
+    from app.models.risk import SymbolSpecificationRecord
+    from app.services.risk.domain import SymbolSpecification
+    from app.services.risk.repository import get_authoritative_symbol_spec
+
+    # Save a spec for Server-A in DB
+    spec_a = SymbolSpecificationRecord(
+        id="sym_server_a",
+        symbol="XAUUSD",
+        source="mt5",
+        tick_size=Decimal("0.01"),
+        tick_value=Decimal("1.00"),
+        contract_size=Decimal("100.00"),
+        volume_min=Decimal("0.01"),
+        volume_max=Decimal("10.00"),
+        volume_step=Decimal("0.01"),
+        digits=2,
+        observed_at=now_time,
+        payload={
+            "id": "sym_server_a",
+            "symbol": "XAUUSD",
+            "source": "mt5",
+            "tick_size": "0.01",
+            "tick_value": "1.00",
+            "contract_size": "100.00",
+            "volume_min": "0.01",
+            "volume_max": "10.00",
+            "volume_step": "0.01",
+            "digits": 2,
+            "observed_at": now_time.isoformat(),
+            "broker_server": "Demo-Server-A",
+        },
+    )
+    session.add(spec_a)
+    await session.commit()
+
+    # Create dummy provider connected to Demo-Server-B
+    class DummyProviderB:
+        source = "mt5"
+        broker_server = "Demo-Server-B"
+
+        def get_symbol_spec(self, sym: str):
+            return SymbolSpecification(
+                id="sym_server_b",
+                symbol=sym,
+                source="mt5",
+                tick_size=Decimal("0.01"),
+                tick_value=Decimal("1.00"),
+                contract_size=Decimal("100.00"),
+                volume_min=Decimal("0.01"),
+                volume_max=Decimal("20.00"),
+                volume_step=Decimal("0.01"),
+                digits=2,
+                observed_at=now_time,
+                broker_server="Demo-Server-B",
+            )
+
+    spec_out = await get_authoritative_symbol_spec(
+        session=session,
+        symbol="XAUUSD",
+        source="mt5",
+        provider=DummyProviderB(),
+        now=now_time,
+    )
+    assert spec_out.broker_server == "Demo-Server-B"
+    assert spec_out.volume_max == Decimal("20.00")
+
+    # If provider is not available for an unknown server, it MUST fail closed
+    class DummyProviderC:
+        source = "mt5"
+        broker_server = "Demo-Server-C"
+
+        def get_symbol_spec(self, sym: str):
+            return None
+
+    with pytest.raises(NotFoundError):
+        await get_authoritative_symbol_spec(
+            session=session,
+            symbol="XAUUSD",
+            source="mt5",
+            provider=DummyProviderC(),
+            now=now_time,
+        )
+
+
+@pytest.mark.asyncio
+async def test_news_point_in_time_provenance_fingerprint(
+    test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time
+):
+    """P2-036: Changing news vintage, available_at, or provider changes SHA-256 fingerprint."""
+    from app.services.risk.domain import NewsEventAudit, NewsRiskProvenance
+
+    ev1 = NewsEventAudit(
+        event_id="ev_001",
+        event_name="US CPI",
+        currency="USD",
+        impact="HIGH",
+        scheduled_at=now_time,
+        available_at=now_time - dt.timedelta(hours=2),
+        window_state="CALM",
+        provider="forex_factory",
+        revision_id="rev_1",
+    )
+    prov1 = NewsRiskProvenance(
+        news_state="CALM",
+        in_blackout=False,
+        in_pre_news_window=False,
+        in_post_news_window=False,
+        event_ids=("ev_001",),
+        description_th="Normal",
+        events=(ev1,),
+        provider="forex_factory",
+        revision_id="rev_1",
+    )
+
+    ks_state = KillSwitchState(
+        id="ks_test",
+        state="INACTIVE",
+        trigger_type="MANUAL",
+        reason_th="OK",
+        activated_at=now_time,
+        activated_by="sys",
+        policy_version="risk-policy-1.0.0",
+    )
+
+    fp1 = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id="day_trader",
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec,
+        kill_switch=ks_state,
+        quote=test_quote,
+        news_prov=prov1,
+        portfolio_exposure_before=Decimal("0.0"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+
+    # Change available_at on event
+    ev2 = ev1.model_copy(update={"available_at": now_time - dt.timedelta(hours=1)})
+    prov2 = prov1.model_copy(update={"events": (ev2,)})
+    fp2 = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id="day_trader",
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec,
+        kill_switch=ks_state,
+        quote=test_quote,
+        news_prov=prov2,
+        portfolio_exposure_before=Decimal("0.0"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp1 != fp2, "Different available_at MUST produce a distinct fingerprint"
+
+    # Change revision_id
+    prov3 = prov1.model_copy(update={"revision_id": "rev_2"})
+    fp3 = compute_risk_dependency_fingerprint(
+        candidate=test_candidate,
+        plan=test_plan,
+        profile_id="day_trader",
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec,
+        kill_switch=ks_state,
+        quote=test_quote,
+        news_prov=prov3,
+        portfolio_exposure_before=Decimal("0.0"),
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert fp1 != fp3, "Different revision_id MUST produce a distinct fingerprint"
+
+
+@pytest.mark.asyncio
+async def test_persistence_integrity_error_reraises(
+    db_session, test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time
+):
+    """P2-037: Persistence non-unique error must re-raise and fail closed."""
+    session, _ = db_session
+    from unittest.mock import patch
+
+    from app.services.risk.repository import persist_risk_decision
+
+    dec = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan,
+        account=test_account,
+        policy=test_policy,
+        spec=test_spec,
+        quote=test_quote,
+        news_context=None,
+        as_of=now_time,
+    )
+
+    bad_dec = dec.model_copy(update={"id": "dec_force_fail"})
+    with patch.object(
+        session, "flush", side_effect=IntegrityError("violates not-null constraint", params={}, orig=Exception())
+    ):
+        with pytest.raises(IntegrityError):
+            await persist_risk_decision(session, bad_dec)
+
+
+@pytest.mark.asyncio
+async def test_cross_process_kill_switch_data_health_persistence(db_session, test_account, test_policy, now_time):
+    """P2-038: Data health failures persist in database and trigger Kill Switch across manager instances."""
+    session, _ = db_session
+    from app.models.risk import DataHealthRecord
+    from app.services.risk.kill_switch import KillSwitchManager
+
+    ks1 = KillSwitchManager()
+    # 1st stale quote
+    await ks1.evaluate_automatic_triggers(
+        session, test_account, test_policy, quote_stale=True, quote_stale_reason="Stale 1"
+    )
+    # 2nd stale quote
+    await ks1.evaluate_automatic_triggers(
+        session, test_account, test_policy, quote_stale=True, quote_stale_reason="Stale 2"
+    )
+
+    dh_row = await session.get(DataHealthRecord, "dh_default")
+    assert dh_row is not None
+    assert dh_row.consecutive_failures == 2
+
+    # Simulate process restart by instantiating new manager
+    ks2 = KillSwitchManager()
+    assert ks2._consecutive_data_health_failures == 0  # In-memory counter is fresh
+
+    # 3rd stale quote on new manager triggers Kill Switch because DB persisted the previous 2 failures!
+    state = await ks2.evaluate_automatic_triggers(
+        session, test_account, test_policy, quote_stale=True, quote_stale_reason="Stale 3"
+    )
+    assert state is not None
+    assert state.state == "ACTIVE"
+    assert state.trigger_type == "AUTOMATIC_DATA_HEALTH"

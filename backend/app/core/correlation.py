@@ -34,6 +34,7 @@ def reset_correlation_id(token: contextvars.Token[str]) -> None:
 def get_correlation_id() -> str:
     return _correlation_id.get()
 
+
 class CorrelationMiddleware:
     """Pure ASGI: reset only after the response/body/background lifecycle completes."""
 

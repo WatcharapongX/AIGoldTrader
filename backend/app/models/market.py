@@ -1,4 +1,5 @@
 """Native PostgreSQL market storage; source is part of each idempotency key."""
+
 import datetime as dt
 import uuid
 from decimal import Decimal

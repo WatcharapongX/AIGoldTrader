@@ -16,18 +16,38 @@ def test_migration_upgrade_downgrade_upgrade(tmp_path):
     backend = Path(__file__).resolve().parents[1]
     engine = create_engine(f"sqlite:///{database.as_posix()}")
     expected = {
-        "users", "sessions", "accounts", "symbols", "audit_logs", "system_events",
-        "ticks", "candles", "economic_events", "economic_event_revisions",
-        "trader_profiles", "strategy_evaluations", "trade_candidates", "candidate_transitions",
-        "risk_policies", "symbol_specifications", "account_snapshots",
-        "risk_decisions", "risk_reservations", "kill_switch_records",
+        "users",
+        "sessions",
+        "accounts",
+        "symbols",
+        "audit_logs",
+        "system_events",
+        "ticks",
+        "candles",
+        "economic_events",
+        "economic_event_revisions",
+        "trader_profiles",
+        "strategy_evaluations",
+        "trade_candidates",
+        "candidate_transitions",
+        "risk_policies",
+        "symbol_specifications",
+        "account_snapshots",
+        "risk_decisions",
+        "risk_reservations",
+        "kill_switch_records",
+        "data_health_records",
     }
     try:
         for target in ("head", "base", "head"):
             action = "downgrade" if target == "base" else "upgrade"
             result = subprocess.run(  # noqa: S603 — fixed executable and migration args, isolated temp DB
                 [sys.executable, "-m", "alembic", action, target],
-                cwd=backend, env=env, capture_output=True, text=True, timeout=30,
+                cwd=backend,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             assert result.returncode == 0, result.stderr
             actual = set(inspect(engine).get_table_names()) - {"alembic_version"}

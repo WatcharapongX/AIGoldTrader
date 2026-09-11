@@ -27,7 +27,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # auth endpoints อนุญาตสั้นกว่า API ทั่วไป (docs/05 §4)
 _auth_limiter = RateLimiter(
-    per_minute=get_settings().rate_limit_auth_per_minute, max_keys=get_settings().rate_limit_max_keys,
+    per_minute=get_settings().rate_limit_auth_per_minute,
+    max_keys=get_settings().rate_limit_max_keys,
 )
 
 
@@ -105,9 +106,7 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
         account = hashlib.sha256(str(body.email).strip().casefold().encode()).hexdigest()
         _auth_limiter.check(f"login:client:{ip}", f"login:account:{account}")
     except RateLimitedError:
-        await audit.write_audit(
-            session, action="LOGIN_RATE_LIMITED", entity="user", reason=f"ip={ip}", ip=ip
-        )
+        await audit.write_audit(session, action="LOGIN_RATE_LIMITED", entity="user", reason=f"ip={ip}", ip=ip)
         await session.commit()
         raise
 
@@ -145,9 +144,7 @@ async def refresh(body: RefreshRequest, session: AsyncSession = Depends(get_sess
         raise AuthError("Invalid refresh token") from exc
 
     token_hash = hash_refresh_token(body.refresh_token)
-    result = await session.execute(
-        select(RefreshSession).where(RefreshSession.refresh_token_hash == token_hash)
-    )
+    result = await session.execute(select(RefreshSession).where(RefreshSession.refresh_token_hash == token_hash))
     stored = result.scalar_one_or_none()
     if stored is None or stored.revoked_at is not None or _as_utc(stored.expires_at) < dt.datetime.now(dt.UTC):
         raise AuthError("Refresh session is revoked or expired")
@@ -163,9 +160,7 @@ async def refresh(body: RefreshRequest, session: AsyncSession = Depends(get_sess
             expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=settings.jwt_refresh_token_expire_days),
         )
     )
-    await audit.write_audit(
-        session, action="TOKEN_REFRESH", entity="user", entity_id=user.id, user_id=user.id
-    )
+    await audit.write_audit(session, action="TOKEN_REFRESH", entity="user", entity_id=user.id, user_id=user.id)
     await session.commit()
     return tokens
 
@@ -179,16 +174,12 @@ async def logout(
     request.state.user = current_user
     # revoke ทุก session ที่ยัง active ของ user (simple policy — ปรับเป็นต่อ-device ได้)
     result = await session.execute(
-        select(RefreshSession).where(
-            RefreshSession.user_id == current_user.id, RefreshSession.revoked_at.is_(None)
-        )
+        select(RefreshSession).where(RefreshSession.user_id == current_user.id, RefreshSession.revoked_at.is_(None))
     )
     now = dt.datetime.now(dt.UTC)
     for stored in result.scalars():
         stored.revoked_at = now
-    await audit.write_audit(
-        session, action="LOGOUT", entity="user", entity_id=current_user.id, user_id=current_user.id
-    )
+    await audit.write_audit(session, action="LOGOUT", entity="user", entity_id=current_user.id, user_id=current_user.id)
     await session.commit()
     return {"status": "ok", "correlation_id": get_correlation_id()}
 

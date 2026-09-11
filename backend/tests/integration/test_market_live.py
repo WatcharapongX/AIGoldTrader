@@ -1,4 +1,5 @@
 """Real PostgreSQL -> native Uvicorn -> authenticated WS -> query/reconnect gate."""
+
 import asyncio
 import json
 import time
@@ -20,14 +21,17 @@ pytestmark = pytest.mark.integration
 def test_live_market_database_websocket_stale_and_recovery(isolated_postgres, tmp_path):  # noqa: F811
     conn, schema = isolated_postgres
     _alembic("upgrade", "head")
+
     async def seed():
         await seed_symbols()
         await seed_admin("market@example.com", "market-fixture-pass")
         await dispose_engine()
+
     asyncio.run(seed(), loop_factory=new_event_loop)
     # Test-only local control module: never installed into the application routes.
     probe = tmp_path / "market_probe.py"
-    probe.write_text('''
+    probe.write_text(
+        """
 from app.main import create_app
 from app.api.market import service
 from app.services.market_data.provider import ReplayProvider
@@ -50,10 +54,16 @@ async def pause(request: Request):
 async def resume(request: Request):
     service(request.app).provider.paused = False
     return {"resumed": True}
-''', encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     log = tmp_path / "market.log"
-    with native_server(launch_commands()["docker-compose.yml"], log, app_module="market_probe:app",
-                       extra_env={"PYTHONPATH": str(tmp_path), "CORS_ORIGINS": "http://localhost:3000"}) as client:
+    with native_server(
+        launch_commands()["docker-compose.yml"],
+        log,
+        app_module="market_probe:app",
+        extra_env={"PYTHONPATH": str(tmp_path), "CORS_ORIGINS": "http://localhost:3000"},
+    ) as client:
         assert client.get("/api/market/status").status_code == 401
         login = client.post("/api/auth/login", json={"email": "market@example.com", "password": "market-fixture-pass"})
         assert login.status_code == 200
@@ -76,8 +86,11 @@ async def resume(request: Request):
             raise AssertionError("Expected WS message not received")
 
         for timeframe in ("M1", "M3", "M5", "M15", "M30", "H1", "H4", "D1", "W1"):
-            response = client.get("/api/market/candles",
-                                  params={"symbol": "XAUUSD", "timeframe": timeframe, "limit": 300}, headers=headers)
+            response = client.get(
+                "/api/market/candles",
+                params={"symbol": "XAUUSD", "timeframe": timeframe, "limit": 300},
+                headers=headers,
+            )
             assert response.status_code == 200 and len(response.json()["candles"]) == 300
             assert all(c["open_time"].endswith("Z") for c in response.json()["candles"])
         with connect(url, origin="http://localhost:3000", proxy=None) as ws:

@@ -43,8 +43,11 @@ def native_server(command, log_path, *, extra_env=None, app_module=None):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    for option, value in (("--host", "127.0.0.1"), ("--port", str(port)),
-                          ("--loop", "app.core.event_loop:new_event_loop")):
+    for option, value in (
+        ("--host", "127.0.0.1"),
+        ("--port", str(port)),
+        ("--loop", "app.core.event_loop:new_event_loop"),
+    ):
         if option in args:
             args[args.index(option) + 1] = value
         else:
@@ -54,8 +57,12 @@ def native_server(command, log_path, *, extra_env=None, app_module=None):
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     with log_path.open("w", encoding="utf-8") as output:
         process = subprocess.Popen(  # noqa: S603 — source-derived Uvicorn args, no shell
-            [sys.executable, "-m", "uvicorn", *args], cwd=ROOT / "backend", env=env,
-            stdout=output, stderr=subprocess.STDOUT, creationflags=flags,
+            [sys.executable, "-m", "uvicorn", *args],
+            cwd=ROOT / "backend",
+            env=env,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            creationflags=flags,
         )
         try:
             with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=5) as client:

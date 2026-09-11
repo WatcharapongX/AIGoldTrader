@@ -1,4 +1,5 @@
 """M1 replacement-safe higher-timeframe aggregation with bounded current windows."""
+
 import datetime as dt
 from decimal import Decimal
 
@@ -7,11 +8,18 @@ from app.services.market_data.domain import Candle, Tick, Timeframe, bucket
 
 def merge(left: Candle | None, right: Candle, timeframe: Timeframe) -> Candle:
     return Candle(
-        symbol=right.symbol, timeframe=timeframe, open_time=bucket(right.open_time, timeframe),
-        open=left.open if left else right.open, high=max(left.high, right.high) if left else right.high,
-        low=min(left.low, right.low) if left else right.low, close=right.close,
-        volume=(left.volume if left else Decimal(0)) + right.volume, bid_close=right.bid_close,
-        ask_close=right.ask_close, source=right.source, is_closed=False,
+        symbol=right.symbol,
+        timeframe=timeframe,
+        open_time=bucket(right.open_time, timeframe),
+        open=left.open if left else right.open,
+        high=max(left.high, right.high) if left else right.high,
+        low=min(left.low, right.low) if left else right.low,
+        close=right.close,
+        volume=(left.volume if left else Decimal(0)) + right.volume,
+        bid_close=right.bid_close,
+        ask_close=right.ask_close,
+        source=right.source,
+        is_closed=False,
     )
 
 
@@ -48,9 +56,17 @@ class CandleEngine:
         start = bucket(tick.timestamp, Timeframe.M1)
         old = self.base if self.base and self.base.open_time == start else None
         base = Candle(
-            symbol=tick.symbol, timeframe=Timeframe.M1, open_time=start, open=old.open if old else tick.bid,
-            high=max(old.high, tick.bid) if old else tick.bid, low=min(old.low, tick.bid) if old else tick.bid,
-            close=tick.bid, volume=(old.volume if old else Decimal(0)) + tick.volume,
-            bid_close=tick.bid, ask_close=tick.ask, source=tick.source, is_closed=False,
+            symbol=tick.symbol,
+            timeframe=Timeframe.M1,
+            open_time=start,
+            open=old.open if old else tick.bid,
+            high=max(old.high, tick.bid) if old else tick.bid,
+            low=min(old.low, tick.bid) if old else tick.bid,
+            close=tick.bid,
+            volume=(old.volume if old else Decimal(0)) + tick.volume,
+            bid_close=tick.bid,
+            ask_close=tick.ask,
+            source=tick.source,
+            is_closed=False,
         )
         return self._replace_base(base) + list(self.current.values())

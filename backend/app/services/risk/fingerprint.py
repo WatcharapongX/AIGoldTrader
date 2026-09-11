@@ -57,6 +57,8 @@ def compute_risk_dependency_fingerprint(
     news_payload = None
     if news_prov:
         news_payload = {
+            "provider": getattr(news_prov, "provider", ""),
+            "revision_id": getattr(news_prov, "revision_id", ""),
             "news_state": news_prov.news_state,
             "in_blackout": news_prov.in_blackout,
             "in_pre_news_window": news_prov.in_pre_news_window,
@@ -65,11 +67,14 @@ def compute_risk_dependency_fingerprint(
             "description_th": news_prov.description_th,
             "events": [
                 {
+                    "provider": getattr(e, "provider", ""),
                     "event_id": e.event_id,
                     "event_name": e.event_name,
                     "currency": e.currency,
                     "impact": e.impact,
                     "scheduled_at": e.scheduled_at.isoformat(),
+                    "available_at": e.available_at.isoformat() if e.available_at is not None else None,
+                    "revision_id": getattr(e, "revision_id", ""),
                     "window_state": e.window_state,
                 }
                 for e in news_prov.events
@@ -93,8 +98,8 @@ def compute_risk_dependency_fingerprint(
     }
 
     account_payload = {
-        "id": account.id,
         "account_id": account.account_id,
+        "state_version": getattr(account, "state_version", 1),
         "balance": format(account.balance, ".2f"),
         "equity": format(account.equity, ".2f"),
         "free_margin": format(account.free_margin, ".2f") if account.free_margin is not None else None,
@@ -108,7 +113,6 @@ def compute_risk_dependency_fingerprint(
         "cooldown_active": cooldown_active,
         "open_positions_count": account.open_positions_count,
         "source": account.source,
-        "as_of": account.as_of.isoformat(),
         "is_stale": account_is_stale,
     }
 

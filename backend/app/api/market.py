@@ -1,4 +1,5 @@
 """Authenticated market REST and first-frame-authenticated WebSocket, never URL tokens."""
+
 import asyncio
 import time
 import uuid
@@ -48,10 +49,17 @@ async def started(request: Request) -> MarketService:
 
 
 def info(symbol: Symbol) -> SymbolInfo:
-    return SymbolInfo(name=symbol.name, asset_class=symbol.asset_class, digits=symbol.digits,
-                      contract_size=symbol.contract_size, tick_value=symbol.tick_value,
-                      default_spread=symbol.default_spread, session_hours=symbol.session_hours,
-                      is_active=symbol.is_active, source_available=symbol.name == "XAUUSD")
+    return SymbolInfo(
+        name=symbol.name,
+        asset_class=symbol.asset_class,
+        digits=symbol.digits,
+        contract_size=symbol.contract_size,
+        tick_value=symbol.tick_value,
+        default_spread=symbol.default_spread,
+        session_hours=symbol.session_hours,
+        is_active=symbol.is_active,
+        source_available=symbol.name == "XAUUSD",
+    )
 
 
 async def find_symbol(session, name):
@@ -63,20 +71,23 @@ async def find_symbol(session, name):
 
 @router.get("/symbols", response_model=list[SymbolInfo])
 async def symbols(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
-    return [info(s) for s in (await session.scalars(select(Symbol).where(
-        Symbol.is_active.is_(True)
-    ).order_by(Symbol.name))).all()]
+    return [
+        info(s)
+        for s in (await session.scalars(select(Symbol).where(Symbol.is_active.is_(True)).order_by(Symbol.name))).all()
+    ]
 
 
 @router.get("/symbols/{name}", response_model=SymbolInfo)
-async def symbol_detail(name: str, user: User = Depends(get_current_user),
-                        session: AsyncSession = Depends(get_session)):
+async def symbol_detail(
+    name: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+):
     return info(await find_symbol(session, name))
 
 
 @router.post("/symbols", response_model=SymbolInfo, status_code=201)
-async def symbol_create(payload: SymbolInput, user: User = Depends(get_current_user),
-                        session: AsyncSession = Depends(get_session)):
+async def symbol_create(
+    payload: SymbolInput, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+):
     if user.role != Role.ADMIN:
         raise ForbiddenError("Admin required")
     if await session.scalar(select(Symbol).where(Symbol.name == payload.name)):
@@ -88,8 +99,12 @@ async def symbol_create(payload: SymbolInput, user: User = Depends(get_current_u
 
 
 @router.put("/symbols/{name}", response_model=SymbolInfo)
-async def symbol_update(name: str, payload: SymbolInput, user: User = Depends(get_current_user),
-                        session: AsyncSession = Depends(get_session)):
+async def symbol_update(
+    name: str,
+    payload: SymbolInput,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     if user.role != Role.ADMIN:
         raise ForbiddenError("Admin required")
     if name != payload.name:
@@ -102,8 +117,9 @@ async def symbol_update(name: str, payload: SymbolInput, user: User = Depends(ge
 
 
 @router.delete("/symbols/{name}", status_code=204)
-async def symbol_delete(name: str, user: User = Depends(get_current_user),
-                        session: AsyncSession = Depends(get_session)):
+async def symbol_delete(
+    name: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+):
     if user.role != Role.ADMIN:
         raise ForbiddenError("Admin required")
     symbol = await find_symbol(session, name)
@@ -118,8 +134,12 @@ async def market_status(request: Request, user: User = Depends(get_current_user)
 
 
 @router.get("/market/quote", response_model=Quote | None)
-async def market_quote(request: Request, symbol: str = "XAUUSD", user: User = Depends(get_current_user),
-                       session: AsyncSession = Depends(get_session)):
+async def market_quote(
+    request: Request,
+    symbol: str = "XAUUSD",
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     await find_symbol(session, symbol)
     current = await started(request)
     if symbol != "XAUUSD":
@@ -132,10 +152,14 @@ async def market_quote(request: Request, symbol: str = "XAUUSD", user: User = De
 
 @router.get("/market/candles", response_model=CandlePage)
 async def market_candles(
-    request: Request, symbol: str = "XAUUSD", timeframe: Timeframe = Timeframe.M5,
+    request: Request,
+    symbol: str = "XAUUSD",
+    timeframe: Timeframe = Timeframe.M5,
     start: AwareDatetime | None = Query(None, alias="from"),
-    end: AwareDatetime | None = Query(None, alias="to"), limit: int = Query(300, ge=1, le=1000),
-    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session),
+    end: AwareDatetime | None = Query(None, alias="to"),
+    limit: int = Query(300, ge=1, le=1000),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
 ):
     selected = await find_symbol(session, symbol)
     if symbol != "XAUUSD":
@@ -143,15 +167,22 @@ async def market_candles(
     if start and end and start >= end:
         raise ValidationError("from must be before to")
     current = await started(request)
-    candles = await candles_query(session, selected.id, symbol, timeframe, start, end, limit,
-                                  source=current.provider.source)
+    candles = await candles_query(
+        session, selected.id, symbol, timeframe, start, end, limit, source=current.provider.source
+    )
     return CandlePage(candles=candles, next_cursor=candles[0].open_time if len(candles) == limit else None)
 
 
 def message(current, kind, command, candles=None, error=None):
     return MarketMessage(
-        type=kind, symbol=command.symbol, timeframe=command.timeframe, sequence=current.sequence,
-        quote=current.quote, candles=candles or [], status=current.status(), error=error,
+        type=kind,
+        symbol=command.symbol,
+        timeframe=command.timeframe,
+        sequence=current.sequence,
+        quote=current.quote,
+        candles=candles or [],
+        status=current.status(),
+        error=error,
     ).model_dump(mode="json")
 
 
@@ -213,8 +244,9 @@ async def market_socket(ws: WebSocket):
                         symbol = await find_symbol(session, command.symbol)
                         if symbol.name != "XAUUSD":
                             raise ValueError("Source unavailable")
-                        candles = await candles_query(session, symbol.id, symbol.name, command.timeframe,
-                                                      source=current.provider.source)
+                        candles = await candles_query(
+                            session, symbol.id, symbol.name, command.timeframe, source=current.provider.source
+                        )
                     subscribed = True
                     await ws.send_json(message(current, "snapshot", command, candles))
                 elif incoming.type == "unsubscribe":
@@ -228,9 +260,14 @@ async def market_socket(ws: WebSocket):
                     await ws.close(code=1013)
                     return
                 if subscribed:
-                    await ws.send_json(message(current, "update", command, [
-                        c for c in update if c.symbol == command.symbol and c.timeframe == command.timeframe
-                    ]))
+                    await ws.send_json(
+                        message(
+                            current,
+                            "update",
+                            command,
+                            [c for c in update if c.symbol == command.symbol and c.timeframe == command.timeframe],
+                        )
+                    )
                 consumer = asyncio.create_task(queue.get())
             if not done:
                 async with current.factory() as session:
@@ -241,8 +278,16 @@ async def market_socket(ws: WebSocket):
                 await ws.send_json(message(current, "status", command))
     except (WebSocketDisconnect, RuntimeError):
         pass
-    except (ValueError, KeyError, TimeoutError, SchemaError, jwt.PyJWTError,
-            ForbiddenError, NotFoundError, RateLimitedError):
+    except (
+        ValueError,
+        KeyError,
+        TimeoutError,
+        SchemaError,
+        jwt.PyJWTError,
+        ForbiddenError,
+        NotFoundError,
+        RateLimitedError,
+    ):
         with suppress(RuntimeError):
             await ws.close(code=1008)
     finally:

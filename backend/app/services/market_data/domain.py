@@ -1,4 +1,5 @@
 """Canonical UTC market contracts. Prices serialize as exact decimal strings."""
+
 import datetime as dt
 import enum
 from decimal import Decimal
@@ -39,8 +40,9 @@ def bucket(timestamp: dt.datetime, timeframe: Timeframe) -> dt.datetime:
 class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("timestamp", "open_time", "last_quote", "server_time", "next_cursor",
-                     "last_candle", check_fields=False)
+    @field_validator(
+        "timestamp", "open_time", "last_quote", "server_time", "next_cursor", "last_candle", check_fields=False
+    )
     @classmethod
     def canonical_utc(cls, value):
         return value.astimezone(dt.UTC) if value is not None else None
@@ -94,8 +96,9 @@ class Candle(Contract):
     def valid_ohlc(self):
         if self.high < max(self.open, self.close, self.low) or self.low > min(self.open, self.close, self.high):
             raise ValueError("Invalid OHLC")
-        if ((self.ask_close is not None and self.ask_close < self.bid_close)
-                or self.open_time != bucket(self.open_time, self.timeframe)):
+        if (self.ask_close is not None and self.ask_close < self.bid_close) or self.open_time != bucket(
+            self.open_time, self.timeframe
+        ):
             raise ValueError("Invalid candle boundary or spread")
         return self
 

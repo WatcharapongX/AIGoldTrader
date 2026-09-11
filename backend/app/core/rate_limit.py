@@ -10,7 +10,11 @@ from app.core.errors import RateLimitedError
 
 class RateLimiter:
     def __init__(
-        self, per_minute: int, *, max_keys: int = 10000, clock: Callable[[], float] = time.monotonic,
+        self,
+        per_minute: int,
+        *,
+        max_keys: int = 10000,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if per_minute < 1 or max_keys < 1:
             raise ValueError("Rate limiter bounds must be positive")

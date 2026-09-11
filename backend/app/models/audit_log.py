@@ -17,9 +17,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    ts: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), index=True
-    )
+    ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     action: Mapped[str] = mapped_column(String(100), index=True)
     entity: Mapped[str] = mapped_column(String(100))

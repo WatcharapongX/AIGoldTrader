@@ -136,12 +136,17 @@ class Settings(BaseSettings):
             except (ArgumentError, ValueError, TypeError):
                 raise ValueError("DATABASE_URL must be a complete PostgreSQL URL with an explicit port") from None
             return url.set(drivername="postgresql+psycopg").render_as_string(hide_password=False)
-        if not all((self.postgres_host, self.postgres_port, self.postgres_db,
-                    self.postgres_user, self.postgres_password)):
+        if not all(
+            (self.postgres_host, self.postgres_port, self.postgres_db, self.postgres_user, self.postgres_password)
+        ):
             raise ValueError("Set DATABASE_URL or all POSTGRES_* connection settings")
         return URL.create(
-            "postgresql+psycopg", username=self.postgres_user, password=self.postgres_password,
-            host=self.postgres_host, port=self.postgres_port, database=self.postgres_db,
+            "postgresql+psycopg",
+            username=self.postgres_user,
+            password=self.postgres_password,
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
         ).render_as_string(hide_password=False)
 
     def validate_runtime_secrets(self) -> None:

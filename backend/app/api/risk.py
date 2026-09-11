@@ -7,6 +7,7 @@ Execution (orders, Phase 7) is strictly forbidden.
 
 import datetime as dt
 import logging
+import uuid
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -21,6 +22,7 @@ from app.core.config import get_settings
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.db.session import get_session
 from app.models import Role, User
+from app.models.account import Account
 from app.models.strategy import TradeCandidateRecord
 from app.services.news.repository import event_vintages
 from app.services.risk.domain import (
@@ -78,6 +80,29 @@ async def evaluate_risk(
         if body.requested_risk_pct <= Decimal("0") or not body.requested_risk_pct.is_finite():
             raise ValidationError("Requested risk percentage must be a positive finite number")
 
+    # 0. Authorize user for account first before touching any state (P2-035)
+    acc_row = None
+    try:
+        parsed_uuid = uuid.UUID(body.account_id)
+        acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
+    except (ValueError, TypeError):
+        acc_row = await session.scalar(select(Account).where(Account.name == body.account_id))
+
+    if acc_row is None:
+        raise NotFoundError(f"Account '{body.account_id}' not found")
+
+    if user.role != Role.ADMIN and str(acc_row.user_id) != str(user.id):
+        raise ForbiddenError("User is not authorized to access this account")
+
+    # Transaction-level advisory lock on account to serialize concurrent evaluations (SOL-P5-P1-031)
+    if session.get_bind().dialect.name == "postgresql":
+        from sqlalchemy import text
+
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"risk_account_{body.account_id}"},
+        )
+
     # 1. Fetch candidate record with strict candidate_id AND profile_id (SOL-P5-P1-006)
     candidate_row = (
         await session.scalars(
@@ -130,6 +155,7 @@ async def evaluate_risk(
     )
     if settings.trading_mode == "PAPER" and body.account_id == "default_paper_account":
         from app.services.risk.account_state import PaperAccountStateService
+
         try:
             await PaperAccountStateService.refresh_paper_account_snapshot(session, account_id=body.account_id, now=now)
         except Exception as exc:
@@ -162,6 +188,7 @@ async def evaluate_risk(
     )
 
     from sqlalchemy.exc import IntegrityError
+
     try:
         await persist_risk_decision(session, decision)
         await session.commit()

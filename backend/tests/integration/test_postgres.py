@@ -73,7 +73,10 @@ def _alembic(*args, success=True):
     result = subprocess.run(  # noqa: S603 — fixed commands, owned TEST schema
         [sys.executable, "-m", "alembic", *args],
         cwd=Path(__file__).resolve().parents[2],
-        env=os.environ.copy(), capture_output=True, text=True, timeout=30,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     log = result.stdout + result.stderr
     url = make_url(os.environ["DATABASE_URL"])
@@ -92,11 +95,27 @@ def _alembic(*args, success=True):
 def test_postgresql_migrations_auth_and_audit(isolated_postgres, capfd):
     conn, schema = isolated_postgres
     expected = {
-        "users", "sessions", "accounts", "symbols", "audit_logs", "system_events",
-        "ticks", "candles", "economic_events", "economic_event_revisions",
-        "trader_profiles", "strategy_evaluations", "trade_candidates", "candidate_transitions",
-        "risk_policies", "symbol_specifications", "account_snapshots",
-        "risk_decisions", "risk_reservations", "kill_switch_records",
+        "users",
+        "sessions",
+        "accounts",
+        "symbols",
+        "audit_logs",
+        "system_events",
+        "ticks",
+        "candles",
+        "economic_events",
+        "economic_event_revisions",
+        "trader_profiles",
+        "strategy_evaluations",
+        "trade_candidates",
+        "candidate_transitions",
+        "risk_policies",
+        "symbol_specifications",
+        "account_snapshots",
+        "risk_decisions",
+        "risk_reservations",
+        "kill_switch_records",
+        "data_health_records",
     }
     for action, target in (("upgrade", "head"), ("downgrade", "base"), ("upgrade", "head")):
         _alembic(action, target)
@@ -123,8 +142,10 @@ def test_postgresql_migrations_auth_and_audit(isolated_postgres, capfd):
 
 def _verify_json_columns(conn, schema, data_type):
     expected = {
-        ("audit_logs", "before"): "YES", ("audit_logs", "after"): "YES",
-        ("symbols", "session_hours"): "NO", ("system_events", "payload"): "YES",
+        ("audit_logs", "before"): "YES",
+        ("audit_logs", "after"): "YES",
+        ("symbols", "session_hours"): "NO",
+        ("system_events", "payload"): "YES",
     }
     for (table, column), nullable in expected.items():
         actual = conn.execute(
@@ -144,7 +165,9 @@ def test_postgresql_corrective_roundtrip_and_drift_gate(isolated_postgres):
     # Real pre-existing JSON in all four columns, including SQL NULL vs JSON null.
     payloads = [
         '{"nested":{"thai":"ทอง","items":[1,true,null,{"value":1.25}]},"empty":{}}',
-        '{}', 'null', None,
+        "{}",
+        "null",
+        None,
     ]
     for index, payload in enumerate(payloads):
         conn.execute(
@@ -192,7 +215,8 @@ def test_postgresql_corrective_roundtrip_and_drift_gate(isolated_postgres):
         assert snapshot() == before
         assert conn.execute(
             'SELECT count(*) FILTER (WHERE "before" IS NULL), '
-            'count(*) FILTER (WHERE "before"::text = %s) FROM audit_logs', ("null",),
+            'count(*) FILTER (WHERE "before"::text = %s) FROM audit_logs',
+            ("null",),
         ).fetchone() == (1, 1)
         assert conn.execute("SELECT session_hours FROM symbols WHERE name='DEFAULT'").fetchone() == ({},)
         with pytest.raises(psycopg.errors.UniqueViolation):
@@ -225,7 +249,8 @@ def _verify_schema(conn, schema, expected):
     ).fetchone()
     assert revision == ("0007_risk_engine",)
     indexes = {
-        row[0]: row[1] for row in conn.execute(
+        row[0]: row[1]
+        for row in conn.execute(
             "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = %s", (schema,)
         ).fetchall()
     }
@@ -239,8 +264,16 @@ def _verify_schema(conn, schema, expected):
     ).fetchall()
     assert {table for table, kind in constraints if kind == "PRIMARY KEY"} == expected | {"alembic_version"}
     foreign_tables = {table for table, kind in constraints if kind == "FOREIGN KEY"}
-    assert foreign_tables == {"sessions", "accounts", "ticks", "candles", "economic_event_revisions",
-                              "trade_candidates", "candidate_transitions", "risk_reservations"}
+    assert foreign_tables == {
+        "sessions",
+        "accounts",
+        "ticks",
+        "candles",
+        "economic_event_revisions",
+        "trade_candidates",
+        "candidate_transitions",
+        "risk_reservations",
+    }
 
 
 async def _verify_auth():
@@ -268,10 +301,13 @@ async def _verify_auth():
             with pytest.raises(IntegrityError):
                 await session.flush()
             await session.rollback()
-            session.add(RefreshSession(
-                user_id=uuid.uuid4(), refresh_token_hash=secrets.token_hex(32),
-                expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=1),
-            ))
+            session.add(
+                RefreshSession(
+                    user_id=uuid.uuid4(),
+                    refresh_token_hash=secrets.token_hex(32),
+                    expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=1),
+                )
+            )
             with pytest.raises(IntegrityError):
                 await session.flush()
             await session.rollback()
@@ -283,12 +319,20 @@ async def _verify_auth():
             ready = await client.get("/readyz")
             assert ready.status_code == 200
             assert ready.json()["checks"] == {"database": True, "redis": None}
-            wrong = await client.post("/api/auth/login", json={
-                "email": "phase1@example.com", "password": "incorrect-test-password",
-            })
-            unknown = await client.post("/api/auth/login", json={
-                "email": "unknown@example.com", "password": "incorrect-test-password",
-            })
+            wrong = await client.post(
+                "/api/auth/login",
+                json={
+                    "email": "phase1@example.com",
+                    "password": "incorrect-test-password",
+                },
+            )
+            unknown = await client.post(
+                "/api/auth/login",
+                json={
+                    "email": "unknown@example.com",
+                    "password": "incorrect-test-password",
+                },
+            )
             assert wrong.status_code == unknown.status_code == 401
             assert wrong.json()["error"]["message"] == unknown.json()["error"]["message"]
             assert password not in wrong.text + unknown.text
@@ -315,12 +359,13 @@ async def _verify_auth():
             assert audits[0].after == {"email": "phase1@example.com", "role": "ADMIN"}
             user = await session.get(User, user_id)
             assert user is not None and user.last_login_at is not None
-            sessions = (await session.execute(select(RefreshSession).where(
-                RefreshSession.user_id == user_id
-            ))).scalars().all()
+            sessions = (
+                (await session.execute(select(RefreshSession).where(RefreshSession.user_id == user_id))).scalars().all()
+            )
             assert len(sessions) == 2 and all(item.revoked_at for item in sessions)
             assert all(item.refresh_token_hash != tokens["refresh_token"] for item in sessions)
         return (password, tokens["access_token"], tokens["refresh_token"], get_settings().secret_key)
+
 
 @pytest.mark.parametrize("log_format", ["json", "console"])
 def test_postgresql_hardening_correlation_and_exception_logs(isolated_postgres, monkeypatch, capfd, log_format):
@@ -360,20 +405,31 @@ async def _verify_hardening():
         await seed_admin("hardening@example.com", password)
         assert get_engine().sync_engine.hide_parameters is True
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test",
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test",
         ) as client:
             for incoming in ("v" * 64, "x" * 65, "invalid space", "bad\nforged", "bad\rforged"):
-                response = await client.post("/api/auth/login", headers={"X-Correlation-ID": incoming}, json={
-                    "email": "hardening@example.com", "password": password,
-                })
+                response = await client.post(
+                    "/api/auth/login",
+                    headers={"X-Correlation-ID": incoming},
+                    json={
+                        "email": "hardening@example.com",
+                        "password": password,
+                    },
+                )
                 assert response.status_code == 200
                 correlation = response.headers["X-Correlation-ID"]
                 assert len(correlation) <= 64
                 assert (correlation == incoming) is (len(incoming) == 64)
                 async with get_session_factory()() as session:
-                    entry = (await session.execute(select(AuditLog).where(
-                        AuditLog.action == "LOGIN", AuditLog.correlation_id == correlation,
-                    ))).scalar_one()
+                    entry = (
+                        await session.execute(
+                            select(AuditLog).where(
+                                AuditLog.action == "LOGIN",
+                                AuditLog.correlation_id == correlation,
+                            )
+                        )
+                    ).scalar_one()
                     assert entry.after == {"email": "hardening@example.com", "role": "ADMIN"}
             failed = await client.get("/_gate/database-error", headers={"X-Correlation-ID": "db-error-123"})
             assert failed.status_code == 500
@@ -381,15 +437,26 @@ async def _verify_hardening():
             assert parameter not in failed.text
         async with get_session_factory()() as session:
             entry = await write_audit(
-                session, action="CORRELATION_TEST", entity="test", correlation_id="x" * 65,
+                session,
+                action="CORRELATION_TEST",
+                entity="test",
+                correlation_id="x" * 65,
             )
             await session.commit()
             assert len(entry.correlation_id) <= 64
     return parameter, password, get_settings().secret_key
 
-@pytest.mark.parametrize("surface", [
-    "README.md", "docs/18-devops.md", "backend/Dockerfile", "docker-compose.yml", "docker-compose.dev.yml",
-])
+
+@pytest.mark.parametrize(
+    "surface",
+    [
+        "README.md",
+        "docs/18-devops.md",
+        "backend/Dockerfile",
+        "docker-compose.yml",
+        "docker-compose.dev.yml",
+    ],
+)
 def test_live_launch_surfaces_preserve_peer(isolated_postgres, tmp_path, surface):
     from launch_support import launch_commands, native_server
 
@@ -398,29 +465,45 @@ def test_live_launch_surfaces_preserve_peer(isolated_postgres, tmp_path, surface
     command = launch_commands()[surface]
     assert "--no-proxy-headers" in command
     log = tmp_path / "server.log"
-    with native_server(command, log, extra_env={
-        "TRUST_PROXY": "false", "RATE_LIMIT_AUTH_PER_MINUTE": "3", "FORWARDED_ALLOW_IPS": "*",
-    }) as client:
+    with native_server(
+        command,
+        log,
+        extra_env={
+            "TRUST_PROXY": "false",
+            "RATE_LIMIT_AUTH_PER_MINUTE": "3",
+            "FORWARDED_ALLOW_IPS": "*",
+        },
+    ) as client:
         statuses = []
         for index in range(4):
-            response = client.post("/api/auth/login", headers={
-                "X-Forwarded-For": f"203.0.113.{index+1}", "X-Real-IP": f"192.0.2.{index+1}",
-                "Forwarded": f"for=198.51.100.{index+1}",
-            }, json={"email": f"launch{index}@example.com", "password": "incorrect-password"})
+            response = client.post(
+                "/api/auth/login",
+                headers={
+                    "X-Forwarded-For": f"203.0.113.{index + 1}",
+                    "X-Real-IP": f"192.0.2.{index + 1}",
+                    "Forwarded": f"for=198.51.100.{index + 1}",
+                },
+                json={"email": f"launch{index}@example.com", "password": "incorrect-password"},
+            )
             statuses.append(response.status_code)
         assert statuses == [401, 401, 401, 429]
         correlation = response.headers["X-Correlation-ID"]
     actual = conn.execute(
-        sql.SQL("SELECT ip FROM {}.audit_logs WHERE action='LOGIN_RATE_LIMITED' AND correlation_id=%s")
-        .format(sql.Identifier(schema)), (correlation,),
+        sql.SQL("SELECT ip FROM {}.audit_logs WHERE action='LOGIN_RATE_LIMITED' AND correlation_id=%s").format(
+            sql.Identifier(schema)
+        ),
+        (correlation,),
     ).fetchone()
     assert actual == ("127.0.0.1",)
 
 
-@pytest.mark.parametrize(("trusted", "expected_ip", "expected_statuses"), [
-    ("127.0.0.1/32", "203.0.113.4", [401, 401, 401, 401]),
-    ("192.0.2.0/24", "127.0.0.1", [401, 401, 401, 429]),
-])
+@pytest.mark.parametrize(
+    ("trusted", "expected_ip", "expected_statuses"),
+    [
+        ("127.0.0.1/32", "203.0.113.4", [401, 401, 401, 401]),
+        ("192.0.2.0/24", "127.0.0.1", [401, 401, 401, 429]),
+    ],
+)
 def test_live_base_compose_proxy_opt_in(isolated_postgres, tmp_path, trusted, expected_ip, expected_statuses):
     from launch_support import launch_commands, native_server
 
@@ -431,15 +514,27 @@ def test_live_base_compose_proxy_opt_in(isolated_postgres, tmp_path, trusted, ex
         "from fastapi import Request\nfrom app.main import create_app\n"
         "from app.core.client_ip import resolve_client_ip\napp=create_app()\n"
         "@app.get('/_gate/peer')\nasync def peer(request: Request):\n"
-        "    return {'ip': resolve_client_ip(request)}\n", encoding="utf-8",
+        "    return {'ip': resolve_client_ip(request)}\n",
+        encoding="utf-8",
     )
-    with native_server(launch_commands()["docker-compose.yml"], tmp_path / "proxy.log", extra_env={
-        "TRUST_PROXY": "true", "TRUSTED_PROXY_CIDRS": trusted, "RATE_LIMIT_AUTH_PER_MINUTE": "3",
-        "PYTHONPATH": str(tmp_path), "FORWARDED_ALLOW_IPS": "*",
-    }, app_module="peer_probe:app") as client:
+    with native_server(
+        launch_commands()["docker-compose.yml"],
+        tmp_path / "proxy.log",
+        extra_env={
+            "TRUST_PROXY": "true",
+            "TRUSTED_PROXY_CIDRS": trusted,
+            "RATE_LIMIT_AUTH_PER_MINUTE": "3",
+            "PYTHONPATH": str(tmp_path),
+            "FORWARDED_ALLOW_IPS": "*",
+        },
+        app_module="peer_probe:app",
+    ) as client:
         statuses = [
-            client.post("/api/auth/login", headers={"X-Forwarded-For": f"203.0.113.{index+1}"},
-                        json={"email": f"proxy{index}@example.com", "password": "incorrect-password"}).status_code
+            client.post(
+                "/api/auth/login",
+                headers={"X-Forwarded-For": f"203.0.113.{index + 1}"},
+                json={"email": f"proxy{index}@example.com", "password": "incorrect-password"},
+            ).status_code
             for index in range(4)
         ]
         assert statuses == expected_statuses
@@ -466,12 +561,19 @@ def test_live_correlation_response_audit_access_and_concurrency(isolated_postgre
         "    await write_audit(session, action='CORRELATION_PROBE', entity='test', entity_id=label)\n"
         "    await session.commit()\n"
         "    if label == 'failure': raise ValueError('fixture-sensitive-body')\n"
-        "    return {'correlation_id': get_correlation_id()}\n", encoding="utf-8",
+        "    return {'correlation_id': get_correlation_id()}\n",
+        encoding="utf-8",
     )
     log = tmp_path / "correlation.log"
-    with native_server(launch_commands()["docker-compose.yml"], log, extra_env={
-        "PYTHONPATH": str(tmp_path), "LOG_FORMAT": "json",
-    }, app_module="correlation_probe:app") as client:
+    with native_server(
+        launch_commands()["docker-compose.yml"],
+        log,
+        extra_env={
+            "PYTHONPATH": str(tmp_path),
+            "LOG_FORMAT": "json",
+        },
+        app_module="correlation_probe:app",
+    ) as client:
         expected = {}
         for label, incoming in (("valid", "valid-123"), ("invalid", "x" * 65), ("failure", "failure-123")):
             response = client.get("/_gate/audit/" + label, headers={"X-Correlation-ID": incoming})
@@ -502,8 +604,9 @@ def test_live_correlation_response_audit_access_and_concurrency(isolated_postgre
             (label,),
         ).fetchone()
         assert audit_id == (canonical,)
-        app_logs = [row for row in records if row.get("audit_action") == "CORRELATION_PROBE"
-                    and row.get("entity_id") == label]
+        app_logs = [
+            row for row in records if row.get("audit_action") == "CORRELATION_PROBE" and row.get("entity_id") == label
+        ]
         assert len(app_logs) == 1 and app_logs[0]["correlation_id"] == canonical
     errors = [row for row in records if row.get("error_type") == "ValueError"]
     assert len(errors) == 1 and errors[0]["correlation_id"] == expected["failure"]

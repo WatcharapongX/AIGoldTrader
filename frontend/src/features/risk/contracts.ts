@@ -258,44 +258,65 @@ export function parseReservation(raw: unknown): RiskReservationData {
 export function parsePortfolioRisk(raw: unknown): PortfolioRiskData {
   if (!raw || typeof raw !== 'object') fail('Portfolio risk must be object');
   const d = raw as Record<string, unknown>;
+
+  if (typeof d.account_id !== 'string' || !d.account_id) fail('Invalid account_id');
+  if (typeof d.account_source !== 'string' || !d.account_source) fail('Invalid account_source');
   parseInstant(d.as_of);
+
+  if (!isNumericStringOrNumber(d.open_risk_pct)) fail('Invalid open_risk_pct');
+  if (!isNumericStringOrNumber(d.reserved_risk_pct)) fail('Invalid reserved_risk_pct');
   if (!isNumericStringOrNumber(d.total_risk_pct)) fail('Invalid total_risk_pct');
   if (!isNumericStringOrNumber(d.max_account_risk_pct)) fail('Invalid max_account_risk_pct');
   if (!isNumericStringOrNumber(d.available_risk_pct)) fail('Invalid available_risk_pct');
+
+  if (!d.symbol_risk_pct || typeof d.symbol_risk_pct !== 'object' || Array.isArray(d.symbol_risk_pct)) {
+    fail('Invalid symbol_risk_pct');
+  }
+
+  if (!d.directional_risk_pct || typeof d.directional_risk_pct !== 'object' || Array.isArray(d.directional_risk_pct)) {
+    fail('Invalid directional_risk_pct');
+  }
+  const directional = d.directional_risk_pct as Record<string, unknown>;
+  if (!isNumericStringOrNumber(directional.LONG) || !isNumericStringOrNumber(directional.SHORT)) {
+    fail('directional_risk_pct must contain LONG and SHORT numbers');
+  }
+
+  if (!Array.isArray(d.active_reservations)) fail('active_reservations must be array');
+  const reservations = d.active_reservations.map(parseReservation);
+
+  if (typeof d.active_reservations_count !== 'number') fail('Invalid active_reservations_count');
   if (typeof d.kill_switch_active !== 'boolean') fail('Invalid kill_switch_active');
 
-  const reservations = Array.isArray(d.active_reservations)
-    ? d.active_reservations.map(parseReservation)
-    : [];
-
-  const directional = (d.directional_risk_pct && typeof d.directional_risk_pct === 'object')
-    ? (d.directional_risk_pct as Record<string, string>)
-    : { LONG: '0.0000', SHORT: '0.0000' };
+  if (!isNumericStringOrNumber(d.daily_loss_pct)) fail('Invalid daily_loss_pct');
+  if (!isNumericStringOrNumber(d.weekly_loss_pct)) fail('Invalid weekly_loss_pct');
+  if (!isNumericStringOrNumber(d.drawdown_pct)) fail('Invalid drawdown_pct');
+  if (typeof d.in_cooldown !== 'boolean') fail('Invalid in_cooldown');
+  if (d.cooldown_until !== null && d.cooldown_until !== undefined) {
+    parseInstant(d.cooldown_until);
+  }
 
   return {
     account_id: String(d.account_id),
-    account_source: String(d.account_source || 'CONFIGURED_PAPER'),
+    account_source: String(d.account_source),
     as_of: String(d.as_of),
     open_risk_pct: String(d.open_risk_pct),
     reserved_risk_pct: String(d.reserved_risk_pct),
     total_risk_pct: String(d.total_risk_pct),
     max_account_risk_pct: String(d.max_account_risk_pct),
     available_risk_pct: String(d.available_risk_pct),
-    symbol_risk_pct: (d.symbol_risk_pct as Record<string, string>) || {},
+    symbol_risk_pct: d.symbol_risk_pct as Record<string, string>,
     directional_risk_pct: {
-      LONG: String(directional.LONG || '0.0000'),
-      SHORT: String(directional.SHORT || '0.0000'),
+      LONG: String(directional.LONG),
+      SHORT: String(directional.SHORT),
     },
     active_reservations: reservations,
-    active_reservations_count: typeof d.active_reservations_count === 'number'
-      ? d.active_reservations_count
-      : reservations.length,
+    active_reservations_count: d.active_reservations_count,
     kill_switch_active: d.kill_switch_active,
     kill_switch_state: d.kill_switch_state ? parseKillSwitch(d.kill_switch_state) : null,
-    daily_loss_pct: String(d.daily_loss_pct || '0.00'),
-    weekly_loss_pct: String(d.weekly_loss_pct || '0.00'),
-    drawdown_pct: String(d.drawdown_pct || '0.00'),
-    in_cooldown: Boolean(d.in_cooldown),
+    daily_loss_pct: String(d.daily_loss_pct),
+    weekly_loss_pct: String(d.weekly_loss_pct),
+    drawdown_pct: String(d.drawdown_pct),
+    in_cooldown: d.in_cooldown,
     cooldown_until: d.cooldown_until ? String(d.cooldown_until) : null,
   };
 }

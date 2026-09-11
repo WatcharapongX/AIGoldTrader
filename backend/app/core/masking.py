@@ -2,8 +2,15 @@
 
 _MASKED = "***MASKED***"
 _SENSITIVE_KEY_PARTS = (
-    "password", "secret", "token", "api_key", "apikey", "credentials",
-    "authorization", "cookie", "private_key",
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "credentials",
+    "authorization",
+    "cookie",
+    "private_key",
 )
 
 

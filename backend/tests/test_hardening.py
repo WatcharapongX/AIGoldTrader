@@ -29,20 +29,28 @@ from scripts.export_api_contract import artifacts
 
 
 def request(peer="198.51.100.1", forwarded="203.0.113.1"):
-    return Request({
-        "type": "http", "client": (peer, 1234), "headers": [
-            (b"x-forwarded-for", forwarded.encode()), (b"forwarded", b"for=203.0.113.2"),
-            (b"x-real-ip", b"203.0.113.3"),
-        ],
-    })
+    return Request(
+        {
+            "type": "http",
+            "client": (peer, 1234),
+            "headers": [
+                (b"x-forwarded-for", forwarded.encode()),
+                (b"forwarded", b"for=203.0.113.2"),
+                (b"x-real-ip", b"203.0.113.3"),
+            ],
+        }
+    )
 
 
 @pytest.mark.parametrize("change_forwarded", [False, True])
 def test_login_peer_limit_cannot_be_spoofed(client, monkeypatch, change_forwarded):
     monkeypatch.setattr(auth, "_auth_limiter", RateLimiter(2))
     statuses = [
-        client.post("/api/auth/login", headers={"X-Forwarded-For": f"203.0.113.{i if change_forwarded else 1}"},
-                    json={"email": "unknown@example.com", "password": "incorrect-password"}).status_code
+        client.post(
+            "/api/auth/login",
+            headers={"X-Forwarded-For": f"203.0.113.{i if change_forwarded else 1}"},
+            json={"email": "unknown@example.com", "password": "incorrect-password"},
+        ).status_code
         for i in range(3)
     ]
     assert statuses == [401, 401, 429]
@@ -51,9 +59,14 @@ def test_login_peer_limit_cannot_be_spoofed(client, monkeypatch, change_forwarde
 def test_changing_accounts_still_spends_client_budget(client, monkeypatch):
     monkeypatch.setattr(auth, "_auth_limiter", RateLimiter(2))
     statuses = [
-        client.post("/api/auth/login", json={
-            "email": f"unknown{i}@example.com", "password": "incorrect-password",
-        }).status_code for i in range(3)
+        client.post(
+            "/api/auth/login",
+            json={
+                "email": f"unknown{i}@example.com",
+                "password": "incorrect-password",
+            },
+        ).status_code
+        for i in range(3)
     ]
     assert statuses == [401, 401, 429]
 
@@ -67,20 +80,24 @@ async def test_normalized_account_budget_spans_different_peers(monkeypatch):
         with pytest.raises(error):
             await auth.login(
                 auth.LoginRequest(email=email, password="incorrect-password"),
-                request(peer=f"198.51.100.{i+1}"), AsyncMock(),
+                request(peer=f"198.51.100.{i + 1}"),
+                AsyncMock(),
             )
 
 
-@pytest.mark.parametrize(("trust", "peer", "chain", "expected"), [
-    (False, "10.0.0.1", "203.0.113.1", "10.0.0.1"),
-    (True, "198.51.100.1", "203.0.113.1", "198.51.100.1"),
-    (True, "10.0.0.1", "203.0.113.1", "203.0.113.1"),
-    (True, "10.0.0.1", "192.0.2.9, 203.0.113.1, 10.0.0.2", "203.0.113.1"),
-    (True, "10.0.0.1", "bad-address", "10.0.0.1"),
-    (True, "10.0.0.1", ",203.0.113.1", "10.0.0.1"),
-    (True, "10.0.0.1", ",".join(["203.0.113.1"] * 17), "10.0.0.1"),
-    (True, "10.0.0.1", "2001:db8::1", "2001:db8::1"),
-])
+@pytest.mark.parametrize(
+    ("trust", "peer", "chain", "expected"),
+    [
+        (False, "10.0.0.1", "203.0.113.1", "10.0.0.1"),
+        (True, "198.51.100.1", "203.0.113.1", "198.51.100.1"),
+        (True, "10.0.0.1", "203.0.113.1", "203.0.113.1"),
+        (True, "10.0.0.1", "192.0.2.9, 203.0.113.1, 10.0.0.2", "203.0.113.1"),
+        (True, "10.0.0.1", "bad-address", "10.0.0.1"),
+        (True, "10.0.0.1", ",203.0.113.1", "10.0.0.1"),
+        (True, "10.0.0.1", ",".join(["203.0.113.1"] * 17), "10.0.0.1"),
+        (True, "10.0.0.1", "2001:db8::1", "2001:db8::1"),
+    ],
+)
 def test_proxy_boundary(monkeypatch, trust, peer, chain, expected):
     monkeypatch.setenv("TRUST_PROXY", str(trust).lower())
     monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/24")
@@ -185,17 +202,31 @@ def test_documented_native_launch_disables_server_proxy_rewriting():
     command = (root / "backend/Dockerfile").read_text(encoding="utf-8").split("CMD ")[-1]
     assert "--no-proxy-headers" in json.loads(command)
 
-@pytest.mark.parametrize(("field", "value"), [
-    ("access_token", ""), ("access_token", "  "), ("refresh_token", ""),
-    ("refresh_token", "\t"), ("token_type", "Basic"), ("token_type", "Bearer"),
-    ("token_type", "other"), ("expires_at", "1"), ("expires_at", 1),
-    ("expires_at", "2030-01-01"), ("expires_at", "2030-02-30T00:00:00Z"),
-    ("expires_at", "2030-01-01T00:00:00"), ("expires_at", "2030-01-01T24:00:00Z"),
-])
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("access_token", ""),
+        ("access_token", "  "),
+        ("refresh_token", ""),
+        ("refresh_token", "\t"),
+        ("token_type", "Basic"),
+        ("token_type", "Bearer"),
+        ("token_type", "other"),
+        ("expires_at", "1"),
+        ("expires_at", 1),
+        ("expires_at", "2030-01-01"),
+        ("expires_at", "2030-02-30T00:00:00Z"),
+        ("expires_at", "2030-01-01T00:00:00"),
+        ("expires_at", "2030-01-01T24:00:00Z"),
+    ],
+)
 def test_token_response_semantic_constraints(field, value):
     payload = {
-        "access_token": "fixture-access", "refresh_token": "fixture-refresh",
-        "token_type": "bearer", "expires_at": "2030-01-01T00:00:00Z",
+        "access_token": "fixture-access",
+        "refresh_token": "fixture-refresh",
+        "token_type": "bearer",
+        "expires_at": "2030-01-01T00:00:00Z",
     }
     payload[field] = value
     with pytest.raises(ValidationError):
@@ -204,8 +235,10 @@ def test_token_response_semantic_constraints(field, value):
 
 def test_token_response_contract_requires_every_field_and_accepts_real_format():
     payload = {
-        "access_token": "fixture-access", "refresh_token": "fixture-refresh",
-        "token_type": "bearer", "expires_at": "2030-01-01T00:00:00.123456+00:00",
+        "access_token": "fixture-access",
+        "refresh_token": "fixture-refresh",
+        "token_type": "bearer",
+        "expires_at": "2030-01-01T00:00:00.123456+00:00",
     }
     model = auth.TokenPair.model_validate(payload)
     assert model.token_type == "bearer"

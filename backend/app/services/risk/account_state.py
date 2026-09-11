@@ -59,8 +59,12 @@ class PaperAccountStateService:
         weekly_pnl = Decimal("0.00")
         consecutive_losses = 0
         cooldown_until = None
+        last_loss_at = None
         open_risk_pct = Decimal("0.0000")
         reserved_risk_pct = Decimal("0.0000")
+        floating_pnl = Decimal("0.00")
+        open_positions_count = 0
+        state_version = 1
 
         if latest_row is not None:
             balance = Decimal(str(latest_row.balance))
@@ -69,10 +73,47 @@ class PaperAccountStateService:
             daily_pnl = Decimal(str(latest_row.daily_realized_pnl))
             weekly_pnl = Decimal(str(latest_row.weekly_realized_pnl))
             consecutive_losses = latest_row.consecutive_losses
-            if "cooldown_until" in latest_row.payload and latest_row.payload["cooldown_until"]:
-                cooldown_until = dt.datetime.fromisoformat(latest_row.payload["cooldown_until"])
+            open_risk_pct = Decimal(str(latest_row.open_risk_pct))
+            reserved_risk_pct = Decimal(str(latest_row.reserved_risk_pct))
+            payload = latest_row.payload or {}
+            if payload.get("cooldown_until"):
+                cooldown_until = dt.datetime.fromisoformat(payload["cooldown_until"])
+            if payload.get("last_loss_at"):
+                last_loss_at = dt.datetime.fromisoformat(payload["last_loss_at"])
+            if payload.get("floating_pnl") is not None:
+                floating_pnl = Decimal(str(payload["floating_pnl"]))
+            if payload.get("open_positions_count") is not None:
+                open_positions_count = int(payload["open_positions_count"])
+            if payload.get("state_version") is not None:
+                state_version = int(payload["state_version"])
 
-        snap_id = f"snap_paper_{as_of.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+            # Reuse unexpired snapshot if not forced (SOL-P5-P1-030, 031)
+            latest_as_of = latest_row.as_of if latest_row.as_of.tzinfo else latest_row.as_of.replace(tzinfo=dt.UTC)
+            if not force and (as_of - latest_as_of).total_seconds() <= 60:
+                return AccountSnapshot(
+                    id=latest_row.id,
+                    account_id=latest_row.account_id,
+                    balance=balance,
+                    equity=equity,
+                    free_margin=latest_row.free_margin or equity,
+                    daily_realized_pnl=daily_pnl,
+                    weekly_realized_pnl=weekly_pnl,
+                    floating_pnl=floating_pnl,
+                    peak_equity=peak_equity,
+                    open_risk_pct=open_risk_pct,
+                    reserved_risk_pct=reserved_risk_pct,
+                    consecutive_losses=consecutive_losses,
+                    last_loss_at=last_loss_at,
+                    cooldown_until=cooldown_until,
+                    open_positions_count=open_positions_count,
+                    state_version=state_version,
+                    trading_mode=latest_row.trading_mode,  # type: ignore
+                    source=latest_row.source,  # type: ignore
+                    as_of=latest_as_of,
+                )
+
+        account_slug = str(acc_row.id.hex)[:8] if hasattr(acc_row.id, "hex") else str(account_id)[:8]
+        snap_id = f"snap_paper_{account_slug}_{int(as_of.timestamp())}_{state_version}"
         snapshot = AccountSnapshot(
             id=snap_id,
             account_id=account_id,
@@ -81,13 +122,15 @@ class PaperAccountStateService:
             free_margin=equity,
             daily_realized_pnl=daily_pnl,
             weekly_realized_pnl=weekly_pnl,
-            floating_pnl=Decimal("0.00"),
+            floating_pnl=floating_pnl,
             peak_equity=max(peak_equity, equity),
             open_risk_pct=open_risk_pct,
             reserved_risk_pct=reserved_risk_pct,
             consecutive_losses=consecutive_losses,
+            last_loss_at=last_loss_at,
             cooldown_until=cooldown_until,
-            open_positions_count=0,
+            open_positions_count=open_positions_count,
+            state_version=state_version,
             trading_mode="PAPER",
             source="PAPER_ACCOUNT_STATE",
             as_of=as_of,

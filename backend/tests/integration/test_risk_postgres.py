@@ -2,8 +2,11 @@
 
 import asyncio
 import datetime as dt
+import json
+import uuid
 from decimal import Decimal
 
+import httpx
 import pytest
 from psycopg import sql
 from sqlalchemy import text
@@ -326,9 +329,9 @@ def test_duplicate_concurrency_idempotency_gate(isolated_postgres):  # noqa: F81
     approved_pcts = {d.approved_risk_pct for d in decisions}
     assert approved_pcts == {Decimal("1.0000")}
 
-    db_dec_count = conn.execute(
-        "SELECT count(*) FROM risk_decisions WHERE candidate_id = 'cand_dup_conc'"
-    ).fetchone()[0]
+    db_dec_count = conn.execute("SELECT count(*) FROM risk_decisions WHERE candidate_id = 'cand_dup_conc'").fetchone()[
+        0
+    ]
     assert db_dec_count == 1, f"Expected 1 decision in DB, got {db_dec_count}"
 
     db_res_count = conn.execute("SELECT count(*) FROM risk_reservations WHERE status = 'ACTIVE'").fetchone()[0]
@@ -397,15 +400,340 @@ def test_migration_0007_to_0009_matrix(isolated_postgres):  # noqa: F811
     assert latest_ks[1] == "ACTIVE", f"Expected ACTIVE kill switch after migration, got {latest_ks[1]}"
 
     # Step 6: Verify legacy decisions are preserved and have unique fingerprints
-    legacy_count = conn.execute(
-        "SELECT count(*) FROM risk_decisions WHERE id LIKE 'dec_dup_legacy_%'"
-    ).fetchone()[0]
+    legacy_count = conn.execute("SELECT count(*) FROM risk_decisions WHERE id LIKE 'dec_dup_legacy_%'").fetchone()[0]
     assert legacy_count == 2, f"Expected 2 preserved decisions, got {legacy_count}"
-    fps = conn.execute(
-        "SELECT dependency_fingerprint FROM risk_decisions WHERE id LIKE 'dec_dup_legacy_%'"
-    ).fetchall()
+    fps = conn.execute("SELECT dependency_fingerprint FROM risk_decisions WHERE id LIKE 'dec_dup_legacy_%'").fetchall()
     assert all(r[0].startswith("legacy_") for r in fps)
     assert len({r[0] for r in fps}) == 2
 
     # Step 7: Downgrade attempt must be refused because audit records exist
     _alembic("downgrade", "0007_risk_engine", success=False)
+
+
+def test_migration_0010_downgrade_barrier_and_seed_quarantine(isolated_postgres):  # noqa: F811
+    """P1-032 & Scenario A-K:
+    1. Upgrade to head (0010).
+    2. Insert an audit record into symbol_specifications.
+    3. Downgrade to 0009 MUST fail with RuntimeError because Phase 5 audit records exist.
+    4. Clear symbol_specifications, then downgrade to 0009 succeeds.
+    5. In 0009, insert invalid historical MT5 seed 'sym_xauusd_mt5_demo_iux_seed'.
+    6. Upgrade to 0010 (head).
+    7. Verify fake MT5 seed was deleted/quarantined.
+    8. Verify data_health_records table exists and has 'dh_default' row.
+    """
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+    _alembic("upgrade", "head")
+
+    # Insert record into symbol_specifications
+    conn.execute(
+        """
+        INSERT INTO symbol_specifications (
+            id, symbol, source, tick_size, tick_value, contract_size,
+            volume_min, volume_max, volume_step, digits, observed_at, payload
+        ) VALUES (
+            'sym_spec_audit_barrier', 'XAUUSD', 'mt5', 0.01, 1.00, 100.00,
+            0.01, 10.00, 0.01, 2, NOW(), '{}'
+        )
+        """
+    )
+    # Downgrade to 0009 must be refused!
+    _alembic("downgrade", "0009_phase5_final_hardening", success=False)
+
+    # Clean up audit record and any seeded Phase 5 authority rows to allow downgrade
+    for tbl in ("risk_decisions", "risk_reservations", "account_snapshots", "symbol_specifications", "risk_policies"):
+        conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(tbl)))
+    conn.execute("DELETE FROM kill_switch_records WHERE id != 'ks_bootstrap'")
+    # Now downgrade to 0009 succeeds
+    _alembic("downgrade", "0009_phase5_final_hardening", success=True)
+
+    # Insert fake MT5 seed in 0009
+    conn.execute(
+        """
+        INSERT INTO symbol_specifications (
+            id, symbol, source, tick_size, tick_value, contract_size,
+            volume_min, volume_max, volume_step, digits, observed_at, payload
+        ) VALUES (
+            'sym_xauusd_mt5_demo_iux_seed', 'XAUUSD', 'mt5', 0.01, 1.00, 100.00,
+            0.01, 10.00, 0.01, 2, NOW(), '{}'
+        )
+        """
+    )
+
+    # Upgrade to 0010 (head)
+    _alembic("upgrade", "head")
+    _alembic("check")
+
+    # Verify fake MT5 seed was quarantined/removed
+    fake_count = conn.execute(
+        "SELECT count(*) FROM symbol_specifications WHERE id = 'sym_xauusd_mt5_demo_iux_seed'"
+    ).fetchone()[0]
+    assert fake_count == 0, "Fake MT5 seed must be quarantined/deleted"
+
+    # Verify data_health_records table exists and has 'dh_default' row
+    dh_row = conn.execute("SELECT id, consecutive_failures FROM data_health_records WHERE id = 'dh_default'").fetchone()
+    assert dh_row is not None
+    assert dh_row[0] == "dh_default"
+
+
+def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  # noqa: F811
+    """P1-031 & P2-035:
+    Real FastAPI HTTP API concurrency gate:
+    1. 10 concurrent POST /api/risk/evaluate calls for the same candidate/account.
+       Assert: exactly 1 decision created in DB, 1 reservation created in DB,
+       all 10 responses return 200 with identical decision ID and identical fingerprint.
+    2. 100 sequential POST /api/risk/evaluate calls:
+       Assert: all return identical decision ID, 0 new reservations created.
+    3. 10 unauthorized POST /api/risk/evaluate calls from non-owner user:
+       Assert: all return 403 Forbidden with 0 state mutations in DB.
+    """
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+    _alembic("upgrade", "head")
+
+    user_id = str(uuid.uuid4())
+    other_user_id = str(uuid.uuid4())
+    acc_id = str(uuid.uuid4())
+
+    # Pre-seed user, account, candidate
+    now = dt.datetime.now(dt.UTC)
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES (%(uid)s, 'owner@example.com', 'dummy_hash', 'TRADER', true, NOW(), NOW()),
+               (%(other_uid)s, 'other@example.com', 'dummy_hash', 'TRADER', true, NOW(), NOW())
+        """,
+        {"uid": user_id, "other_uid": other_user_id},
+    )
+    conn.execute(
+        """
+        INSERT INTO accounts (
+            id, user_id, name, trading_mode, starting_balance, base_currency, is_active, created_at, updated_at
+        )
+        VALUES (%(acc_id)s, %(uid)s, 'Test Paper Acc', 'PAPER', 10000.00, 'USD', true, NOW(), NOW())
+        """,
+        {"acc_id": acc_id, "uid": user_id},
+    )
+    snap_payload = {
+        "id": "snap_http_init",
+        "account_id": acc_id,
+        "balance": "10000.00",
+        "equity": "10000.00",
+        "free_margin": "10000.00",
+        "daily_realized_pnl": "0.00",
+        "weekly_realized_pnl": "0.00",
+        "peak_equity": "10000.00",
+        "open_risk_pct": "0.0000",
+        "reserved_risk_pct": "0.0000",
+        "consecutive_losses": 0,
+        "trading_mode": "PAPER",
+        "source": "PAPER_ACCOUNT_STATE",
+        "as_of": now.isoformat(),
+        "state_version": 1,
+    }
+    conn.execute(
+        """
+        INSERT INTO account_snapshots (
+            id, account_id, balance, equity, free_margin, daily_realized_pnl, weekly_realized_pnl,
+            peak_equity, open_risk_pct, reserved_risk_pct, consecutive_losses, trading_mode,
+            source, as_of, payload
+        ) VALUES (
+            'snap_http_init', %(acc_id)s, 10000.00, 10000.00, 10000.00, 0.00, 0.00,
+            10000.00, 0.0000, 0.0000, 0, 'PAPER', 'PAPER_ACCOUNT_STATE', NOW(), %(payload)s
+        )
+        """,
+        {"acc_id": acc_id, "payload": json.dumps(snap_payload)},
+    )
+
+    spec = default_gold_spec(source="simulated", observed_at=now)
+    conn.execute(
+        """
+        INSERT INTO symbol_specifications (
+            id, symbol, source, tick_size, tick_value, contract_size,
+            volume_min, volume_max, volume_step, digits, observed_at, payload
+        ) VALUES (
+            %(id)s, %(symbol)s, %(source)s, %(tick_size)s, %(tick_value)s, %(contract_size)s,
+            %(volume_min)s, %(volume_max)s, %(volume_step)s, %(digits)s, NOW(), %(payload)s
+        )
+        """,
+        {
+            "id": spec.id,
+            "symbol": spec.symbol,
+            "source": spec.source,
+            "tick_size": spec.tick_size,
+            "tick_value": spec.tick_value,
+            "contract_size": spec.contract_size,
+            "volume_min": spec.volume_min,
+            "volume_max": spec.volume_max,
+            "volume_step": spec.volume_step,
+            "digits": spec.digits,
+            "payload": json.dumps(spec.model_dump(mode="json")),
+        },
+    )
+
+    plan = TradePlanSuggestion(
+        id="plan_http_conc",
+        candidate_id="cand_http_conc",
+        symbol="XAUUSD",
+        direction="LONG",
+        entry_type="LIMIT_ZONE",
+        entry_lower=Decimal("2500.00"),
+        entry_upper=Decimal("2502.00"),
+        entry_source_id="h1_fvg",
+        stop_loss=Decimal("2495.00"),
+        stop_source_id="h1_swing_low",
+        invalidation_th="หลุดแนวรับ 2495.00",
+        targets=(
+            Target(name="TP1", price=Decimal("2510.00"), source_id="h4_high", rr=Decimal("1.5")),
+            Target(name="TP2", price=Decimal("2520.00"), source_id="d1_high", rr=Decimal("3.0")),
+        ),
+        score=85,
+        evidence=(Evidence(code="EV1", description_th="SMC Confirmation"),),
+        warnings_th=(),
+        news_state="CALM",
+        status="SUGGESTION_ONLY",
+        as_of=now,
+        context_id="ctx_001",
+        expires_at=now + dt.timedelta(hours=2),
+    )
+    candidate = SetupCandidate(
+        id="cand_http_conc",
+        profile_id="day_trader",
+        strategy_id="STRAT01",
+        strategy_version="1.0.0",
+        symbol="XAUUSD",
+        direction="LONG",
+        status="READY",
+        score=85,
+        detected_at=now - dt.timedelta(minutes=10),
+        confirmed_at=now,
+        expires_at=now + dt.timedelta(hours=2),
+        context_id="ctx_001",
+        upstream_ids=("ctx_001",),
+        evidence=(Evidence(code="EV1", description_th="SMC Confirmation"),),
+        missing_conditions=(),
+        conflicts=(),
+        invalidation_th="หลุดแนวรับ 2495.00",
+        plan=plan,
+    )
+    conn.execute(
+        """
+        INSERT INTO strategy_evaluations (id, context_id, symbol, source, as_of, generated_at, payload_hash, payload)
+        VALUES ('eval_http_conc', 'ctx_001', 'XAUUSD', 'mt5', NOW(), NOW(), 'hash_eval', '{}')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO trade_candidates (
+            id, evaluation_id, profile_id, strategy_id, as_of, payload
+        ) VALUES (
+            'cand_http_conc', 'eval_http_conc', 'day_trader', 'STRAT01', NOW(), %(payload)s
+        )
+        """,
+        {"payload": json.dumps(candidate.model_dump(mode="json"))},
+    )
+
+    async def run_http_concurrency():
+        from app.api.deps import get_current_user
+        from app.main import create_app
+        from app.models import Role, User
+
+        app = create_app()
+        owner = User(id=uuid.UUID(user_id), email="owner@example.com", role=Role.TRADER, is_active=True)
+        unauthorized_user = User(
+            id=uuid.UUID(other_user_id), email="other@example.com", role=Role.TRADER, is_active=True
+        )
+
+        from unittest.mock import AsyncMock, MagicMock
+
+        static_quote = Quote(
+            source="simulated",
+            mode="SIMULATED",
+            symbol="XAUUSD",
+            bid=Decimal("2500.00"),
+            ask=Decimal("2500.30"),
+            spread=Decimal("0.30"),
+            volume=Decimal("100"),
+            status="CONNECTED",
+            timestamp=now,
+        )
+
+        class DummyProvider:
+            source = "simulated"
+            broker_server = None
+            server = None
+
+        mock_market = MagicMock()
+        mock_market.quote = static_quote
+        mock_market.start = AsyncMock()
+        mock_market.provider = DummyProvider()
+        app.state.market = mock_market
+
+        mock_news = MagicMock()
+        mock_news.start = AsyncMock()
+        mock_news.provider.source = "fixture_economic_v1"
+        mock_news.context = AsyncMock(
+            return_value=build_news_context(
+                events=[],
+                as_of=now,
+                source="fixture_economic_v1",
+                mode="FIXTURE",
+                config=NewsConfig(),
+                candles=[],
+                quotes=[],
+                structure=None,
+                market_source="simulated",
+            )
+        )
+        app.state.news = mock_news
+
+        # 1. 10 Concurrent calls by owner
+        app.dependency_overrides[get_current_user] = lambda: owner
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            req_body = {
+                "candidate_id": "cand_http_conc",
+                "profile_id": "day_trader",
+                "account_id": acc_id,
+                "requested_risk_pct": 1.0,
+            }
+            tasks = [client.post("/api/risk/evaluate", json=req_body) for _ in range(10)]
+            responses = await asyncio.gather(*tasks)
+
+            assert all(r.status_code == 200 for r in responses), (
+                f"Expected all 200, got {[r.status_code for r in responses]}"
+            )
+            dec_ids = {r.json()["id"] for r in responses}
+            assert len(dec_ids) == 1, f"Expected 1 decision ID, got {dec_ids}"
+            fps = {r.json()["dependency_fingerprint"] for r in responses}
+            assert len(fps) == 1, f"Expected 1 fingerprint, got {fps}"
+
+            # 2. 100 Sequential calls
+            for _ in range(100):
+                res = await client.post("/api/risk/evaluate", json=req_body)
+                assert res.status_code == 200
+                assert res.json()["id"] == list(dec_ids)[0]
+
+            # 3. Unauthorized access check
+            app.dependency_overrides[get_current_user] = lambda: unauthorized_user
+            for _ in range(10):
+                unauth_res = await client.post("/api/risk/evaluate", json=req_body)
+                assert unauth_res.status_code == 403
+
+        app.dependency_overrides.clear()
+
+    try:
+        asyncio.run(run_http_concurrency(), loop_factory=new_event_loop)
+    finally:
+        asyncio.run(dispose_engine())
+
+    # Assert exactly 1 decision and 1 active reservation
+    dec_count = conn.execute(
+        "SELECT count(*) FROM risk_decisions WHERE candidate_id = 'cand_http_conc'"
+    ).fetchone()[0]
+    assert dec_count == 1, f"Expected exactly 1 decision in DB, got {dec_count}"
+
+    res_count = conn.execute(
+        "SELECT count(*) FROM risk_reservations WHERE account_id = %s AND status = 'ACTIVE'",
+        (acc_id,),
+    ).fetchone()[0]
+    assert res_count == 1, f"Expected exactly 1 active reservation in DB, got {res_count}"

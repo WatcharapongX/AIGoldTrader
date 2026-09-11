@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI):
         try:
             from app.db.session import get_session_factory
             from app.services.risk.account_state import PaperAccountStateService
+
             async with get_session_factory()() as startup_session:
                 await PaperAccountStateService.refresh_paper_account_snapshot(startup_session, "default_paper_account")
                 await startup_session.commit()
@@ -85,10 +86,11 @@ def create_app() -> FastAPI:
                 "error": {
                     "code": "VALIDATION_ERROR",
                     "message": "Request validation failed",
-                    "details": {"errors": [
-                        {"type": error["type"], "loc": error["loc"], "msg": error["msg"]}
-                        for error in exc.errors()
-                    ]},
+                    "details": {
+                        "errors": [
+                            {"type": error["type"], "loc": error["loc"], "msg": error["msg"]} for error in exc.errors()
+                        ]
+                    },
                     "correlation_id": get_correlation_id(),
                 }
             },
@@ -96,11 +98,16 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
-        logger.error("http_request failed (%s)", type(exc).__name__, extra={
-            "operation": "http_request", "method": request.method,
-            "route": getattr(request.scope.get("route"), "path", "unmatched"),
-            **safe_exception(exc),
-        })
+        logger.error(
+            "http_request failed (%s)",
+            type(exc).__name__,
+            extra={
+                "operation": "http_request",
+                "method": request.method,
+                "route": getattr(request.scope.get("route"), "path", "unmatched"),
+                **safe_exception(exc),
+            },
+        )
         return JSONResponse(
             status_code=500,
             content={

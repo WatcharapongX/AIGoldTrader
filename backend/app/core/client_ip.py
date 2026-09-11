@@ -17,8 +17,7 @@ def resolve_client_ip(request: Request) -> str:
     if not settings.trust_proxy:
         return str(peer)
     networks = [
-        ip_network(value.strip(), strict=False)
-        for value in settings.trusted_proxy_cidrs.split(",") if value.strip()
+        ip_network(value.strip(), strict=False) for value in settings.trusted_proxy_cidrs.split(",") if value.strip()
     ]
     if not any(peer in network for network in networks):
         return str(peer)

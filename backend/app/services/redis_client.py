@@ -174,4 +174,3 @@ class PubSubManager:
             raise
         except Exception:  # noqa: BLE001
             logger.exception("PubSubManager listener crashed")
-

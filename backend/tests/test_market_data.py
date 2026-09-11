@@ -18,8 +18,9 @@ NOW = dt.datetime(2026, 9, 9, 12, 0, 0, tzinfo=dt.UTC)
 
 
 def tick(second=0, bid="2350", ask="2350.30"):
-    return Tick(symbol="XAUUSD", timestamp=NOW + dt.timedelta(seconds=second), bid=bid,
-                ask=ask, volume="1", source="simulated")
+    return Tick(
+        symbol="XAUUSD", timestamp=NOW + dt.timedelta(seconds=second), bid=bid, ask=ask, volume="1", source="simulated"
+    )
 
 
 @pytest.mark.parametrize("bid,ask", [("NaN", "1"), ("1", "Infinity"), ("0", "1"), ("2", "1"), ("-1", "1")])
@@ -55,7 +56,11 @@ def test_aggregation_ohlc_volume_rollover_duplicates():
     engine.ingest(tick(2, "2349", "2349.30"))
     current = engine.current[Timeframe.M5]
     assert (current.open, current.high, current.low, current.close, current.volume) == (
-        Decimal("2350"), Decimal("2352"), Decimal("2349"), Decimal("2349"), Decimal(3)
+        Decimal("2350"),
+        Decimal("2352"),
+        Decimal("2349"),
+        Decimal("2349"),
+        Decimal(3),
     )
     rollover = engine.ingest(tick(60))
     assert any(c.timeframe == Timeframe.M1 and c.is_closed for c in rollover)
@@ -74,8 +79,9 @@ def test_seed_then_live_matches_canonical_m1_fold(timeframe):
     count = int((now - start).total_seconds() // 60) + 1
     engine.seed(ReplayProvider().get_historical_candles("XAUUSD", Timeframe.M1, now, count))
     value = price(int(now.timestamp()))
-    engine.ingest(Tick(symbol="XAUUSD", timestamp=now, bid=value, ask=value + Decimal(".30"),
-                       volume="1", source="simulated"))
+    engine.ingest(
+        Tick(symbol="XAUUSD", timestamp=now, bid=value, ask=value + Decimal(".30"), volume="1", source="simulated")
+    )
     expected = synthetic_candle("XAUUSD", timeframe, bucket(now, timeframe), now + dt.timedelta(seconds=1))
     assert engine.current[timeframe] == expected
 
@@ -169,8 +175,8 @@ def test_market_endpoints_auth_and_symbol_crud(client, auth_headers):
 
 def test_websocket_origin_query_and_auth_rejected(client):
     from starlette.websockets import WebSocketDisconnect
-    for url, origin in (("/ws/market", "https://evil.invalid"),
-                        ("/ws/market?token=fixture", "http://localhost:3000")):
+
+    for url, origin in (("/ws/market", "https://evil.invalid"), ("/ws/market?token=fixture", "http://localhost:3000")):
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(url, headers={"origin": origin}):
                 pass
@@ -179,7 +185,14 @@ def test_websocket_origin_query_and_auth_rejected(client):
         with pytest.raises(WebSocketDisconnect):
             ws.receive_json()
 
+
 def test_database_timezone_is_normalized_to_utc_contract():
-    value = Tick(symbol="XAUUSD", timestamp="2026-09-09T19:00:00+07:00",
-                 bid="2350", ask="2350.30", volume="1", source="simulated")
+    value = Tick(
+        symbol="XAUUSD",
+        timestamp="2026-09-09T19:00:00+07:00",
+        bid="2350",
+        ask="2350.30",
+        volume="1",
+        source="simulated",
+    )
     assert value.model_dump(mode="json")["timestamp"] == "2026-09-09T12:00:00Z"

@@ -1,4 +1,5 @@
 """One lazy, bounded DEV feed per application. Publication follows successful DB commit."""
+
 import asyncio
 import datetime as dt
 import logging
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class LocalMarketBus:
     """Replaceable single-instance pub/sub; slow consumers must reconnect for a fresh snapshot."""
+
     def __init__(self):
         self.queues: set[asyncio.Queue] = set()
 
@@ -65,13 +67,18 @@ class MarketService:
     def status(self, now=None) -> MarketDataStatus:
         now = now or dt.datetime.now(dt.UTC)
         state = self.state
-        if state == "CONNECTED" and self.quote and (
-            now - self.quote.timestamp
-        ).total_seconds() > self.settings.market_stale_seconds:
+        if (
+            state == "CONNECTED"
+            and self.quote
+            and (now - self.quote.timestamp).total_seconds() > self.settings.market_stale_seconds
+        ):
             state = "STALE"
         return MarketDataStatus(
-            source=self.provider.source, mode=self.provider.mode, status=state,
-            digits=self.provider.digits, tick_size=self.provider.tick_size,
+            source=self.provider.source,
+            mode=self.provider.mode,
+            status=state,
+            digits=self.provider.digits,
+            tick_size=self.provider.tick_size,
             provider_symbol=self.provider.provider_symbol,
             last_candle=self.last_candle,
             history_counts=self.history_counts,
@@ -104,9 +111,15 @@ class MarketService:
             return
         self.event_times[code] = now
         async with self.factory() as session:
-            session.add(SystemEvent(category=EventCategory.DATA, severity=EventSeverity.WARNING,
-                                    code=code, message=code.replace("_", " "),
-                                    payload={"source": self.provider.source}))
+            session.add(
+                SystemEvent(
+                    category=EventCategory.DATA,
+                    severity=EventSeverity.WARNING,
+                    code=code,
+                    message=code.replace("_", " "),
+                    payload={"source": self.provider.source},
+                )
+            )
             await session.commit()
         logger.warning("market_data_event", extra={"event_code": code})
 
@@ -125,8 +138,7 @@ class MarketService:
             if not symbol.is_active:
                 raise ValueError("Symbol is inactive")
             for timeframe in Timeframe:
-                history = await asyncio.to_thread(
-                    self.provider.get_historical_candles, "XAUUSD", timeframe, now)
+                history = await asyncio.to_thread(self.provider.get_historical_candles, "XAUUSD", timeframe, now)
                 self.history_counts[timeframe] = len(history)
                 if not history or (not self.provider.authoritative_candles and len(history) < 300):
                     raise ValueError("Insufficient provider history; at least 300 bars per timeframe required")
@@ -168,12 +180,16 @@ class MarketService:
                 self.state = "STALE"
             await self.event(code)
             return False
-        if (self.provider.authoritative_candles and self.quote
-                and (tick.timestamp - self.quote.timestamp).total_seconds()
-                > max(self.settings.market_stale_seconds, self.settings.mt5_poll_seconds * 2)):
+        if (
+            self.provider.authoritative_candles
+            and self.quote
+            and (tick.timestamp - self.quote.timestamp).total_seconds()
+            > max(self.settings.market_stale_seconds, self.settings.mt5_poll_seconds * 2)
+        ):
             raise ValueError("Provider gap requires historical resnapshot")
-        candles = (await self.provider.candle_updates(now) if self.provider.authoritative_candles
-                   else self.engine.ingest(tick))
+        candles = (
+            await self.provider.candle_updates(now) if self.provider.authoritative_candles else self.engine.ingest(tick)
+        )
         if any(c.source != self.provider.source or c.symbol != tick.symbol for c in candles):
             raise ValueError("Provider candle source mismatch")
         async with self.factory() as session:
@@ -186,8 +202,7 @@ class MarketService:
             if self.sequence % 60 == 0 and not self.provider.authoritative_candles:
                 await prune(session, self.symbol_id, now)
             await session.commit()
-        self.quote = Quote(**tick.model_dump(), spread=tick.ask - tick.bid, status="CONNECTED",
-                           mode=self.provider.mode)
+        self.quote = Quote(**tick.model_dump(), spread=tick.ask - tick.bid, status="CONNECTED", mode=self.provider.mode)
         self.state, self.detail = "CONNECTED", self.provider.description
         if self.history_counts and min(self.history_counts.values()) < 300:
             self.detail += "; PARTIAL HISTORY: fewer than 300 bars available for some timeframes"
