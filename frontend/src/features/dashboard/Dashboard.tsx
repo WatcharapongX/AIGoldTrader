@@ -182,6 +182,15 @@ export function DashboardView({
     : market ? 'Market Data: ' + market.status + ' · ' + (staleQuote ? 'STALE / ไม่พร้อม' : 'ข้อมูลล่าสุด') : 'Market Data: UNKNOWN';
   const visibleCandles = market ? marketCandles.filter(c => c.source === market.source && c.symbol === 'XAUUSD' && c.timeframe === 'M5') : [];
   const latestCandle = visibleCandles.at(-1);
+  const calcMA = (period: number): number | null => {
+    if (visibleCandles.length < period) return null;
+    const slice = visibleCandles.slice(-period);
+    const sum = slice.reduce((acc, c) => acc + Number(c.close), 0);
+    return sum / period;
+  };
+  const ma20 = calcMA(20);
+  const ma50 = calcMA(50);
+  const ma200 = calcMA(200);
   const safetyHealth = !old && data ? {trading_mode:data.trading_mode, live_auto_trading:data.live_auto_trading} as HealthResponse : null;
   const plan = clock > 0 && !old && !data?.strategy_stale && data?.current_plan && Date.parse(data.current_plan.expires_at) > clock ? data.current_plan : null;
   const direction = plan?.direction || 'NEUTRAL';
@@ -342,9 +351,9 @@ export function DashboardView({
             เปิดหน้า Market Overview แบบละเอียด →
           </Link>
           <div data-testid="moving-averages" className="flex flex-wrap gap-4 mt-3 text-xs">
-            <span className="text-blue-400">MA 20: —</span>
-            <span className="text-amber-400">MA 50: —</span>
-            <span className="text-purple-400">MA 200: —</span>
+            <span className="text-blue-400">MA 20: {ma20 !== null ? fmtPrice(ma20) : '—'}</span>
+            <span className="text-amber-400">MA 50: {ma50 !== null ? fmtPrice(ma50) : '—'}</span>
+            <span className="text-purple-400">MA 200: {ma200 !== null ? fmtPrice(ma200) : '—'}</span>
           </div>
         </div>
 

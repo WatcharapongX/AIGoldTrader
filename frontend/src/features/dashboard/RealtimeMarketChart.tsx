@@ -18,7 +18,7 @@ export function RealtimeMarketChart({ candles }: { candles: Candle[] }) {
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const fittedLength = useRef(0);
+  const initialized = useRef(false);
 
   useEffect(() => {
     if (!container.current) return;
@@ -41,7 +41,9 @@ export function RealtimeMarketChart({ candles }: { candles: Candle[] }) {
         timeVisible: true,
         secondsVisible: false,
         borderColor: '#253044',
-        rightOffset: 8,
+        rightOffset: 6,
+        barSpacing: 7.0,
+        minBarSpacing: 4.5,
       },
       crosshair: {
         vertLine: { color: '#73839a' },
@@ -53,7 +55,9 @@ export function RealtimeMarketChart({ candles }: { candles: Candle[] }) {
       downColor: '#ed7a88',
       wickUpColor: '#36c4a4',
       wickDownColor: '#ed7a88',
-      borderVisible: false,
+      borderVisible: true,
+      borderUpColor: '#36c4a4',
+      borderDownColor: '#ed7a88',
       priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
     });
     chart.current = value;
@@ -68,9 +72,17 @@ export function RealtimeMarketChart({ candles }: { candles: Candle[] }) {
   useEffect(() => {
     if (!series.current) return;
     series.current.setData(candles.map(point));
-    if (candles.length && fittedLength.current !== candles.length) {
-      chart.current?.timeScale().fitContent();
-      fittedLength.current = candles.length;
+    if (!candles.length) {
+      initialized.current = false;
+      return;
+    }
+    if (!initialized.current && chart.current) {
+      // Zoom in to recent ~100–130 candles (target ~115) fitting the screen size
+      chart.current.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, candles.length - 115),
+        to: candles.length + 4,
+      });
+      initialized.current = true;
     }
   }, [candles]);
 
