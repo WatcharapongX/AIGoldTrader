@@ -47,3 +47,16 @@ test('dashboard transport uses shared cleanup and never calls outside economic p
  assert.match(code,/abort.abort\(\)/);assert.match(code,/clearInterval\(timer\)/);
  assert.doesNotMatch(code,/api\.tradingeconomics|fetch\(['"]https:\/\/xoomar/);
 });
+test('dashboard renders verified realtime candles without fabricated market or performance metrics',()=>{
+ const dashboard=fs.readFileSync(path.resolve(__dirname,'../src/features/dashboard/Dashboard.tsx'),'utf8');
+ const login=fs.readFileSync(path.resolve(__dirname,'../src/app/login/page.tsx'),'utf8');
+ const shell=fs.readFileSync(path.resolve(__dirname,'../src/components/layout/AppShell.tsx'),'utf8');
+ assert.match(dashboard,/RealtimeMarketChart candles=\{visibleCandles\}/);
+ assert.match(dashboard,/msg\.candles/);
+ assert.match(dashboard,/news_provider\.source/);
+ assert.match(dashboard,/Setup Score/);
+ assert.match(shell,/TradingStatus health=\{runtime.health\}/);
+ assert.doesNotMatch(dashboard,/3,642\.18|57,321|12,450\.32|68% Bullish|AI Trading Signal/);
+ assert.doesNotMatch(dashboard,/const pcts = \[/);
+ assert.doesNotMatch(login,/3,642\.18|\+12\.35|AI-Powered Analysis/);
+});

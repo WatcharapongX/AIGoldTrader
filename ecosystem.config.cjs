@@ -1,0 +1,42 @@
+﻿// PM2 Ecosystem Config — AI Gold Trader
+// รันคำสั่ง: pm2 start ecosystem.config.cjs
+module.exports = {
+  apps: [
+    {
+      name: "aigold-frontend",
+      cwd: "C:\\AI Gold Trader\\frontend",
+      script: "C:\\AI Gold Trader\\frontend\\node_modules\\next\\dist\\bin\\next",
+      args: "start -p 3001",
+      interpreter: "C:\\Program Files\\nodejs\\node.exe",
+      watch: false,
+      windowsHide: true,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: "5s",
+      restart_delay: 3000,
+      env: { NODE_ENV: "production", PORT: 3001 },
+      error_file: "C:\\AI Gold Trader\\logs\\frontend-error.log",
+      out_file:   "C:\\AI Gold Trader\\logs\\frontend-out.log",
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+      merge_logs: true,
+    },
+    {
+      name: "aigold-backend",
+      cwd: "C:\\AI Gold Trader\\backend",
+      script: "C:\\AI Gold Trader\\backend\\.venv\\Scripts\\pythonw.exe",
+      args: "-m uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers --loop app.core.event_loop:new_event_loop",
+      interpreter: "none",
+      watch: false,
+      windowsHide: true,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: "5s",
+      restart_delay: 3000,
+      env: { PYTHONUNBUFFERED: "1" },
+      error_file: "C:\\AI Gold Trader\\logs\\backend-error.log",
+      out_file:   "C:\\AI Gold Trader\\logs\\backend-out.log",
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+      merge_logs: true,
+    },
+  ],
+};

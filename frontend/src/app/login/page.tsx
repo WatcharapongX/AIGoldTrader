@@ -2,10 +2,12 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { TradingStatus, useRuntimeStatus } from "@/components/layout/RuntimeStatus";
 import { useAuthStore } from "@/stores/auth";
 
 export default function LoginPage() {
   const router = useRouter();
+  const runtime = useRuntimeStatus(false);
   const { login, isLoading, error, clearError } = useAuthStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,7 +42,7 @@ export default function LoginPage() {
               <path d="M12 9l-3 6h6l-3-6z" fill="currentColor" opacity="0.5" />
             </svg>
             <span className="text-gray-300 font-medium tracking-wide text-sm hidden sm:block">
-              AI Powered &middot; Data Driven &middot; Trade Smarter
+              Market Structure &middot; Strategy Analysis
             </span>
           </div>
           <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/5 cursor-pointer hover:bg-white/15 transition-colors">
@@ -55,12 +57,11 @@ export default function LoginPage() {
           <div className="inline-flex items-center gap-4 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl px-6 py-3 mb-8">
             <div className="flex flex-col">
               <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">XAUUSD</span>
-              <span className="text-white text-2xl font-bold font-mono">3,642.18</span>
+              <span className="text-white text-lg font-bold">Gold Trading Platform</span>
             </div>
             <div className="w-px h-8 bg-white/10"></div>
-            <div className="flex flex-col text-green-400">
-              <span className="text-sm font-bold">+12.35</span>
-              <span className="text-xs font-medium">(+0.34%)</span>
+            <div className="flex flex-col text-gray-400">
+              <span className="text-xs font-medium">เข้าสู่ระบบเพื่อดูข้อมูลและสถานะผู้ให้บริการ</span>
             </div>
           </div>
 
@@ -72,7 +73,7 @@ export default function LoginPage() {
           </h1>
           
           <p className="text-lg text-gray-300 mb-12 max-w-xl leading-relaxed">
-            Combine AI, real-time data, and proven strategies for a better trading tomorrow.
+            Combine verified market data, deterministic analysis, and disciplined trading workflows.
           </p>
 
           {/* Features Grid */}
@@ -84,8 +85,8 @@ export default function LoginPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
-              <h3 className="text-white font-semibold mb-1">AI-Powered Analysis</h3>
-              <p className="text-gray-400 text-sm">Find high-probability setups</p>
+              <h3 className="text-white font-semibold mb-1">Deterministic Analysis</h3>
+              <p className="text-gray-400 text-sm">ตรวจสอบ setup พร้อมแหล่งที่มาของข้อมูล</p>
             </div>
             
             {/* Feature 2 */}
@@ -95,8 +96,8 @@ export default function LoginPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
                 </svg>
               </div>
-              <h3 className="text-white font-semibold mb-1">Real-Time Market Data</h3>
-              <p className="text-gray-400 text-sm">Gold, Forex, News & more</p>
+              <h3 className="text-white font-semibold mb-1">XAUUSD Market Data</h3>
+              <p className="text-gray-400 text-sm">ข้อมูลจากผู้ให้บริการ พร้อมสถานะความสด</p>
             </div>
 
             {/* Feature 3 */}
@@ -117,8 +118,8 @@ export default function LoginPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8V7a4 4 0 00-8 0v4h8z" />
                 </svg>
               </div>
-              <h3 className="text-white font-semibold mb-1">Disciplined Risk Management</h3>
-              <p className="text-gray-400 text-sm">Trade smarter, trade longer</p>
+              <h3 className="text-white font-semibold mb-1">Analysis Only</h3>
+              <p className="text-gray-400 text-sm">ไม่มีการส่งคำสั่งซื้อขาย</p>
             </div>
           </div>
         </div>
@@ -230,6 +231,7 @@ export default function LoginPage() {
                 />
                 <button
                   type="button"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-500 hover:text-white transition-colors focus:outline-none"
                 >
@@ -291,9 +293,8 @@ export default function LoginPage() {
 
           {/* Safety Notice */}
           <div className="mt-8 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-center">
-            <p className="text-xs text-amber-400/90">
-              <span className="font-semibold">⚠️ PAPER TRADING MODE</span> — Live auto trading disabled.
-            </p>
+            <TradingStatus health={runtime.health} />
+            <p className="text-xs text-amber-400 mt-2">วิเคราะห์เท่านั้น · ไม่มีการส่งคำสั่งซื้อขาย</p>
           </div>
         </div>
 
