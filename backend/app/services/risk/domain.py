@@ -68,6 +68,7 @@ class RiskPolicy(BaseModel):
     max_volume: Decimal = Field(default=Decimal("10.00"), gt=0)
     volume_step: Decimal = Field(default=Decimal("0.01"), gt=0)
     reservation_ttl_seconds: int = Field(default=300, ge=30, le=1800)
+    data_health_consecutive_failures: int = Field(default=3, ge=1, le=10)
 
     @model_validator(mode="after")
     def validate_policy(self):
@@ -157,6 +158,7 @@ class AccountSnapshot(BaseModel):
         "CONFIGURED_TEST",
         "CONFIGURED_PAPER",
         "PAPER_SNAPSHOT",
+        "PAPER_ACCOUNT_STATE",
         "UNAVAILABLE",
         "MT5_DEMO",
         "MT5_REAL",
@@ -187,6 +189,23 @@ class MarketProvenance(BaseModel):
     is_stale: bool = False
 
 
+class NewsEventAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    event_id: str
+    event_name: str
+    currency: str
+    impact: str
+    scheduled_at: AwareDatetime
+    available_at: AwareDatetime | None = None
+    window_state: str = ""
+
+    @field_validator("scheduled_at", "available_at")
+    @classmethod
+    def utc_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
+        return v.astimezone(dt.UTC) if v is not None else None
+
+
 class NewsRiskProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -196,6 +215,7 @@ class NewsRiskProvenance(BaseModel):
     in_post_news_window: bool
     event_ids: tuple[str, ...] = ()
     description_th: str = ""
+    events: tuple[NewsEventAudit, ...] = ()
 
 
 class RiskDecision(BaseModel):

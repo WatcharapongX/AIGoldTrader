@@ -37,6 +37,7 @@ def _to_utc(val: dt.datetime | None) -> dt.datetime | None:
 class KillSwitchManager:
     def __init__(self):
         self._cached_state: KillSwitchState | None = None
+        self._consecutive_data_health_failures: int = 0
 
     async def get_state(self, session: AsyncSession) -> KillSwitchState:
         """Fetch latest kill switch state from DB; fallback to UNKNOWN (fail-closed) if empty (SOL-P5-P1-009)."""
@@ -245,15 +246,22 @@ class KillSwitchManager:
                     policy_version=policy.version,
                 )
 
-        # Data health trigger
+        # Data health trigger with hysteresis
         if quote_stale:
-            return await self.activate(
-                session=session,
-                trigger_type="AUTOMATIC_DATA_HEALTH",
-                reason_th=f"ข้อมูลราคาผิดปกติหรือไม่สดใหม่: {quote_stale_reason}",
-                activated_by="system_data_health",
-                policy_version=policy.version,
-            )
+            self._consecutive_data_health_failures += 1
+            if self._consecutive_data_health_failures >= getattr(policy, "data_health_consecutive_failures", 3):
+                return await self.activate(
+                    session=session,
+                    trigger_type="AUTOMATIC_DATA_HEALTH",
+                    reason_th=(
+                        f"ข้อมูลราคาผิดปกติหรือไม่สดใหม่ต่อเนื่อง {self._consecutive_data_health_failures} ครั้ง: "
+                        f"{quote_stale_reason}"
+                    ),
+                    activated_by="system_data_health",
+                    policy_version=policy.version,
+                )
+        else:
+            self._consecutive_data_health_failures = 0
 
         return None
 

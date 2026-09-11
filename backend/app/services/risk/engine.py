@@ -16,6 +16,7 @@ from app.services.risk.domain import (
     Decision,
     Direction,
     MarketProvenance,
+    NewsEventAudit,
     NewsRiskProvenance,
     RiskDecision,
     RiskPolicy,
@@ -163,6 +164,26 @@ class RiskEngine:
                     else:
                         warnings_th.append(desc)
 
+                events_audit = [
+                    NewsEventAudit(
+                        event_id=ev.id,
+                        event_name=ev.event_name,
+                        currency=ev.currency,
+                        impact=ev.impact,
+                        scheduled_at=ev.scheduled_at,
+                        available_at=getattr(ev, "available_at", None),
+                        window_state=(
+                            "BLACKOUT"
+                            if ev.id in relevant_event_ids and in_blackout
+                            else (
+                                "PRE"
+                                if ev.id in relevant_event_ids and in_pre
+                                else ("POST" if ev.id in relevant_event_ids and in_post else "CALM")
+                            )
+                        ),
+                    )
+                    for ev in news_context.events
+                ]
                 news_prov = NewsRiskProvenance(
                     news_state="EVENT_RISK_ACTIVE" if (in_blackout or in_pre or in_post) else "CALM",
                     in_blackout=in_blackout,
@@ -170,6 +191,7 @@ class RiskEngine:
                     in_post_news_window=in_post,
                     event_ids=tuple(relevant_event_ids),
                     description_th=desc,
+                    events=tuple(events_audit),
                 )
             else:
                 news_prov = NewsRiskProvenance(
@@ -181,33 +203,20 @@ class RiskEngine:
                     description_th="สภาวะข่าวปกติ ไม่มีเหตุการณ์สำคัญ",
                 )
 
-        # 5. Check idempotency first inside lock: if unexpired decision already exists (SOL-P5-P1-001, 004)
-        existing_candidate_decision = await find_existing_decision(
-            session=session,
-            candidate_id=candidate.id,
-            profile_id=candidate.profile_id,
-            now=now,
-        )
-        if existing_candidate_decision is not None:
-            # Check if all safety dependencies are unchanged
-            candidate_fp = compute_risk_dependency_fingerprint(
-                candidate=candidate,
-                plan=plan,
-                profile_id=candidate.profile_id,
-                account=account,
-                policy=policy,
-                spec=spec,
-                kill_switch=ks_state,
-                quote=quote,
-                news_prov=news_prov,
-                portfolio_exposure_before=existing_candidate_decision.portfolio_exposure_before,
-                requested_risk_pct=target_risk_pct,
-            )
-            if existing_candidate_decision.dependency_fingerprint == candidate_fp:
-                return existing_candidate_decision
+        # 5. Evaluate temporal safety flags
+        account_is_stale = (now - account.as_of).total_seconds() > policy.account_freshness_seconds
+        plan_is_expired = plan.expires_at is not None and plan.expires_at <= now
+        cooldown_active = False
+        if account.cooldown_until is not None:
+            cooldown_active = now < account.cooldown_until
+        elif account.consecutive_losses >= policy.cooldown_consecutive_losses:
+            calc_until = account.as_of + dt.timedelta(minutes=policy.cooldown_period_minutes)
+            cooldown_active = now < calc_until
 
         # 6. Calculate current portfolio exposure for fingerprint (sole source: DB reservations)
-        active_reservations = await portfolio_manager.get_active_reservations(session, account.account_id, now)
+        active_reservations = await portfolio_manager.get_active_reservations(
+            session, account.account_id, now, exclude_candidate_id=candidate.id
+        )
         current_reserved = sum((Decimal(str(r.risk_pct)) for r in active_reservations), Decimal("0"))
         current_exposure = account.open_risk_pct + current_reserved
 
@@ -224,6 +233,10 @@ class RiskEngine:
             news_prov=news_prov,
             portfolio_exposure_before=current_exposure,
             requested_risk_pct=target_risk_pct,
+            account_is_stale=account_is_stale,
+            quote_is_stale=quote_is_stale,
+            plan_is_expired=plan_is_expired,
+            cooldown_active=cooldown_active,
         )
         decision_id = f"dec_{fingerprint[:24]}"
 
@@ -342,6 +355,7 @@ class RiskEngine:
             direction=direction,
             requested_risk_pct=target_risk_pct,
             now=now,
+            exclude_candidate_id=candidate.id,
         )
 
         if not budget_check.allowed:

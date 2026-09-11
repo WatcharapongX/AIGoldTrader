@@ -8,7 +8,7 @@ import uuid
 from decimal import Decimal
 from typing import NamedTuple
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.risk import RiskReservationRecord
@@ -33,16 +33,33 @@ class ReservationBudgetCheck(NamedTuple):
 
 class PortfolioRiskManager:
     async def get_active_reservations(
-        self, session: AsyncSession, account_id: str, now: dt.datetime, for_update: bool = False
+        self,
+        session: AsyncSession,
+        account_id: str,
+        now: dt.datetime,
+        for_update: bool = False,
+        exclude_candidate_id: str | None = None,
     ) -> list[RiskReservationRecord]:
         """Fetch all active unexpired risk reservations for the account with optional row-lock."""
+        from app.models.risk import RiskDecisionRecord
+
         stmt = select(RiskReservationRecord).where(
             RiskReservationRecord.account_id == account_id,
             RiskReservationRecord.status == "ACTIVE",
             RiskReservationRecord.reserved_until > now,
         )
+        if exclude_candidate_id is not None:
+            stmt = stmt.outerjoin(
+                RiskDecisionRecord, RiskReservationRecord.decision_id == RiskDecisionRecord.id
+            ).where(
+                or_(
+                    RiskDecisionRecord.candidate_id.is_(None),
+                    RiskDecisionRecord.candidate_id != exclude_candidate_id,
+                )
+            )
+
         if for_update and session.get_bind().dialect.name == "postgresql":
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update(of=RiskReservationRecord)
 
         rows = (await session.scalars(stmt)).all()
         return list(rows)
@@ -95,9 +112,12 @@ class PortfolioRiskManager:
                 Decimal("0.01")
             )
 
-        in_cooldown = (account.cooldown_until is not None and account.cooldown_until > as_of) or (
-            account.consecutive_losses >= policy.cooldown_consecutive_losses
-        )
+        in_cooldown = False
+        if account.cooldown_until is not None:
+            in_cooldown = as_of < account.cooldown_until
+        elif account.consecutive_losses >= policy.cooldown_consecutive_losses:
+            calc_until = account.as_of + dt.timedelta(minutes=policy.cooldown_period_minutes)
+            in_cooldown = as_of < calc_until
 
         active_res = tuple(
             RiskReservation(
@@ -148,6 +168,7 @@ class PortfolioRiskManager:
         direction: Direction,
         requested_risk_pct: Decimal,
         now: dt.datetime,
+        exclude_candidate_id: str | None = None,
     ) -> ReservationBudgetCheck:
         """Atomically evaluates portfolio capacity without creating a reservation."""
         # Transaction-level advisory lock per account prevents race conditions on empty/low tables
@@ -177,7 +198,9 @@ class PortfolioRiskManager:
             )
 
         # Row-level lock active reservations for this account to prevent concurrency races
-        active_rows = await self.get_active_reservations(session, account.account_id, now, for_update=True)
+        active_rows = await self.get_active_reservations(
+            session, account.account_id, now, for_update=True, exclude_candidate_id=exclude_candidate_id
+        )
 
         # Database table risk_reservations is the sole source of truth (SOL-P5-P2-011)
         current_reserved = sum((Decimal(str(r.risk_pct)) for r in active_rows), Decimal("0"))

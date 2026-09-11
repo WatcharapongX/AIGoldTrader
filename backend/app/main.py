@@ -33,6 +33,15 @@ async def lifespan(app: FastAPI):
         "startup",
         extra={"app": settings.app_name, "env": settings.app_env, "trading_mode": settings.trading_mode},
     )
+    if settings.trading_mode == "PAPER":
+        try:
+            from app.db.session import get_session_factory
+            from app.services.risk.account_state import PaperAccountStateService
+            async with get_session_factory()() as startup_session:
+                await PaperAccountStateService.refresh_paper_account_snapshot(startup_session, "default_paper_account")
+                await startup_session.commit()
+        except Exception as exc:
+            logger.debug("Startup paper account refresh skipped: %s", exc)
     try:
         yield
     finally:

@@ -150,7 +150,9 @@ def news_context(base_time):
 
 
 @pytest.mark.asyncio
-async def test_normal_approved_decision(db_session, candidate, plan, account, policy, spec, quote, news_context, base_time):
+async def test_normal_approved_decision(
+    db_session, candidate, plan, account, policy, spec, quote, news_context, base_time
+):
     session, _ = db_session
     decision = await risk_engine.evaluate_candidate(
         session=session,
@@ -327,7 +329,9 @@ async def test_news_risk_separation_blackout_and_reduction(
 
 
 @pytest.mark.asyncio
-async def test_portfolio_risk_capacity_exceeded(db_session, candidate, plan, account, policy, spec, quote, news_context, base_time):
+async def test_portfolio_risk_capacity_exceeded(
+    db_session, candidate, plan, account, policy, spec, quote, news_context, base_time
+):
     session, _ = db_session
 
     from app.models.risk import RiskReservationRecord

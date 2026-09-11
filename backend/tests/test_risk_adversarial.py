@@ -645,7 +645,17 @@ async def test_automatic_kill_switch_triggers(
     # Clear for next test
     await kill_switch_manager.clear(session, cleared_by="admin")
 
-    # 3. Data Health Trigger (stale quote)
+    # 3. Data Health Trigger with Hysteresis (SOL-P5-NEW-P1-020)
+    for _ in range(test_policy.data_health_consecutive_failures - 1):
+        ks_transient = await kill_switch_manager.evaluate_automatic_triggers(
+            session=session,
+            account=test_account,
+            policy=test_policy,
+            quote_stale=True,
+            quote_stale_reason="Quote delayed 15 seconds",
+        )
+        assert ks_transient is None
+
     ks_stale = await kill_switch_manager.evaluate_automatic_triggers(
         session=session,
         account=test_account,
@@ -700,7 +710,9 @@ async def test_reservation_uniqueness_prevents_duplicate_allocation(db_session, 
     await session.rollback()
 
 
-def test_fingerprint_sensitivity_across_all_safety_dependencies(test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time):
+def test_fingerprint_sensitivity_across_all_safety_dependencies(
+    test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time
+):
     """Section 36 & SOL-P5-P1-001: Changing ANY risk dependency MUST alter the fingerprint."""
     ks_inactive = KillSwitchState(
         id="ks_test_01",

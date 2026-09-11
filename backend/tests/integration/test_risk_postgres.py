@@ -62,11 +62,13 @@ def test_risk_migration_idempotence_and_preservation(isolated_postgres):  # noqa
             id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
             decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
             approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
-            stop_distance, account_snapshot_id, policy_version, as_of, expires_at, payload
+            stop_distance, account_snapshot_id, policy_version, as_of, expires_at, payload,
+            dependency_fingerprint
         ) VALUES (
             'dec_test_pg_001', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
             'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
-            'snap_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}'
+            'snap_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}',
+            'fp_test_pg_001'
         )
         """
     )
@@ -117,14 +119,16 @@ def test_mandatory_postgresql_concurrency_oversubscription_gate(isolated_postgre
                 id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
                 decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
                 approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
-                stop_distance, account_snapshot_id, policy_version, as_of, expires_at, payload
+                stop_distance, account_snapshot_id, policy_version, as_of, expires_at, payload,
+                dependency_fingerprint
             ) VALUES (
                 %s, 'cand_conc', 'plan_conc', 'STRAT01', %s, 'XAUUSD', 'LONG',
                 'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
-                'snap_conc_001', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}'
+                'snap_conc_001', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}',
+                %s
             )
             """,
-            (f"dec_conc_{i}", f"profile_{i}"),
+            (f"dec_conc_{i}", f"profile_{i}", f"fp_conc_{i}"),
         )
 
     async def run_concurrent_requests():
@@ -322,7 +326,9 @@ def test_duplicate_concurrency_idempotency_gate(isolated_postgres):  # noqa: F81
     approved_pcts = {d.approved_risk_pct for d in decisions}
     assert approved_pcts == {Decimal("1.0000")}
 
-    db_dec_count = conn.execute("SELECT count(*) FROM risk_decisions WHERE candidate_id = 'cand_dup_conc'").fetchone()[0]
+    db_dec_count = conn.execute(
+        "SELECT count(*) FROM risk_decisions WHERE candidate_id = 'cand_dup_conc'"
+    ).fetchone()[0]
     assert db_dec_count == 1, f"Expected 1 decision in DB, got {db_dec_count}"
 
     db_res_count = conn.execute("SELECT count(*) FROM risk_reservations WHERE status = 'ACTIVE'").fetchone()[0]
@@ -365,18 +371,19 @@ def test_migration_0007_to_0009_matrix(isolated_postgres):  # noqa: F811
     # Step 3: Insert legacy decisions in 0007
     for i in range(2):
         conn.execute(
-            f"""
+            """
             INSERT INTO risk_decisions (
                 id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
                 decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
                 approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
                 stop_distance, account_snapshot_id, policy_version, as_of, expires_at, payload
             ) VALUES (
-                'dec_dup_legacy_{i}', 'cand_legacy_{i}', 'plan_legacy', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
+                %(id)s, 'cand_same', %(plan_id)s, 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
                 'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
-                'snap_legacy_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{{}}'
+                'snap_legacy_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}'
             )
-            """
+            """,
+            {"id": f"dec_dup_legacy_{i}", "plan_id": f"plan_legacy_{i}"},
         )
 
     # Step 4: Upgrade through head (0008 + 0009)

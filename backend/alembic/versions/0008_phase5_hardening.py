@@ -12,10 +12,20 @@ depends_on = None
 
 def upgrade():
     # 1. Add dependency_fingerprint to risk_decisions
-    with op.batch_alter_table("risk_decisions") as batch_op:
-        batch_op.add_column(
-            sa.Column("dependency_fingerprint", sa.String(64), nullable=False, server_default="legacy_fingerprint"),
+    op.add_column(
+        "risk_decisions",
+        sa.Column("dependency_fingerprint", sa.String(64), nullable=True),
+    )
+    bind = op.get_bind()
+    bind.execute(
+        sa.text(
+            "UPDATE risk_decisions "
+            "SET dependency_fingerprint = 'legacy_' || id "
+            "WHERE dependency_fingerprint IS NULL OR dependency_fingerprint = 'legacy_fingerprint'"
         )
+    )
+    with op.batch_alter_table("risk_decisions") as batch_op:
+        batch_op.alter_column("dependency_fingerprint", nullable=False)
         batch_op.create_index(
             "ix_risk_decision_fingerprint",
             ["candidate_id", "profile_id", "dependency_fingerprint"],
@@ -33,17 +43,17 @@ def upgrade():
         )
 
     # 3. Seed authoritative bootstrap INACTIVE state for Kill Switch if table is empty
-    bind = op.get_bind()
-    now = dt.datetime.now(dt.UTC)
+    # Use ancient epoch timestamp so historical ACTIVE records are strictly newer and authoritative
+    epoch = dt.datetime(1970, 1, 1, 0, 0, 0, tzinfo=dt.UTC)
     bind.execute(
         sa.text(
             "INSERT INTO kill_switch_records "
             "(id, state, trigger_type, reason_th, activated_at, activated_by, policy_version, payload) "
             "VALUES ('ks_bootstrap', 'INACTIVE', 'MANUAL', 'ระบบเริ่มต้นทำงานในสภาวะปกติ (System Bootstrap)', "
-            ":now, 'system_bootstrap', 'risk-policy-1.0.0', '{}') "
+            ":epoch, 'system_bootstrap', 'risk-policy-1.0.0', '{}') "
             "ON CONFLICT DO NOTHING"
         ),
-        {"now": now},
+        {"epoch": epoch},
     )
 
 

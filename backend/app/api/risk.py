@@ -128,6 +128,13 @@ async def evaluate_risk(
         now=now,
         max_age_seconds=policy.symbol_spec_freshness_seconds,
     )
+    if settings.trading_mode == "PAPER" and body.account_id == "default_paper_account":
+        from app.services.risk.account_state import PaperAccountStateService
+        try:
+            await PaperAccountStateService.refresh_paper_account_snapshot(session, account_id=body.account_id, now=now)
+        except Exception as exc:
+            logger.debug("Paper account snapshot refresh skipped: %s", exc)
+
     account = await get_authoritative_account_snapshot(
         session=session,
         account_id=body.account_id,

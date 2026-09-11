@@ -122,6 +122,7 @@ export interface RiskDecisionData {
   warnings_th: string[];
   blocked_reasons_th: string[];
   market_provenance: MarketProvenanceData | null;
+  news_provenance: NewsRiskProvenanceData | null;
   news_risk_provenance: NewsRiskProvenanceData | null;
 }
 
@@ -342,7 +343,8 @@ export function parseRiskDecision(raw: unknown): RiskDecisionData {
     warnings_th: Array.isArray(d.warnings_th) ? d.warnings_th.map(String) : [],
     blocked_reasons_th: Array.isArray(d.blocked_reasons_th) ? d.blocked_reasons_th.map(String) : [],
     market_provenance: d.market_provenance ? (d.market_provenance as MarketProvenanceData) : null,
-    news_risk_provenance: d.news_risk_provenance ? (d.news_risk_provenance as NewsRiskProvenanceData) : null,
+    news_provenance: (d.news_provenance || d.news_risk_provenance) ? ((d.news_provenance || d.news_risk_provenance) as NewsRiskProvenanceData) : null,
+    news_risk_provenance: (d.news_provenance || d.news_risk_provenance) ? ((d.news_provenance || d.news_risk_provenance) as NewsRiskProvenanceData) : null,
   };
 }
 

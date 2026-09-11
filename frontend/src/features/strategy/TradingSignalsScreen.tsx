@@ -13,7 +13,6 @@ export function TradingSignalsScreen() {
   const [provider, setProvider] = useState<MarketDataStatus | null>(null);
   const [primitive] = useState(() => new AnalysisPrimitive());
   const [revision, setRevision] = useState('initial');
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -24,8 +23,6 @@ export function TradingSignalsScreen() {
         setRevision(`rev-${status.source}-${Date.now()}`);
       } catch {
         // Fallback
-      } finally {
-        setLoading(false);
       }
     };
     void fetchStatus();

@@ -4,7 +4,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
@@ -43,18 +43,40 @@ async def get_active_policy(session: AsyncSession) -> RiskPolicy:
     return RiskPolicy.model_validate(rows[0].payload)
 
 
-async def save_policy(session: AsyncSession, policy: RiskPolicy) -> RiskPolicy:
+async def activate_policy(
+    session: AsyncSession, policy: RiskPolicy, activated_by: str = "admin"
+) -> RiskPolicy:
+    """Atomically deactivates existing active policies and activates the new policy under lock."""
+    if session.get_bind().dialect.name == "postgresql":
+        from sqlalchemy import text
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('risk_policy_activation'))"))
+
     now = dt.datetime.now(dt.UTC)
-    record = RiskPolicyRecord(
-        id=f"pol_{policy.version}",
-        version=policy.version,
-        is_active=True,
-        created_at=now,
-        payload=policy.model_dump(mode="json"),
+    from sqlalchemy import update
+    await session.execute(
+        update(RiskPolicyRecord).where(RiskPolicyRecord.is_active == True).values(is_active=False)  # noqa: E712
     )
-    session.add(record)
+
+    record = await session.get(RiskPolicyRecord, f"pol_{policy.version}")
+    if record is not None:
+        record.is_active = True
+        record.payload = policy.model_dump(mode="json")
+    else:
+        record = RiskPolicyRecord(
+            id=f"pol_{policy.version}",
+            version=policy.version,
+            is_active=True,
+            created_at=now,
+            payload=policy.model_dump(mode="json"),
+        )
+        session.add(record)
+
     await session.flush()
     return policy
+
+
+async def save_policy(session: AsyncSession, policy: RiskPolicy) -> RiskPolicy:
+    return await activate_policy(session, policy)
 
 
 async def get_authoritative_symbol_spec(
@@ -250,8 +272,24 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
         async with session.begin_nested():
             session.add(record)
             await session.flush()
-    except (SQLAlchemyError, Exception) as exc:
-        logger.debug("Concurrent persist collision resolved cleanly: %s", exc)
+    except IntegrityError as exc:
+        logger.debug("Concurrent persist unique collision recovered cleanly: %s", exc)
+        existing = await session.get(RiskDecisionRecord, decision.id)
+        if existing is not None:
+            return RiskDecision.model_validate(existing.payload)
+        stmt = (
+            select(RiskDecisionRecord)
+            .where(
+                RiskDecisionRecord.candidate_id == decision.candidate_id,
+                RiskDecisionRecord.profile_id == decision.profile_id,
+                RiskDecisionRecord.dependency_fingerprint == decision.dependency_fingerprint,
+            )
+            .order_by(RiskDecisionRecord.as_of.desc())
+            .limit(1)
+        )
+        row = (await session.scalars(stmt)).first()
+        if row is not None:
+            return RiskDecision.model_validate(row.payload)
     return decision
 
 

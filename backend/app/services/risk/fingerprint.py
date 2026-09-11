@@ -31,16 +31,19 @@ def compute_risk_dependency_fingerprint(
     news_prov: NewsRiskProvenance | None,
     portfolio_exposure_before: Decimal,
     requested_risk_pct: Decimal,
+    account_is_stale: bool = False,
+    quote_is_stale: bool = False,
+    plan_is_expired: bool = False,
+    cooldown_active: bool = False,
 ) -> str:
     """Computes a canonical SHA-256 fingerprint representing the exact semantic safety state.
 
     Any change to candidate geometry, account snapshot, quote, news status, Kill Switch state,
-    symbol spec, policy version, or portfolio budget alters the fingerprint, guaranteeing
-    safe re-evaluation.
+    symbol spec, policy version, portfolio budget, or temporal safety validity alters the fingerprint,
+    guaranteeing safe re-evaluation.
     """
     quote_payload = None
     if quote:
-        quote_age = (account.as_of - quote.timestamp).total_seconds() if account.as_of else 0
         quote_payload = {
             "source": quote.source,
             "mode": quote.mode,
@@ -48,7 +51,7 @@ def compute_risk_dependency_fingerprint(
             "ask": format(Decimal(str(quote.ask)), ".5f"),
             "spread": format(Decimal(str(quote.spread)), ".5f"),
             "timestamp": quote.timestamp.isoformat(),
-            "is_stale": quote_age > policy.quote_freshness_seconds or quote.spread > policy.max_spread_absolute,
+            "is_stale": quote_is_stale,
         }
 
     news_payload = None
@@ -60,6 +63,17 @@ def compute_risk_dependency_fingerprint(
             "in_post_news_window": news_prov.in_post_news_window,
             "event_ids": sorted(news_prov.event_ids),
             "description_th": news_prov.description_th,
+            "events": [
+                {
+                    "event_id": e.event_id,
+                    "event_name": e.event_name,
+                    "currency": e.currency,
+                    "impact": e.impact,
+                    "scheduled_at": e.scheduled_at.isoformat(),
+                    "window_state": e.window_state,
+                }
+                for e in news_prov.events
+            ],
         }
 
     plan_payload = {
@@ -75,6 +89,7 @@ def compute_risk_dependency_fingerprint(
             else None
         ),
         "expires_at": plan.expires_at.isoformat() if plan.expires_at else None,
+        "is_expired": plan_is_expired,
     }
 
     account_payload = {
@@ -90,9 +105,11 @@ def compute_risk_dependency_fingerprint(
         "reserved_risk_pct": format(account.reserved_risk_pct, ".4f"),
         "consecutive_losses": account.consecutive_losses,
         "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
+        "cooldown_active": cooldown_active,
         "open_positions_count": account.open_positions_count,
         "source": account.source,
         "as_of": account.as_of.isoformat(),
+        "is_stale": account_is_stale,
     }
 
     canonical_obj = {
@@ -118,6 +135,12 @@ def compute_risk_dependency_fingerprint(
         "portfolio": {
             "exposure_before": format(portfolio_exposure_before, ".4f"),
             "requested_risk_pct": format(requested_risk_pct, ".4f"),
+        },
+        "temporal_safety": {
+            "account_is_stale": account_is_stale,
+            "quote_is_stale": quote_is_stale,
+            "plan_is_expired": plan_is_expired,
+            "cooldown_active": cooldown_active,
         },
     }
 

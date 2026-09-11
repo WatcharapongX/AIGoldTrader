@@ -110,29 +110,29 @@ export function Dashboard() {
             setPortfolioRisk(portRes.value);
             setPortfolioRiskState('READY');
           } else {
-            setPortfolioRiskState(portfolioRisk ? 'STALE' : 'UNAVAILABLE');
+            setPortfolioRiskState(prev => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
           }
 
           if (ksRes.status === 'fulfilled') {
             setKillSwitch(ksRes.value);
             setKillSwitchState(ksRes.value.state === 'UNKNOWN' ? 'UNAVAILABLE' : 'READY');
           } else {
-            setKillSwitchState(killSwitch ? 'STALE' : 'UNAVAILABLE');
+            setKillSwitchState(prev => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
           }
 
           if (polRes.status === 'fulfilled') {
             setRiskPolicy(polRes.value);
             setRiskPolicyState('READY');
           } else {
-            setRiskPolicyState(riskPolicy ? 'STALE' : 'UNAVAILABLE');
+            setRiskPolicyState(prev => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
           }
         }
       } catch {
         if (!abort.signal.aborted) {
           setError('โหลดข้อมูลไม่สำเร็จ');
-          setPortfolioRiskState(portfolioRisk ? 'STALE' : 'UNAVAILABLE');
-          setKillSwitchState(killSwitch ? 'STALE' : 'UNAVAILABLE');
-          setRiskPolicyState(riskPolicy ? 'STALE' : 'UNAVAILABLE');
+          setPortfolioRiskState(prev => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+          setKillSwitchState(prev => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
+          setRiskPolicyState(prev => (prev === 'READY' || prev === 'STALE' ? 'STALE' : 'UNAVAILABLE'));
         }
       } finally {
         busy = false;

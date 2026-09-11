@@ -156,33 +156,6 @@ def upgrade():
                     {"now": now, "payload": json.dumps(snap_payload)},
                 )
 
-        # 6. Seed authoritative MT5 broker symbol spec if table is empty
-        spec_exists = bind.scalar(sa.text("SELECT id FROM symbol_specifications WHERE symbol = 'XAUUSD' LIMIT 1"))
-        if not spec_exists:
-            spec_payload = {
-                "id": "sym_xauusd_mt5_demo_iux_seed",
-                "symbol": "XAUUSD",
-                "source": "mt5_demo_iux",
-                "tick_size": "0.01",
-                "tick_value": "1.00",
-                "contract_size": "100.00",
-                "volume_min": "0.01",
-                "volume_max": "20.00",
-                "volume_step": "0.01",
-                "digits": 2,
-                "observed_at": now.isoformat(),
-            }
-            bind.execute(
-                sa.text(
-                    "INSERT INTO symbol_specifications (id, symbol, source, tick_size, tick_value, contract_size, "
-                    "volume_min, volume_max, volume_step, digits, observed_at, payload) "
-                    "VALUES ('sym_xauusd_mt5_demo_iux_seed', 'XAUUSD', 'mt5_demo_iux', 0.01, 1.00, 100.00, "
-                    "0.01, 20.00, 0.01, 2, :now, :payload) "
-                    "ON CONFLICT (id) DO NOTHING"
-                ),
-                {"now": now, "payload": json.dumps(spec_payload)},
-            )
-
 
 def downgrade():
     bind = op.get_bind()
@@ -192,5 +165,4 @@ def downgrade():
     if not context.is_offline_mode():
         op.execute(sa.text("DELETE FROM account_snapshots WHERE id = 'snap_default_paper_account_init'"))
         op.execute(sa.text("DELETE FROM accounts WHERE id = 'a0000000-0000-0000-0000-000000000001'"))
-        op.execute(sa.text("DELETE FROM symbol_specifications WHERE id = 'sym_xauusd_mt5_demo_iux_seed'"))
         op.execute(sa.text("DELETE FROM risk_policies WHERE id = 'pol_risk-policy-1.0.0'"))
