@@ -1,5 +1,5 @@
-import { TradingScreen } from '@/features/chart/TradingScreen';
+import { MarketAnalysisScreen } from '@/features/analysis/MarketAnalysisScreen';
 
 export default function AnalysisPage() {
-  return <TradingScreen />;
+  return <MarketAnalysisScreen />;
 }
