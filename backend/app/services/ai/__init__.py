@@ -1,0 +1,72 @@
+"""Phase 6.1 AI Foundation package."""
+
+from app.services.ai.agents import (
+    BaseAnalyticalAgent,
+    MacroNewsAnalyst,
+    MarketContextAgent,
+    MetaController,
+    RiskInterpreter,
+    SMCICTAnalyst,
+    StrategyCritic,
+    TradeThesisAgent,
+    compute_agent_agreement,
+    get_all_analytical_agents,
+)
+from app.services.ai.domain import (
+    ANALYTICAL_AGENT_IDS,
+    META_CONTROLLER_ID,
+    VERSION,
+    AgentAgreement,
+    AgentAnalysisResult,
+    AgentStatus,
+    AIAnalysisInput,
+    AIAnalysisResult,
+    DirectionalBias,
+    EvidenceStrength,
+    MetaStatus,
+    TokenUsage,
+    fingerprint,
+)
+from app.services.ai.orchestrator import AIOrchestrator, ai_orchestrator
+from app.services.ai.prompts import PROMPT_REGISTRY, get_prompt, wrap_untrusted_data
+from app.services.ai.provider import (
+    AIProvider,
+    FixtureAIProvider,
+    ModelConfig,
+    ProviderResult,
+)
+
+__all__ = [
+    "ANALYTICAL_AGENT_IDS",
+    "META_CONTROLLER_ID",
+    "VERSION",
+    "AIAnalysisInput",
+    "AIAnalysisResult",
+    "AIOrchestrator",
+    "AIProvider",
+    "AgentAgreement",
+    "AgentAnalysisResult",
+    "AgentStatus",
+    "BaseAnalyticalAgent",
+    "DirectionalBias",
+    "EvidenceStrength",
+    "FixtureAIProvider",
+    "MacroNewsAnalyst",
+    "MarketContextAgent",
+    "MetaController",
+    "MetaStatus",
+    "ModelConfig",
+    "PROMPT_REGISTRY",
+    "ProviderResult",
+    "RiskInterpreter",
+    "SMCICTAnalyst",
+    "StrategyCritic",
+    "TokenUsage",
+    "TradeThesisAgent",
+    "ai_orchestrator",
+    "compute_agent_agreement",
+    "fingerprint",
+    "get_all_analytical_agents",
+    "get_prompt",
+    "wrap_untrusted_data",
+]
