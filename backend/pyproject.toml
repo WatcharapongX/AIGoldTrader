@@ -64,7 +64,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = '-q -m "not live_external"'
 markers = [
-    "live_external: explicit acceptance against a real configured MT5 terminal (never offline fixtures)",
+    "live_external: explicit acceptance against real external services (live MT5 terminal or real LLM vendor; never offline fixtures)",
     "integration: opt-in tests against an explicitly configured disposable PostgreSQL database",
 ]
 

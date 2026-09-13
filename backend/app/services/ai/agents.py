@@ -22,7 +22,12 @@ from app.services.ai.domain import (
     fingerprint,
 )
 from app.services.ai.prompts import build_structured_payload, get_prompt
-from app.services.ai.provider import AIProvider, ModelConfig, analyze_with_controls
+from app.services.ai.provider import (
+    AIProvider,
+    ModelConfig,
+    ProviderDescriptor,
+    analyze_with_controls,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +75,7 @@ class BaseAnalyticalAgent:
     async def execute(
         self,
         ai_input: AIAnalysisInput,
-        provider: AIProvider,
+        provider: AIProvider | ProviderDescriptor,
         config: ModelConfig,
         timeout_seconds: float | None = None,
     ) -> AgentAnalysisResult:
@@ -274,7 +279,7 @@ class MetaController:
         self,
         ai_input: AIAnalysisInput,
         agent_results: dict[str, AgentAnalysisResult],
-        provider: AIProvider,
+        provider: AIProvider | ProviderDescriptor,
         config: ModelConfig,
         timeout_seconds: float | None = None,
     ) -> AIAnalysisResult:

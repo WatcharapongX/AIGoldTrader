@@ -1,5 +1,6 @@
 """Phase 6.1 AI Foundation package."""
 
+from app.services.ai.adapters import OpenAICompatibleProvider, ProviderFactory
 from app.services.ai.agents import (
     BaseAnalyticalAgent,
     MacroNewsAnalyst,
@@ -48,11 +49,22 @@ from app.services.ai.orchestrator import AIOrchestrator, ai_orchestrator
 from app.services.ai.prompts import PROMPT_REGISTRY, build_structured_payload, get_prompt, wrap_untrusted_data
 from app.services.ai.provider import (
     AIProvider,
+    AIProviderError,
     FixtureAIProvider,
     InputBudgetExceeded,
     ModelConfig,
     OutputBudgetExceeded,
+    ProviderAuthError,
+    ProviderBudgetExceeded,
+    ProviderCapacityExhausted,
+    ProviderDescriptor,
+    ProviderInternalError,
+    ProviderNetworkError,
+    ProviderRateLimitError,
+    ProviderRequestError,
     ProviderResult,
+    ProviderSchemaError,
+    ProviderTimeoutError,
     analyze_with_controls,
 )
 
@@ -73,6 +85,7 @@ __all__ = [
     "AIOrchestrator",
     "AIProvenance",
     "AIProvider",
+    "AIProviderError",
     "AIRiskDecisionContext",
     "AIStrategyContext",
     "AIStrategyEvidence",
@@ -93,9 +106,21 @@ __all__ = [
     "MetaController",
     "MetaStatus",
     "ModelConfig",
+    "OpenAICompatibleProvider",
     "OutputBudgetExceeded",
     "PROMPT_REGISTRY",
+    "ProviderAuthError",
+    "ProviderBudgetExceeded",
+    "ProviderCapacityExhausted",
+    "ProviderDescriptor",
+    "ProviderFactory",
+    "ProviderInternalError",
+    "ProviderNetworkError",
+    "ProviderRateLimitError",
+    "ProviderRequestError",
     "ProviderResult",
+    "ProviderSchemaError",
+    "ProviderTimeoutError",
     "RiskInterpreter",
     "SMCICTAnalyst",
     "StrategyCritic",

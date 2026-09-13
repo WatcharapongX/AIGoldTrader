@@ -1,4 +1,4 @@
-"""Sensitive data masking สำหรับ log/audit (FR-SE-02) — ห้าม secret รั่วลง log."""
+import re
 
 _MASKED = "***MASKED***"
 _SENSITIVE_KEY_PARTS = (
@@ -12,6 +12,13 @@ _SENSITIVE_KEY_PARTS = (
     "cookie",
     "private_key",
 )
+
+_BEARER_PATTERN = re.compile(r"(?i)(bearer\s+)([A-Za-z0-9_\-\.]+)")
+_AUTH_HEADER_PATTERN = re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)([^\s,;'\"]+)")
+_API_KEY_PATTERN = re.compile(
+    r"(?i)((?:api[-_]?key|apikey|secret[-_]?key|access[-_]?token|auth[-_]?token|token)\s*[:=]\s*)([^\s,;'\"]+)"
+)
+_GENERIC_KEY_PATTERN = re.compile(r"(?i)(sk-[A-Za-z0-9_\-]{8,}|AIza[A-Za-z0-9_\-]{10,})")
 
 
 def _is_sensitive(key: str) -> bool:
@@ -34,3 +41,22 @@ def mask_payload(payload: dict | None) -> dict | None:
         else:
             masked[key] = value
     return masked
+
+
+def mask_secret_text(
+    text: str, extra_secrets: list[str] | set[str] | tuple[str, ...] | None = None
+) -> str:
+    """Mask credentials, tokens, bearer headers, and known secrets from strings/exceptions."""
+    if not text:
+        return text
+    masked = text
+    if extra_secrets:
+        for secret in extra_secrets:
+            if secret and len(secret) >= 4:
+                masked = masked.replace(secret, _MASKED)
+    masked = _AUTH_HEADER_PATTERN.sub(rf"\g<1>{_MASKED}", masked)
+    masked = _BEARER_PATTERN.sub(rf"\g<1>{_MASKED}", masked)
+    masked = _API_KEY_PATTERN.sub(rf"\g<1>{_MASKED}", masked)
+    masked = _GENERIC_KEY_PATTERN.sub(_MASKED, masked)
+    return masked
+

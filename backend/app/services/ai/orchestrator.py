@@ -25,16 +25,55 @@ from app.services.ai.domain import (
     AIAnalysisResult,
     fingerprint,
 )
-from app.services.ai.provider import AIProvider, FixtureAIProvider, ModelConfig
+from app.services.ai.provider import (
+    AIProvider,
+    ModelConfig,
+    ProviderAuthError,
+    ProviderCapacityExhausted,
+    ProviderDescriptor,
+)
 
 logger = logging.getLogger(__name__)
+
 
 class AIOrchestrator:
     """Orchestrates the safety-gated execution of the multi-agent AI advisory layer."""
 
-    def __init__(self, provider: AIProvider | None = None, default_config: ModelConfig | None = None):
-        self.provider = provider or FixtureAIProvider()
-        self.default_config = default_config or ModelConfig()
+    def __init__(
+        self,
+        provider: AIProvider | ProviderDescriptor | None = None,
+        default_config: ModelConfig | None = None,
+        descriptor: ProviderDescriptor | None = None,
+    ):
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        target_provider: AIProvider | ProviderDescriptor
+        if descriptor is not None:
+            target_provider = descriptor
+        elif provider is not None:
+            target_provider = provider
+        else:
+            if getattr(settings, "ai_provider_mode", "fixture") == "external":
+                target_provider = ProviderDescriptor(
+                    provider_id="configured_external",
+                    provider_type=getattr(settings, "ai_provider_type", "openai_compatible"),
+                    credential_ref="AI_PROVIDER_API_KEY",
+                    base_url_ref="AI_PROVIDER_BASE_URL",
+                )
+            else:
+                target_provider = ProviderDescriptor(
+                    provider_id="default_fixture",
+                    provider_type="fixture",
+                )
+        self.provider: AIProvider | ProviderDescriptor = target_provider
+
+        prov_name = (
+            self.provider.provider_type
+            if isinstance(self.provider, ProviderDescriptor)
+            else getattr(self.provider, "provider", "fixture")
+        )
+        self.default_config = default_config or ModelConfig(provider=prov_name)
         self.agents = get_all_analytical_agents()
         self.meta_controller = MetaController()
 
@@ -436,6 +475,40 @@ class AIOrchestrator:
                     summary_th=f"การวิเคราะห์ของ {agent.agent_id} เกินกำหนดเวลา timeout ({timeout}s)",
                     warnings_th=(f"Hard timeout after {timeout}s",),
                     missing_context_th=(f"Agent timeout after {timeout}s",),
+                    provider_provenance=effective_config.provider,
+                    prompt_version=agent.prompt_id,
+                    generated_at=dt.datetime.now(dt.UTC),
+                    as_of=as_of,
+                    token_usage=None,
+                )
+            except ProviderCapacityExhausted as exc:
+                logger.warning("Agent %s provider capacity exhausted: %s", agent.agent_id, exc)
+                return AgentAnalysisResult(
+                    agent_id=agent.agent_id,
+                    agent_version="ai-1.0.0",
+                    status="UNAVAILABLE",
+                    directional_bias="NO_BIAS",
+                    evidence_strength="INSUFFICIENT",
+                    summary_th="ระบบ AI ไม่สามารถประมวลผลได้เนื่องจากคิว Provider เต็ม (Capacity Exhausted)",
+                    warnings_th=("PROVIDER_CAPACITY_EXHAUSTED", str(exc)),
+                    missing_context_th=(str(exc),),
+                    provider_provenance=effective_config.provider,
+                    prompt_version=agent.prompt_id,
+                    generated_at=dt.datetime.now(dt.UTC),
+                    as_of=as_of,
+                    token_usage=None,
+                )
+            except ProviderAuthError as exc:
+                logger.warning("Agent %s provider auth failed: %s", agent.agent_id, exc)
+                return AgentAnalysisResult(
+                    agent_id=agent.agent_id,
+                    agent_version="ai-1.0.0",
+                    status="UNAVAILABLE",
+                    directional_bias="NO_BIAS",
+                    evidence_strength="INSUFFICIENT",
+                    summary_th="ระบบ AI ไม่สามารถประมวลผลได้เนื่องจากปัญหาการยืนยันตัวตน Provider (Auth Error)",
+                    warnings_th=("PROVIDER_AUTH_ERROR", str(exc)),
+                    missing_context_th=(str(exc),),
                     provider_provenance=effective_config.provider,
                     prompt_version=agent.prompt_id,
                     generated_at=dt.datetime.now(dt.UTC),

@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -21,12 +21,85 @@ MAX_INPUT_BYTES_PER_AGENT = 20_000
 MAX_PROVIDER_OUTPUT_BYTES = 10_000
 
 
-class InputBudgetExceeded(ValueError):
+class AIProviderError(Exception):
+    """Base exception for AI provider failures."""
+
+
+class ProviderTimeoutError(AIProviderError, TimeoutError):
+    """Execution deadline or timeout exhausted."""
+
+
+class ProviderNetworkError(AIProviderError):
+    """Low-level network, TLS, or DNS error connecting to provider."""
+
+
+class ProviderAuthError(AIProviderError):
+    """Authentication or authorization failure (401/403 or missing credentials)."""
+
+
+class ProviderRateLimitError(AIProviderError):
+    """Provider rate limit / 429 quota exhaustion."""
+
+
+class ProviderCapacityExhausted(AIProviderError):
+    """Local server-side concurrent worker slot capacity exhausted."""
+
+
+class ProviderRequestError(AIProviderError):
+    """Invalid client request payload or schema (4xx)."""
+
+
+class ProviderSchemaError(AIProviderError):
+    """Provider output failed schema validation."""
+
+
+class ProviderBudgetExceeded(AIProviderError):
+    """Provider exceeded token or byte limits."""
+
+
+class ProviderInternalError(AIProviderError):
+    """Unhandled internal provider or worker error."""
+
+
+class InputBudgetExceeded(ProviderBudgetExceeded, ValueError):
     """Serialized provider input exceeds the safe local boundary."""
 
 
-class OutputBudgetExceeded(ValueError):
+class OutputBudgetExceeded(ProviderBudgetExceeded, ValueError):
     """Provider output exceeds the safe local boundary."""
+
+
+class ProviderDescriptor(BaseModel):
+    """Strict, immutable, serializable descriptor for AI providers.
+
+    Contains configuration identity and references only; NEVER raw secrets or live client objects.
+    Survives Windows spawn multiprocessing boundary and JSON serialization.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider_id: str = "default_provider"
+    provider_type: Literal["fixture", "openai_compatible"] = "fixture"
+    model_alias: str = "fast-advisory"
+    credential_ref: str | None = None
+    base_url_ref: str | None = None
+    organization_ref: str | None = None
+    request_schema_version: str = "v1"
+    response_schema_version: str = "v1"
+    capabilities: tuple[str, ...] = ("structured_json", "system_prompt")
+    enabled: bool = True
+    live_external_only: bool = False
+
+    @model_validator(mode="after")
+    def validate_no_raw_secrets(self):
+        if self.credential_ref:
+            ref_lower = self.credential_ref.lower().strip()
+            if any(ref_lower.startswith(prefix) for prefix in ("sk-", "aiza", "bearer ")):
+                raise ValueError(
+                    "credential_ref must be an environment variable name or secret identifier, "
+                    "not a raw secret or API key"
+                )
+        return self
 
 
 class ModelConfig(BaseModel):
@@ -79,7 +152,7 @@ class AIProvider(abc.ABC):
 
 
 async def analyze_with_controls(
-    provider: AIProvider,
+    provider: AIProvider | ProviderDescriptor,
     *,
     agent_id: str,
     system_prompt: str,

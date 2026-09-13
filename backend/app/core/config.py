@@ -84,6 +84,21 @@ class Settings(BaseSettings):
     # Phase 3 deterministic parameters; optional ANALYSIS_CONFIG JSON, no credentials.
     analysis_config: AnalysisConfig = Field(default_factory=AnalysisConfig)
 
+    # Phase 6.2 AI Provider Configuration (Safe local default: fixture, G-06: no hardcoded credentials)
+    ai_provider_mode: Literal["fixture", "external"] = "fixture"
+    ai_provider_type: Literal["fixture", "openai_compatible"] = "fixture"
+    ai_provider_api_key: str = Field(default="", repr=False)
+    ai_provider_base_url: str = "https://api.openai.com/v1"
+    ai_model_mapping: dict[str, str] = Field(
+        default_factory=lambda: {
+            "fast-advisory": "gpt-4o-mini",
+            "reasoning-advisory": "gpt-4o",
+            "deep-analysis": "gpt-4o",
+        }
+    )
+    ai_max_concurrent_provider_calls: int = Field(default=6, ge=1, le=32)
+    ai_provider_queue_timeout_seconds: float = Field(default=15.0, gt=0.0, le=60.0)
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"

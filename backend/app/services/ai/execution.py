@@ -1,7 +1,8 @@
 """Killable provider execution boundary with one parent-enforced wall-clock budget.
 
-Only the serializable provider request DTO and provider implementation cross the
-spawn boundary. Database sessions, HTTP requests, and application state never do.
+Only the serializable provider request DTO and ProviderDescriptor cross the
+spawn boundary. Database sessions, HTTP requests, vendor SDK clients, and application
+state never cross. Worker constructs its own provider adapter worker-side.
 """
 
 import asyncio
@@ -12,15 +13,58 @@ from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
 from typing import Any
 
+from app.core.masking import mask_secret_text
+
 _POLL_SECONDS = 0.005
-_TERMINATE_GRACE_SECONDS = 0.10
-_KILL_GRACE_SECONDS = 0.10
+_TERMINATE_GRACE_SECONDS = 0.03
+_KILL_GRACE_SECONDS = 0.03
 _ACTIVE_PROCESSES: set[BaseProcess] = set()
 
 
 def active_provider_process_count() -> int:
     """Return live provider workers owned by this process (test/health visibility)."""
     return sum(process.is_alive() for process in tuple(_ACTIVE_PROCESSES))
+
+
+class GlobalProviderLimiter:
+    """Process-wide admission controller and bounded semaphore for worker processes."""
+
+    def __init__(self, max_concurrent: int = 6, queue_timeout_seconds: float = 15.0):
+        self.max_concurrent = max_concurrent
+        self.queue_timeout_seconds = queue_timeout_seconds
+        self._semaphore: asyncio.Semaphore | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        current_loop = asyncio.get_running_loop()
+        if self._semaphore is None or self._loop != current_loop:
+            self._loop = current_loop
+            self._semaphore = asyncio.Semaphore(self.max_concurrent)
+        return self._semaphore
+
+    def configure(self, max_concurrent: int, queue_timeout_seconds: float) -> None:
+        """Dynamically configure concurrency limit and queue timeout (e.g. in tests)."""
+        self.max_concurrent = max_concurrent
+        self.queue_timeout_seconds = queue_timeout_seconds
+        self._semaphore = None
+        self._loop = None
+
+    async def acquire(self, timeout_seconds: float | None = None) -> None:
+        from app.services.ai.provider import ProviderCapacityExhausted
+
+        sem = self._get_semaphore()
+        timeout = timeout_seconds if timeout_seconds is not None else self.queue_timeout_seconds
+        try:
+            await asyncio.wait_for(sem.acquire(), timeout=timeout)
+        except TimeoutError as exc:
+            raise ProviderCapacityExhausted(
+                f"Provider capacity exhausted: all {self.max_concurrent} worker slots occupied "
+                f"(queue wait {timeout:.2f}s exceeded)"
+            ) from exc
+
+    def release(self) -> None:
+        if self._semaphore is not None:
+            self._semaphore.release()
 
 
 def _provider_state(provider: Any) -> dict[str, int | bool]:
@@ -33,7 +77,14 @@ def _provider_state(provider: Any) -> dict[str, int | bool]:
 
 
 async def _worker_execute(provider: Any, request: dict[str, Any], pipe: Connection) -> dict[str, Any]:
-    from app.services.ai.provider import ModelConfig
+    from app.services.ai.provider import (
+        ModelConfig,
+        ProviderAuthError,
+        ProviderNetworkError,
+        ProviderRateLimitError,
+        ProviderRequestError,
+        ProviderTimeoutError,
+    )
 
     config = ModelConfig.model_validate(request["model_config"])
     started = time.monotonic()
@@ -41,7 +92,9 @@ async def _worker_execute(provider: Any, request: dict[str, Any], pipe: Connecti
     for attempt in range(config.max_retries + 1):
         remaining = request["timeout_seconds"] - (time.monotonic() - started)
         if remaining <= 0:
-            raise TimeoutError(f"Provider timeout: deadline exhausted for {request['agent_id']}") from last_error
+            raise ProviderTimeoutError(
+                f"Provider timeout: deadline exhausted for {request['agent_id']}"
+            ) from last_error
         pipe.send(("attempt", attempt + 1))
         try:
             result = await asyncio.wait_for(
@@ -57,21 +110,40 @@ async def _worker_execute(provider: Any, request: dict[str, Any], pipe: Connecti
             return result.model_dump(mode="json")
         except asyncio.CancelledError:
             raise
-        except (TimeoutError, RuntimeError) as exc:
+        except (ProviderAuthError, ProviderRequestError):
+            # Non-transient errors: do not retry
+            raise
+        except (TimeoutError, RuntimeError, ProviderNetworkError, ProviderRateLimitError) as exc:
             last_error = exc
             if attempt >= config.max_retries:
                 raise
+            # Bounded retry backoff within remaining deadline
+            backoff = min(0.05 * (2**attempt), max(0.0, remaining - 0.05))
+            if backoff > 0:
+                await asyncio.sleep(backoff)
     raise RuntimeError(f"Provider retry loop exhausted for {request['agent_id']}") from last_error
 
 
-def _provider_worker_entry(provider: Any, request: dict[str, Any], pipe: Connection) -> None:
-    """Spawn-safe module-level worker entry point; never starts another process."""
+def _provider_worker_entry(target: Any, request: dict[str, Any], pipe: Connection) -> None:
+    """Spawn-safe module-level worker entry point; never starts another process.
+
+    If target is a ProviderDescriptor, construct provider adapter worker-side (P3-066).
+    """
+    from app.services.ai.adapters import ProviderFactory
+    from app.services.ai.provider import ProviderDescriptor
+
+    provider: Any = None
     try:
+        if isinstance(target, ProviderDescriptor):
+            provider = ProviderFactory.create_provider(target)
+        else:
+            provider = target
         result = asyncio.run(_worker_execute(provider, request, pipe))
         pipe.send(("result", result, _provider_state(provider)))
     except BaseException as exc:
         try:
-            pipe.send(("error", type(exc).__name__, str(exc), _provider_state(provider)))
+            err_msg = mask_secret_text(str(exc))
+            pipe.send(("error", type(exc).__name__, err_msg, _provider_state(provider)))
         except (BrokenPipeError, EOFError, OSError):
             pass
     finally:
@@ -91,7 +163,7 @@ def _merge_observed_state(provider: Any, state: dict[str, int | bool]) -> None:
     for name, value in state.items():
         try:
             setattr(provider, name, value)
-        except (AttributeError, TypeError):
+        except (AttributeError, TypeError, ValueError):
             pass
 
 
@@ -114,11 +186,23 @@ def _record_attempt(provider: Any, request: dict[str, Any], attempt: int, seen: 
         payloads.append(request["user_payload"])
     attempts = getattr(provider, "attempts", None)
     if isinstance(attempts, int):
-        provider.attempts = max(attempts, attempt)
+        try:
+            provider.attempts = max(attempts, attempt)
+        except (AttributeError, ValueError):
+            pass
 
 
 class ProviderExecutor:
     """Run one provider request in a disposable process under a hard parent deadline."""
+
+    def __init__(self, max_concurrent: int = 6, queue_timeout_seconds: float = 15.0):
+        self.limiter = GlobalProviderLimiter(
+            max_concurrent=max_concurrent,
+            queue_timeout_seconds=queue_timeout_seconds,
+        )
+
+    def configure_concurrency(self, max_concurrent: int, queue_timeout_seconds: float) -> None:
+        self.limiter.configure(max_concurrent, queue_timeout_seconds)
 
     async def execute(
         self,
@@ -135,7 +219,14 @@ class ProviderExecutor:
             MAX_PROVIDER_OUTPUT_BYTES,
             InputBudgetExceeded,
             OutputBudgetExceeded,
+            ProviderAuthError,
+            ProviderCapacityExhausted,
+            ProviderNetworkError,
+            ProviderRateLimitError,
+            ProviderRequestError,
             ProviderResult,
+            ProviderSchemaError,
+            ProviderTimeoutError,
         )
 
         input_bytes = len(system_prompt.encode("utf-8")) + len(user_payload.encode("utf-8"))
@@ -152,6 +243,10 @@ class ProviderExecutor:
             "model_config": model_config.model_dump(mode="json"),
             "timeout_seconds": timeout,
         }
+
+        # 1. Acquire bounded global concurrency slot BEFORE worker creation
+        await self.limiter.acquire()
+
         context = mp.get_context("spawn")
         recv_pipe, send_pipe = context.Pipe(duplex=False)
         process = context.Process(target=_provider_worker_entry, args=(provider, request, send_pipe), daemon=True)
@@ -164,7 +259,10 @@ class ProviderExecutor:
             _ACTIVE_PROCESSES.add(process)
             attempts = getattr(provider, "attempts", None)
             if isinstance(attempts, int):
-                provider.attempts = max(attempts, 1)
+                try:
+                    provider.attempts = max(attempts, 1)
+                except (AttributeError, ValueError):
+                    pass
             send_pipe.close()
             while True:
                 while recv_pipe.poll():
@@ -179,8 +277,11 @@ class ProviderExecutor:
                 if asyncio.get_running_loop().time() >= deadline:
                     _terminate_worker(process)
                     if hasattr(provider, "cancelled"):
-                        provider.cancelled = True
-                    raise TimeoutError(f"Provider hard timeout: deadline exhausted for {agent_id}")
+                        try:
+                            provider.cancelled = True
+                        except (AttributeError, ValueError):
+                            pass
+                    raise ProviderTimeoutError(f"Provider hard timeout: deadline exhausted for {agent_id}")
                 if not process.is_alive():
                     while recv_pipe.poll():
                         candidate = recv_pipe.recv()
@@ -200,8 +301,24 @@ class ProviderExecutor:
             if message[0] == "error":
                 _merge_observed_state(provider, message[3])
                 error_name, error_message = str(message[1]), str(message[2])
-                if error_name in {"TimeoutError", "CancelledError"}:
-                    raise TimeoutError(error_message)
+                if error_name in {"TimeoutError", "CancelledError", "ProviderTimeoutError"}:
+                    raise ProviderTimeoutError(error_message)
+                if error_name == "ProviderAuthError":
+                    raise ProviderAuthError(error_message)
+                if error_name == "ProviderRateLimitError":
+                    raise ProviderRateLimitError(error_message)
+                if error_name == "ProviderRequestError":
+                    raise ProviderRequestError(error_message)
+                if error_name == "ProviderCapacityExhausted":
+                    raise ProviderCapacityExhausted(error_message)
+                if error_name == "ProviderSchemaError":
+                    raise ProviderSchemaError(error_message)
+                if error_name == "ProviderNetworkError":
+                    raise ProviderNetworkError(error_message)
+                if error_name == "OutputBudgetExceeded":
+                    raise OutputBudgetExceeded(error_message)
+                if error_name == "InputBudgetExceeded":
+                    raise InputBudgetExceeded(error_message)
                 if error_name == "RuntimeError":
                     raise RuntimeError(error_message)
                 raise ValueError(error_message)
@@ -257,6 +374,8 @@ class ProviderExecutor:
             send_pipe.close()
             if process.pid is not None and not process.is_alive():
                 process.close()
+            # 2. Release global concurrency slot
+            self.limiter.release()
 
 
 provider_executor = ProviderExecutor()
