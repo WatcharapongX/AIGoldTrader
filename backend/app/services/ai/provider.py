@@ -75,6 +75,7 @@ class FixtureAIProvider(AIProvider):
         schema_invalid_agents: set[str] | None = None,
         injection_agents: set[str] | None = None,
         timeout_agents: set[str] | None = None,
+        hanging_agents: set[str] | None = None,
         token_budget_exceeded_agents: set[str] | None = None,
         agent_biases: dict[str, str] | None = None,
         agent_strengths: dict[str, str] | None = None,
@@ -84,6 +85,7 @@ class FixtureAIProvider(AIProvider):
         self.schema_invalid_agents = set(schema_invalid_agents or ())
         self.injection_agents = set(injection_agents or ())
         self.timeout_agents = set(timeout_agents or ())
+        self.hanging_agents = set(hanging_agents or ())
         self.token_budget_exceeded_agents = set(token_budget_exceeded_agents or ())
         self.agent_biases = dict(agent_biases or {})
         self.agent_strengths = dict(agent_strengths or {})
@@ -109,6 +111,10 @@ class FixtureAIProvider(AIProvider):
                 "timestamp": dt.datetime.now(dt.UTC).isoformat(),
             }
         )
+
+        # 0. Simulate indefinite hang
+        if agent_id in self.hanging_agents:
+            await asyncio.sleep(9999)
 
         # 1. Simulate timeout
         if agent_id in self.timeout_agents:
@@ -141,11 +147,14 @@ class FixtureAIProvider(AIProvider):
         try:
             parsed = json.loads(user_payload)
             if isinstance(parsed, dict):
-                cand = parsed.get("strategy_candidate")
-                if isinstance(cand, dict) and cand.get("direction"):
-                    direction = str(cand["direction"])
-                if parsed.get("symbol"):
-                    symbol = str(parsed["symbol"])
+                raw_ctx = parsed.get("trusted_context")
+                ctx = raw_ctx if isinstance(raw_ctx, dict) else parsed
+                if isinstance(ctx, dict):
+                    cand = ctx.get("strategy_candidate") or ctx.get("strategy")
+                    if isinstance(cand, dict) and cand.get("direction"):
+                        direction = str(cand["direction"])
+                    if ctx.get("symbol"):
+                        symbol = str(ctx["symbol"])
         except (json.JSONDecodeError, TypeError, KeyError) as exc:
             logger.debug("FixtureAIProvider failed to parse user_payload: %s", exc)
 
@@ -173,7 +182,7 @@ class FixtureAIProvider(AIProvider):
                 "directional_bias": bias,
                 "evidence_strength": strength,
                 "summary_th": f"รายงานการวิเคราะห์ของ {agent_id} สำหรับ {symbol} พบปัจจัยสนับสนุนทิศทาง {bias}",
-                "evidence_refs": [f"ref_{agent_id}_01", f"ref_{agent_id}_02"],
+                "evidence_refs": [f"fixture://ref_{agent_id}_01", f"fixture://ref_{agent_id}_02"],
                 "supporting_factors_th": [f"ปัจจัยสนับสนุนที่ 1 จาก {agent_id}", f"ปัจจัยสนับสนุนที่ 2 จาก {agent_id}"],
                 "conflicting_factors_th": [],
                 "warnings_th": [],

@@ -8,6 +8,8 @@ import datetime as dt
 import logging
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from app.services.ai.domain import (
     META_CONTROLLER_ID,
     AgentAgreement,
@@ -15,6 +17,7 @@ from app.services.ai.domain import (
     AIAnalysisInput,
     AIAnalysisResult,
     DirectionalBias,
+    EvidenceStrength,
     MetaStatus,
     fingerprint,
 )
@@ -26,9 +29,13 @@ logger = logging.getLogger(__name__)
 
 def compute_agent_agreement(biases: list[DirectionalBias]) -> AgentAgreement:
     """Deterministically compute agreement level across analytical agents."""
+    if not biases:
+        return "UNAVAILABLE"
+    if all(b == "NO_BIAS" for b in biases):
+        return "UNAVAILABLE"
     valid_biases = [b for b in biases if b in ("LONG", "SHORT")]
     if not valid_biases:
-        return "LOW"
+        return "LOW" if any(b == "NEUTRAL" for b in biases) else "UNAVAILABLE"
 
     long_count = valid_biases.count("LONG")
     short_count = valid_biases.count("SHORT")
@@ -128,10 +135,9 @@ class MarketContextAgent(BaseAnalyticalAgent):
         return {
             "symbol": ai_input.symbol,
             "as_of": ai_input.as_of.isoformat(),
-            "quote": ai_input.market_quote,
-            "regime": ai_input.market_structure_context.get("regime", "UNKNOWN"),
-            "sessions": ai_input.market_structure_context.get("current_sessions", []),
-            "indicators": ai_input.market_structure_context.get("indicators", {}),
+            "quote": ai_input.quote_context.model_dump(mode="json"),
+            "regime": ai_input.structure_context.regime,
+            "sessions": list(ai_input.structure_context.current_sessions),
         }
 
 
@@ -143,13 +149,13 @@ class SMCICTAnalyst(BaseAnalyticalAgent):
         return {
             "symbol": ai_input.symbol,
             "as_of": ai_input.as_of.isoformat(),
-            "internal_state": ai_input.market_structure_context.get("internal_state", "UNKNOWN"),
-            "external_state": ai_input.market_structure_context.get("external_state", "UNKNOWN"),
-            "swings_count": len(ai_input.market_structure_context.get("swings", [])),  # type: ignore[arg-type]
-            "events": ai_input.market_structure_context.get("events", [])[:10],
-            "liquidity": ai_input.market_structure_context.get("liquidity", [])[:10],
-            "zones": ai_input.market_structure_context.get("zones", [])[:10],
-            "dealing_range": ai_input.market_structure_context.get("dealing_range"),
+            "internal_state": ai_input.structure_context.internal_state,
+            "external_state": ai_input.structure_context.external_state,
+            "swings_count": len(ai_input.structure_context.swings),
+            "events": list(ai_input.structure_context.events[:10]),
+            "liquidity": list(ai_input.structure_context.liquidity[:10]),
+            "zones": list(ai_input.structure_context.zones[:10]),
+            "dealing_range": ai_input.structure_context.dealing_range,
         }
 
 
@@ -161,8 +167,11 @@ class MacroNewsAnalyst(BaseAnalyticalAgent):
         return {
             "symbol": ai_input.symbol,
             "as_of": ai_input.as_of.isoformat(),
-            "news_context": ai_input.news_context,
-            "news_provenance": ai_input.news_provenance,
+            "news_context": ai_input.news_context.model_dump(mode="json"),
+            "news_provenance": {
+                "provider": ai_input.provenance.news_provider,
+                "revision": ai_input.provenance.news_revision,
+            },
         }
 
 
@@ -174,12 +183,13 @@ class StrategyCritic(BaseAnalyticalAgent):
         return {
             "symbol": ai_input.symbol,
             "as_of": ai_input.as_of.isoformat(),
-            "candidate": ai_input.strategy_candidate,
+            "candidate": ai_input.strategy_context.model_dump(mode="json"),
             "plan_summary": {
-                "direction": ai_input.trade_plan.get("direction"),
-                "score": ai_input.trade_plan.get("score"),
-                "invalidation_th": ai_input.trade_plan.get("invalidation_th"),
-                "warnings_th": ai_input.trade_plan.get("warnings_th", []),
+                "plan_id": ai_input.trade_plan_context.plan_id,
+                "invalidation_th": ai_input.trade_plan_context.invalidation_th,
+                "risk_reward_ratio": str(ai_input.trade_plan_context.risk_reward_ratio)
+                if ai_input.trade_plan_context.risk_reward_ratio is not None
+                else None,
             },
         }
 
@@ -192,8 +202,8 @@ class RiskInterpreter(BaseAnalyticalAgent):
         return {
             "symbol": ai_input.symbol,
             "as_of": ai_input.as_of.isoformat(),
-            "risk_decision": ai_input.risk_decision,
-            "kill_switch_state": ai_input.kill_switch_state,
+            "risk_decision": ai_input.risk_context.model_dump(mode="json"),
+            "kill_switch_state": ai_input.kill_switch_context.model_dump(mode="json"),
         }
 
 
@@ -205,10 +215,10 @@ class TradeThesisAgent(BaseAnalyticalAgent):
         return {
             "symbol": ai_input.symbol,
             "as_of": ai_input.as_of.isoformat(),
-            "strategy_direction": ai_input.strategy_candidate.get("direction"),
-            "strategy_score": ai_input.strategy_candidate.get("score"),
-            "risk_status": ai_input.risk_decision.get("decision"),
-            "kill_switch_state": ai_input.kill_switch_state.get("state"),
+            "strategy_direction": ai_input.strategy_context.direction,
+            "strategy_score": ai_input.strategy_context.score,
+            "risk_status": ai_input.risk_context.decision,
+            "kill_switch_state": ai_input.kill_switch_context.state,
         }
 
 
@@ -222,6 +232,21 @@ def get_all_analytical_agents() -> tuple[BaseAnalyticalAgent, ...]:
         RiskInterpreter(),
         TradeThesisAgent(),
     )
+
+
+class MetaSynthesisOutput(BaseModel):
+    """Strict schema for Meta Controller provider output. Extra fields are strictly forbidden."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    directional_bias: DirectionalBias = "NEUTRAL"
+    evidence_strength: EvidenceStrength = "MODERATE"
+    agent_agreement: AgentAgreement = "LOW"
+    summary_th: str = "สรุปผลการวิเคราะห์ภาพรวมโดย AI"
+    key_evidence_th: tuple[str, ...] = ()
+    conflicts_th: tuple[str, ...] = ()
+    risk_notes_th: tuple[str, ...] = ()
+    warnings_th: tuple[str, ...] = ()
 
 
 class MetaController:
@@ -249,8 +274,8 @@ class MetaController:
         meta_context = {
             "symbol": ai_input.symbol,
             "as_of": ai_input.as_of.isoformat(),
-            "risk_decision": ai_input.risk_decision.get("decision"),
-            "kill_switch_state": ai_input.kill_switch_state.get("state"),
+            "risk_decision": ai_input.risk_context.decision,
+            "kill_switch_state": ai_input.kill_switch_context.state,
             "agent_agreement": agreement,
             "agent_summaries": {
                 aid: {
@@ -267,6 +292,7 @@ class MetaController:
         wrapped_payload = wrap_untrusted_data(meta_context)
         system_prompt = get_prompt(self.prompt_id)
 
+        meta_failed = False
         try:
             res = await provider.analyze(
                 agent_id=self.agent_id,
@@ -277,21 +303,19 @@ class MetaController:
             )
             raw = dict(res.raw_payload)
 
-            bias = raw.get("directional_bias", "NEUTRAL")
-            if bias not in ("LONG", "SHORT", "NEUTRAL", "NO_BIAS"):
-                bias = "NEUTRAL"
-            strength = raw.get("evidence_strength", "MODERATE")
-            if strength not in ("STRONG", "MODERATE", "WEAK", "INSUFFICIENT"):
-                strength = "MODERATE"
-
-            summary_th = str(raw.get("summary_th", "สรุปผลการวิเคราะห์ภาพรวมโดย AI"))
-            key_evidence_th = tuple(str(x) for x in raw.get("key_evidence_th", []))
-            conflicts_th = tuple(str(x) for x in raw.get("conflicts_th", []))
-            risk_notes_th = tuple(str(x) for x in raw.get("risk_notes_th", []))
-            warnings_th = tuple(str(x) for x in raw.get("warnings_th", []))
+            # Strict validation: any forbidden fields (execute, order_type, stop_loss, etc.) fail here
+            validated = MetaSynthesisOutput.model_validate(raw)
+            bias = validated.directional_bias
+            strength = validated.evidence_strength
+            summary_th = validated.summary_th
+            key_evidence_th = validated.key_evidence_th
+            conflicts_th = validated.conflicts_th
+            risk_notes_th = validated.risk_notes_th
+            warnings_th = validated.warnings_th
 
         except Exception as exc:
             logger.warning("MetaController synthesis failed: %s", exc)
+            meta_failed = True
             bias = "NEUTRAL"
             strength = "INSUFFICIENT"
             summary_th = f"การประมวลผล Meta Controller เกิดข้อผิดพลาด: {exc}"
@@ -300,10 +324,12 @@ class MetaController:
             risk_notes_th = ("Meta Controller failed",)
             warnings_th = (str(exc),)
 
-        # 3. Derive meta status based on agent results
+        # 3. Derive meta status based on agent results AND meta controller health
         ready_count = sum(1 for r in agent_results.values() if r.status == "READY")
-        if ready_count == 6:
-            meta_status: MetaStatus = "READY"
+        if meta_failed:
+            meta_status: MetaStatus = "DEGRADED" if ready_count > 0 else "UNAVAILABLE"
+        elif ready_count == 6:
+            meta_status = "READY"
         elif ready_count >= 4:
             meta_status = "PARTIAL"
         elif ready_count >= 1:
@@ -323,17 +349,18 @@ class MetaController:
             "evidence_strength": strength,
             "agent_agreement": agreement,
             "agent_biases": {k: v.directional_bias for k, v in sorted(agent_results.items())},
-            "risk_decision_id": str(ai_input.risk_decision.get("id", "")),
+            "risk_decision_id": ai_input.risk_context.decision_id,
+            "input_fingerprint": ai_input.input_fingerprint,
         }
         analysis_fp = fingerprint(semantic_data)
 
         return AIAnalysisResult(
-            analysis_id=f"ai_{analysis_fp[:32]}",
+            analysis_id=ai_input.analysis_id or f"ai_{analysis_fp[:32]}",
             symbol=ai_input.symbol,
             as_of=ai_input.as_of,
             status=meta_status,
-            directional_bias=bias,  # type: ignore[arg-type]
-            evidence_strength=strength,  # type: ignore[arg-type]
+            directional_bias=bias,
+            evidence_strength=strength,
             agent_agreement=agreement,
             summary_th=summary_th,
             key_evidence_th=key_evidence_th,
@@ -341,11 +368,11 @@ class MetaController:
             risk_notes_th=risk_notes_th,
             warnings_th=warnings_th,
             agent_results=agent_results,
-            strategy_id=str(ai_input.strategy_candidate.get("strategy_id", "")),
-            strategy_version=str(ai_input.strategy_candidate.get("strategy_version", "")),
-            risk_decision_id=str(ai_input.risk_decision.get("id", "")),
-            risk_decision_status=str(ai_input.risk_decision.get("decision", "")),
-            kill_switch_state=str(ai_input.kill_switch_state.get("state", "INACTIVE")),
+            strategy_id=ai_input.strategy_context.strategy_id,
+            strategy_version=ai_input.strategy_context.strategy_version,
+            risk_decision_id=ai_input.risk_context.decision_id,
+            risk_decision_status=ai_input.risk_context.decision,
+            kill_switch_state=ai_input.kill_switch_context.state,
             provider_provenance=config.provider,
             prompt_versions=prompt_versions,
             generated_at=now_utc,

@@ -97,6 +97,25 @@ def test_compute_agent_agreement_logic():
     assert compute_agent_agreement(["LONG", "LONG", "LONG", "SHORT"]) == "MEDIUM"
     assert compute_agent_agreement(["LONG", "LONG", "SHORT", "SHORT"]) == "CONFLICTING"
     assert compute_agent_agreement(["NEUTRAL", "NO_BIAS"]) == "LOW"
+    assert compute_agent_agreement(["NO_BIAS", "NO_BIAS", "NO_BIAS"]) == "UNAVAILABLE"
+
+
+def test_meta_output_schema_forbids_execution_fields():
+    """Verify that MetaSynthesisOutput rejects forbidden order execution fields via extra='forbid'."""
+    from app.services.ai.agents import MetaSynthesisOutput
+
+    valid_meta = {
+        "directional_bias": "LONG",
+        "evidence_strength": "STRONG",
+        "agent_agreement": "HIGH",
+        "summary_th": "สรุปผล",
+    }
+    obj = MetaSynthesisOutput.model_validate(valid_meta)
+    assert obj.directional_bias == "LONG"
+
+    for forbidden_field in ("entry", "stop_loss", "take_profit", "order_send", "execute"):
+        with pytest.raises(ValidationError):
+            MetaSynthesisOutput.model_validate({**valid_meta, forbidden_field: "injected"})
 
 
 def test_semantic_fingerprint_determinism():
@@ -106,26 +125,230 @@ def test_semantic_fingerprint_determinism():
     assert fingerprint(d1) == fingerprint(d2)
 
 
+def test_semantic_fingerprint_ignores_clock_jitter():
+    """Verify semantic input fingerprint is identical across different request times and UUIDs."""
+    from decimal import Decimal
+
+    from app.services.ai.domain import (
+        AIKillSwitchContext,
+        AIMarketQuoteContext,
+        AIMarketStructureContext,
+        AINewsContext,
+        AIProvenance,
+        AIRiskDecisionContext,
+        AIStrategyContext,
+        AITradePlanContext,
+        compute_semantic_input_fingerprint,
+    )
+
+    t0 = dt.datetime(2026, 9, 13, 10, 0, 0, tzinfo=dt.UTC)
+    quote = AIMarketQuoteContext(
+        symbol="XAUUSD",
+        bid=Decimal("2500.00"),
+        ask=Decimal("2500.30"),
+        spread=Decimal("0.30"),
+        timestamp=t0,
+        is_stale=False,
+    )
+    structure = AIMarketStructureContext(
+        symbol="XAUUSD",
+        timeframe="M15",
+        as_of=t0,
+        regime="TRENDING_UP",
+        internal_state="BULLISH",
+        external_state="BULLISH",
+        current_sessions=("LONDON",),
+    )
+    news = AINewsContext(news_state="CALM", as_of=t0)
+    strategy = AIStrategyContext(
+        candidate_id="cand_01",
+        strategy_id="STRAT01",
+        profile_id="day_trader",
+        symbol="XAUUSD",
+        direction="LONG",
+        score=85,
+        detected_at=t0,
+    )
+    trade_plan = AITradePlanContext(
+        plan_id="plan_01",
+        entry_lower=Decimal("2500.00"),
+        entry_upper=Decimal("2501.00"),
+        stop_loss=Decimal("2495.00"),
+        take_profit_1=Decimal("2510.00"),
+        take_profit_2=Decimal("2520.00"),
+        risk_reward_ratio=Decimal("2.0"),
+        invalidation_th="หลุดแนวรับ",
+    )
+    risk = AIRiskDecisionContext(
+        decision_id="dec_01",
+        decision="APPROVED",
+        account_id="acc_01",
+        profile_id="day_trader",
+        requested_risk_pct=Decimal("1.0"),
+        approved_risk_pct=Decimal("1.0"),
+        requested_risk_amount=Decimal("100.00"),
+        approved_risk_amount=Decimal("100.00"),
+        position_size=Decimal("0.14"),
+        policy_version="risk-policy-1.0.0",
+        as_of=t0,
+        expires_at=t0 + dt.timedelta(minutes=15),
+        reservation_id="res_01",
+        reservation_status="ACTIVE",
+    )
+    ks = AIKillSwitchContext(record_id="ks_01", state="INACTIVE", trigger_type="NONE")
+    prov = AIProvenance(
+        market_source="simulated",
+        strategy_candidate_id="cand_01",
+        strategy_evaluation_id="eval_01",
+        trade_plan_id="plan_01",
+        risk_decision_id="dec_01",
+        risk_reservation_id="res_01",
+    )
+
+    fp1 = compute_semantic_input_fingerprint(
+        symbol="XAUUSD",
+        account_id="acc_01",
+        profile_id="day_trader",
+        as_of=t0,
+        quote_context=quote,
+        structure_context=structure,
+        news_context=news,
+        strategy_context=strategy,
+        trade_plan_context=trade_plan,
+        risk_context=risk,
+        kill_switch_context=ks,
+        provenance=prov,
+    )
+    fp2 = compute_semantic_input_fingerprint(
+        symbol="XAUUSD",
+        account_id="acc_01",
+        profile_id="day_trader",
+        as_of=t0,
+        quote_context=quote,
+        structure_context=structure,
+        news_context=news,
+        strategy_context=strategy,
+        trade_plan_context=trade_plan,
+        risk_context=risk,
+        kill_switch_context=ks,
+        provenance=prov,
+    )
+    assert fp1 == fp2
+
+
 @pytest.mark.asyncio
 async def test_full_orchestrator_happy_path():
     """Verify happy path orchestrated analysis with fixture provider."""
+    from decimal import Decimal
+
+    from app.services.ai.domain import (
+        AIKillSwitchContext,
+        AIMarketQuoteContext,
+        AIMarketStructureContext,
+        AINewsContext,
+        AIProvenance,
+        AIRiskDecisionContext,
+        AIStrategyContext,
+        AITradePlanContext,
+        compute_semantic_input_fingerprint,
+    )
+
     now = dt.datetime.now(dt.UTC)
+    quote = AIMarketQuoteContext(
+        symbol="XAUUSD",
+        bid=Decimal("2500.00"),
+        ask=Decimal("2500.30"),
+        spread=Decimal("0.30"),
+        timestamp=now,
+        is_stale=False,
+    )
+    structure = AIMarketStructureContext(
+        symbol="XAUUSD",
+        timeframe="M15",
+        as_of=now,
+        regime="TRENDING_UP",
+        internal_state="BULLISH",
+        external_state="BULLISH",
+        current_sessions=("LONDON",),
+    )
+    news = AINewsContext(news_state="CALM", as_of=now)
+    strategy = AIStrategyContext(
+        candidate_id="cand_01",
+        strategy_id="STRAT01",
+        profile_id="day_trader",
+        symbol="XAUUSD",
+        direction="LONG",
+        score=85,
+        detected_at=now,
+    )
+    trade_plan = AITradePlanContext(
+        plan_id="plan_01",
+        entry_lower=Decimal("2500.00"),
+        entry_upper=Decimal("2501.00"),
+        stop_loss=Decimal("2495.00"),
+        take_profit_1=Decimal("2510.00"),
+        take_profit_2=Decimal("2520.00"),
+        risk_reward_ratio=Decimal("2.0"),
+        invalidation_th="หลุดแนวรับ",
+    )
+    risk = AIRiskDecisionContext(
+        decision_id="dec_01",
+        decision="APPROVED",
+        account_id="acc_01",
+        profile_id="day_trader",
+        requested_risk_pct=Decimal("1.0"),
+        approved_risk_pct=Decimal("1.0"),
+        requested_risk_amount=Decimal("100.00"),
+        approved_risk_amount=Decimal("100.00"),
+        position_size=Decimal("0.14"),
+        policy_version="risk-policy-1.0.0",
+        as_of=now,
+        expires_at=now + dt.timedelta(minutes=15),
+        reservation_id="res_01",
+        reservation_status="ACTIVE",
+    )
+    ks = AIKillSwitchContext(record_id="ks_01", state="INACTIVE", trigger_type="NONE")
+    prov = AIProvenance(
+        market_source="simulated",
+        strategy_candidate_id="cand_01",
+        strategy_evaluation_id="eval_01",
+        trade_plan_id="plan_01",
+        risk_decision_id="dec_01",
+        risk_reservation_id="res_01",
+    )
+    fp = compute_semantic_input_fingerprint(
+        symbol="XAUUSD",
+        account_id="acc_01",
+        profile_id="day_trader",
+        as_of=now,
+        quote_context=quote,
+        structure_context=structure,
+        news_context=news,
+        strategy_context=strategy,
+        trade_plan_context=trade_plan,
+        risk_context=risk,
+        kill_switch_context=ks,
+        provenance=prov,
+    )
+
     ai_input = AIAnalysisInput(
         analysis_id="test_ai_01",
         trace_id="tr_01",
-        symbol="XAUUSD",
+        analysis_requested_at=now,
         as_of=now,
-        market_quote={"symbol": "XAUUSD", "is_stale": False, "bid": "2500.00", "ask": "2500.30"},
-        market_structure_context={"regime": "TRENDING_UP", "internal_state": "BULLISH"},
-        news_context={"news_state": "CALM", "events": []},
-        strategy_candidate={"id": "cand_01", "direction": "LONG", "score": 85, "strategy_id": "STRAT01"},
-        trade_plan={"direction": "LONG", "score": 85, "invalidation_th": "หลุดแนวรับ"},
-        risk_decision={"id": "dec_01", "decision": "APPROVED", "approved_risk_pct": "1.0"},
-        kill_switch_state={"state": "INACTIVE"},
-        market_provenance={"source": "simulated"},
-        news_provenance={"source": "forex_factory"},
+        symbol="XAUUSD",
+        account_id="acc_01",
+        profile_id="day_trader",
+        quote_context=quote,
+        structure_context=structure,
+        news_context=news,
+        strategy_context=strategy,
+        trade_plan_context=trade_plan,
+        risk_context=risk,
+        kill_switch_context=ks,
+        provenance=prov,
         input_versions={"ai": "1.0.0"},
-        input_fingerprint="fp_test_01",
+        input_fingerprint=fp,
     )
 
     provider = FixtureAIProvider()
@@ -226,4 +449,3 @@ async def test_ai_advisory_api_endpoint_roundtrip(client, auth_headers, db_sessi
     assert data["execution_disclaimer"] == "ADVISORY_ONLY_NO_EXECUTION_AUTHORITY"
     assert data["status"] in ("READY", "BLOCKED_BY_RISK", "BLOCKED_BY_KILL_SWITCH")
     assert "analysis_fingerprint" in data
-

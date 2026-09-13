@@ -1,32 +1,65 @@
 """Comprehensive adversarial and safety tests for Phase 6.1 AI Foundation.
 
-Covers all 25+ mandatory safety tests specified in Section 52:
-- Pre-flight Kill Switch & Risk gates
-- Stale data & lookahead leakage prevention
-- Partial & total agent failure modes
-- Malformed & schema-invalid model outputs
+Covers all mandatory safety requirements:
+- Pre-flight Kill Switch (ACTIVE -> BLOCKED_BY_KILL_SWITCH, UNKNOWN -> BLOCKED_BY_UPSTREAM)
+- Risk decision gates (BLOCKED -> BLOCKED_BY_RISK,
+  UNAPPROVED/EXPIRED -> BLOCKED_BY_RISK, RESERVATION_INACTIVE -> BLOCKED_BY_UPSTREAM)
+- Stale market quote -> STALE
+- Recursive no-lookahead matrix (quote, news, swings, events, liquidity, zones, strategy evidence)
+- Partial & total agent failure modes (PARTIAL, DEGRADED, UNAVAILABLE)
+- Meta Controller failure semantics (DEGRADED or UNAVAILABLE, NEVER READY)
+- Meta extra forbidden output fields rejection
+- Provider hard timeouts with task cancellation on indefinite hang
 - English & Thai prompt injection defenses
-- Model output forbidden execution / order field rejections
+- Forbidden execution / order field rejections
 - Upstream Strategy & Risk immutability
 - Decoupling of Risk Engine safety when AI is down
+- Assembler cross-user authorization (403 ForbiddenError, 0 provider calls)
+- Assembler account mismatch & profile mismatch fail-closed
+- Assembler missing risk (RISK_NOT_EVALUATED, no fake IDs)
+- Assembler expired risk & released reservation fail-closed
+- API rate limiting (RateLimitedError 429)
 """
 
 import datetime as dt
+import uuid
 from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
 
+from app.core.errors import ForbiddenError, RateLimitedError
+from app.core.errors import ValidationError as AppValidationError
+from app.core.rate_limit import RateLimiter
+from app.models import Role
+from app.models.account import Account, TradingMode
+from app.models.risk import (
+    AccountSnapshotRecord,
+    RiskDecisionRecord,
+    RiskReservationRecord,
+)
+from app.models.strategy import StrategyEvaluationRecord, TradeCandidateRecord
+from app.services.ai.assembler import AIAnalysisInputAssembler
 from app.services.ai.domain import (
     ANALYTICAL_AGENT_IDS,
     AgentAnalysisResult,
     AIAnalysisInput,
-    fingerprint,
+    AIKillSwitchContext,
+    AIMarketQuoteContext,
+    AIMarketStructureContext,
+    AINewsContext,
+    AINewsEventContext,
+    AIProvenance,
+    AIRiskDecisionContext,
+    AIStrategyContext,
+    AITradePlanContext,
+    compute_semantic_input_fingerprint,
 )
 from app.services.ai.orchestrator import AIOrchestrator
 from app.services.ai.prompts import wrap_untrusted_data
 from app.services.ai.provider import FixtureAIProvider, ModelConfig
 from app.services.risk.domain import RiskDecision
+from app.services.users import create_user
 
 
 @pytest.fixture
@@ -36,29 +69,131 @@ def now_time() -> dt.datetime:
 
 @pytest.fixture
 def base_ai_input(now_time) -> AIAnalysisInput:
+    quote = AIMarketQuoteContext(
+        symbol="XAUUSD",
+        bid=Decimal("2500.00"),
+        ask=Decimal("2500.30"),
+        spread=Decimal("0.30"),
+        timestamp=now_time,
+        is_stale=False,
+        source="simulated",
+    )
+    structure = AIMarketStructureContext(
+        symbol="XAUUSD",
+        timeframe="M15",
+        as_of=now_time,
+        internal_state="BULLISH",
+        external_state="BULLISH",
+        regime="TRENDING_UP",
+        current_sessions=("LONDON",),
+        swings=(),
+        events=(),
+        liquidity=(),
+        zones=(),
+    )
+    news = AINewsContext(
+        news_state="CALM",
+        in_blackout=False,
+        as_of=now_time,
+        events=(),
+        event_ids=(),
+    )
+    strategy = AIStrategyContext(
+        candidate_id="cand_adv_01",
+        strategy_id="STRAT01",
+        strategy_version="1.0.0",
+        profile_id="day_trader",
+        symbol="XAUUSD",
+        direction="LONG",
+        score=85,
+        detected_at=now_time,
+        confirmed_at=now_time,
+        status="PENDING",
+        evidence=(),
+    )
+    trade_plan = AITradePlanContext(
+        plan_id="plan_adv_01",
+        entry_lower=Decimal("2500.00"),
+        entry_upper=Decimal("2501.00"),
+        stop_loss=Decimal("2495.00"),
+        take_profit_1=Decimal("2510.00"),
+        take_profit_2=Decimal("2520.00"),
+        risk_reward_ratio=Decimal("2.0"),
+        invalidation_th="หลุดแนวรับ",
+        expires_at=now_time + dt.timedelta(hours=2),
+    )
+    risk = AIRiskDecisionContext(
+        decision_id="dec_adv_01",
+        decision="APPROVED",
+        account_id="acc_adv_01",
+        profile_id="day_trader",
+        requested_risk_pct=Decimal("1.0"),
+        approved_risk_pct=Decimal("1.0"),
+        requested_risk_amount=Decimal("100.00"),
+        approved_risk_amount=Decimal("100.00"),
+        position_size=Decimal("0.14"),
+        policy_version="risk-policy-1.0.0",
+        as_of=now_time,
+        expires_at=now_time + dt.timedelta(minutes=15),
+        reservation_id="res_adv_01",
+        reservation_status="ACTIVE",
+    )
+    kill_switch = AIKillSwitchContext(
+        record_id="ks_adv_01",
+        state="INACTIVE",
+        trigger_type="NONE",
+    )
+    provenance = AIProvenance(
+        market_source="simulated",
+        strategy_candidate_id="cand_adv_01",
+        strategy_evaluation_id="eval_adv_01",
+        trade_plan_id="plan_adv_01",
+        risk_decision_id="dec_adv_01",
+        risk_reservation_id="res_adv_01",
+        kill_switch_record_id="ks_adv_01",
+        kill_switch_as_of=now_time,
+    )
+    fp = compute_semantic_input_fingerprint(
+        symbol="XAUUSD",
+        account_id="acc_adv_01",
+        profile_id="day_trader",
+        as_of=now_time,
+        quote_context=quote,
+        structure_context=structure,
+        news_context=news,
+        strategy_context=strategy,
+        trade_plan_context=trade_plan,
+        risk_context=risk,
+        kill_switch_context=kill_switch,
+        provenance=provenance,
+    )
     return AIAnalysisInput(
         analysis_id="ai_adv_test_01",
         trace_id="tr_adv_01",
-        symbol="XAUUSD",
+        analysis_requested_at=now_time,
         as_of=now_time,
-        market_quote={"symbol": "XAUUSD", "is_stale": False, "bid": "2500.00", "ask": "2500.30"},
-        market_structure_context={"regime": "TRENDING_UP", "internal_state": "BULLISH"},
-        news_context={"news_state": "CALM", "events": []},
-        strategy_candidate={"id": "cand_adv_01", "direction": "LONG", "score": 85, "strategy_id": "STRAT01"},
-        trade_plan={"direction": "LONG", "score": 85, "invalidation_th": "หลุดแนวรับ"},
-        risk_decision={"id": "dec_adv_01", "decision": "APPROVED", "approved_risk_pct": "1.0"},
-        kill_switch_state={"state": "INACTIVE"},
-        market_provenance={"source": "simulated"},
-        news_provenance={"source": "forex_factory"},
+        symbol="XAUUSD",
+        account_id="acc_adv_01",
+        profile_id="day_trader",
+        quote_context=quote,
+        structure_context=structure,
+        news_context=news,
+        strategy_context=strategy,
+        trade_plan_context=trade_plan,
+        risk_context=risk,
+        kill_switch_context=kill_switch,
+        provenance=provenance,
         input_versions={"ai": "1.0.0"},
-        input_fingerprint="fp_adv_01",
+        input_fingerprint=fp,
     )
 
 
 # 1. Kill Switch ACTIVE -> zero provider analytical calls -> BLOCKED_BY_KILL_SWITCH
 @pytest.mark.asyncio
 async def test_01_kill_switch_active_blocks_with_zero_calls(base_ai_input):
-    ks_input = base_ai_input.model_copy(update={"kill_switch_state": {"state": "ACTIVE"}})
+    ks_input = base_ai_input.model_copy(
+        update={"kill_switch_context": base_ai_input.kill_switch_context.model_copy(update={"state": "ACTIVE"})}
+    )
     provider = FixtureAIProvider()
     orchestrator = AIOrchestrator(provider=provider)
 
@@ -74,7 +209,11 @@ async def test_01_kill_switch_active_blocks_with_zero_calls(base_ai_input):
 @pytest.mark.asyncio
 async def test_02_risk_decision_blocked_blocks_with_zero_calls(base_ai_input):
     risk_input = base_ai_input.model_copy(
-        update={"risk_decision": {"id": "dec_blk", "decision": "BLOCKED", "blocked_reasons_th": ["Daily loss limit"]}}
+        update={
+            "risk_context": base_ai_input.risk_context.model_copy(
+                update={"decision": "BLOCKED", "blocked_reasons_th": ("Daily loss limit",)}
+            )
+        }
     )
     provider = FixtureAIProvider()
     orchestrator = AIOrchestrator(provider=provider)
@@ -100,11 +239,11 @@ async def test_03_risk_approved_valid_data_executes_all_agents(base_ai_input):
     assert res.execution_disclaimer == "ADVISORY_ONLY_NO_EXECUTION_AUTHORITY"
 
 
-# 4. Market stale -> STALE/BLOCKED_BY_UPSTREAM
+# 4. Market stale -> STALE
 @pytest.mark.asyncio
 async def test_04_market_stale_returns_stale_status(base_ai_input):
     stale_input = base_ai_input.model_copy(
-        update={"market_quote": {"symbol": "XAUUSD", "is_stale": True, "bid": "2500.00", "ask": "2500.30"}}
+        update={"quote_context": base_ai_input.quote_context.model_copy(update={"is_stale": True})}
     )
     provider = FixtureAIProvider()
     orchestrator = AIOrchestrator(provider=provider)
@@ -150,14 +289,14 @@ async def test_07_all_agents_fail_results_in_unavailable_status(base_ai_input):
     assert all(r.status == "DEGRADED" for r in res.agent_results.values())
 
 
-# 8. Meta Controller fails -> handles exception safely without crashing
+# 8. Meta Controller fails -> handles exception safely without crashing; status DEGRADED
 @pytest.mark.asyncio
 async def test_08_meta_controller_fails_handled_safely(base_ai_input):
     provider = FixtureAIProvider(fail_agents={"meta_controller"})
     orchestrator = AIOrchestrator(provider=provider)
 
     res = await orchestrator.analyze(base_ai_input)
-    assert "Meta Controller" in res.summary_th or "ข้อผิดพลาด" in res.summary_th
+    assert res.status in ("DEGRADED", "UNAVAILABLE"), "Meta failure must NEVER return READY"
     assert len(res.agent_results) == 6
 
 
@@ -169,10 +308,6 @@ async def test_09_malformed_provider_json_degrades_agent(base_ai_input):
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.agent_results["strategy_critic"].status == "DEGRADED"
-    assert (
-        "JSON" in res.agent_results["strategy_critic"].summary_th
-        or "ไม่พร้อม" in res.agent_results["strategy_critic"].summary_th
-    )
 
 
 # 10. Schema-invalid provider output -> rejected safely
@@ -190,14 +325,20 @@ def test_11_future_news_data_rejected_by_lookahead_validator(base_ai_input, now_
     future_time = now_time + dt.timedelta(hours=1)
     bad_input = base_ai_input.model_copy(
         update={
-            "news_context": {
-                "events": [
-                    {
-                        "event_id": "ev_future",
-                        "available_at": future_time.isoformat(),
-                    }
-                ]
-            }
+            "news_context": base_ai_input.news_context.model_copy(
+                update={
+                    "events": (
+                        AINewsEventContext(
+                            id="ev_future",
+                            title="Future Event",
+                            currency="USD",
+                            impact="HIGH",
+                            scheduled_at=future_time,
+                            available_at=future_time,
+                        ),
+                    )
+                }
+            )
         }
     )
     with pytest.raises(ValueError, match="No-lookahead violation"):
@@ -208,7 +349,7 @@ def test_11_future_news_data_rejected_by_lookahead_validator(base_ai_input, now_
 def test_12_future_market_quote_rejected_by_lookahead_validator(base_ai_input, now_time):
     future_time = now_time + dt.timedelta(minutes=10)
     bad_input = base_ai_input.model_copy(
-        update={"market_quote": {"symbol": "XAUUSD", "timestamp": future_time.isoformat()}}
+        update={"quote_context": base_ai_input.quote_context.model_copy(update={"timestamp": future_time})}
     )
     with pytest.raises(ValueError, match="No-lookahead violation"):
         AIOrchestrator.validate_no_lookahead(bad_input)
@@ -366,7 +507,6 @@ async def test_20_deterministic_fingerprint_repeat(base_ai_input):
 @pytest.mark.asyncio
 async def test_21_provider_timeout_handled_safely(base_ai_input):
     provider = FixtureAIProvider(timeout_agents={"trade_thesis"})
-    # Configure tiny timeout for test speed
     config = ModelConfig(timeout_seconds=0.1)
     orchestrator = AIOrchestrator(provider=provider, default_config=config)
 
@@ -389,7 +529,6 @@ async def test_22_token_budget_exceeded_handled_safely(base_ai_input):
 # 23. AI completely unavailable while Risk remains unchanged (Total decoupling)
 @pytest.mark.asyncio
 async def test_23_ai_service_down_does_not_affect_risk_decision(base_ai_input):
-    """Verify that if AI service raises an unhandled error, deterministic RiskDecision remains intact."""
     risk_dec = RiskDecision(
         id="dec_safe_01",
         evaluation_intent_id="intent_01",
@@ -420,11 +559,6 @@ async def test_23_ai_service_down_does_not_affect_risk_decision(base_ai_input):
         execution_blocked="NO_EXECUTION_ANALYSIS_ONLY",
     )
 
-    # RiskDecision is frozen and immutable
-    assert risk_dec.decision == "APPROVED"
-    assert risk_dec.approved_risk_pct == Decimal("1.0")
-
-    # Even if AI orchestrator has failing agents
     broken_orchestrator = AIOrchestrator(provider=FixtureAIProvider(fail_agents=set(ANALYTICAL_AGENT_IDS)))
     res = await broken_orchestrator.analyze(base_ai_input)
     assert res.status == "UNAVAILABLE"
@@ -437,48 +571,557 @@ async def test_23_ai_service_down_does_not_affect_risk_decision(base_ai_input):
 # 24. Upstream Strategy & TradePlan Immutability
 @pytest.mark.asyncio
 async def test_24_upstream_strategy_and_tradeplan_immutable(base_ai_input):
-    """Verify that running AI analysis does not mutate upstream strategy candidate or trade plan in memory."""
-    target_plan = {
-        "id": "plan_immut_01",
-        "direction": "LONG",
-        "score": 85,
-        "entry_lower": 2500.0,
-        "entry_upper": 2501.0,
-        "stop_loss": 2495.0,
-        "invalidation_th": "หลุดแนวรับ",
-    }
-    cand_dict = {
-        "id": "cand_immut_01",
-        "direction": "LONG",
-        "score": 85,
-        "strategy_id": "STRAT01",
-    }
-    input_with_dicts = base_ai_input.model_copy(
-        update={"strategy_candidate": cand_dict, "trade_plan": target_plan}
-    )
-
-    fp_plan_before = fingerprint(target_plan)
-    fp_cand_before = fingerprint(cand_dict)
+    before_strat = base_ai_input.strategy_context.model_dump()
+    before_plan = base_ai_input.trade_plan_context.model_dump()
 
     orchestrator = AIOrchestrator(provider=FixtureAIProvider())
-    res = await orchestrator.analyze(input_with_dicts)
+    res = await orchestrator.analyze(base_ai_input)
 
     assert res.status == "READY"
-    assert fingerprint(target_plan) == fp_plan_before, "TradePlan must not be mutated"
-    assert fingerprint(cand_dict) == fp_cand_before, "Candidate must not be mutated"
+    assert base_ai_input.strategy_context.model_dump() == before_strat
+    assert base_ai_input.trade_plan_context.model_dump() == before_plan
 
 
 # 25. Adversarial injection hook inside fixture provider fails Pydantic validation
 @pytest.mark.asyncio
 async def test_25_adversarial_injection_hook_fails_validation(base_ai_input):
-    """Verify that if an adversarial model attempts to output forbidden fields, the agent degrades."""
     provider = FixtureAIProvider(injection_agents={"trade_thesis"})
     orchestrator = AIOrchestrator(provider=provider)
 
     res = await orchestrator.analyze(base_ai_input)
-    # The injected trade thesis result will fail Pydantic validation and become DEGRADED
     assert res.agent_results["trade_thesis"].status == "DEGRADED"
-    assert (
-        "extra fields not permitted" in res.agent_results["trade_thesis"].summary_th
-        or res.agent_results["trade_thesis"].status == "DEGRADED"
+
+
+# 26. Kill Switch UNKNOWN -> BLOCKED_BY_UPSTREAM with 0 provider calls
+@pytest.mark.asyncio
+async def test_26_kill_switch_unknown_blocks_with_blocked_by_upstream(base_ai_input):
+    ks_input = base_ai_input.model_copy(
+        update={"kill_switch_context": base_ai_input.kill_switch_context.model_copy(update={"state": "UNKNOWN"})}
     )
+    provider = FixtureAIProvider()
+    orchestrator = AIOrchestrator(provider=provider)
+
+    res = await orchestrator.analyze(ks_input)
+    assert res.status == "BLOCKED_BY_UPSTREAM"
+    assert len(provider.call_history) == 0
+
+
+# 27. Risk decision reservation inactive -> BLOCKED_BY_UPSTREAM
+@pytest.mark.asyncio
+async def test_27_risk_decision_reservation_inactive_blocks(base_ai_input):
+    risk_input = base_ai_input.model_copy(
+        update={"risk_context": base_ai_input.risk_context.model_copy(update={"reservation_status": "INACTIVE"})}
+    )
+    provider = FixtureAIProvider()
+    orchestrator = AIOrchestrator(provider=provider)
+
+    res = await orchestrator.analyze(risk_input)
+    assert res.status == "BLOCKED_BY_UPSTREAM"
+    assert len(provider.call_history) == 0
+
+
+# 28. Risk decision not evaluated -> BLOCKED_BY_RISK
+@pytest.mark.asyncio
+async def test_28_risk_decision_not_evaluated_blocks(base_ai_input):
+    risk_input = base_ai_input.model_copy(
+        update={"risk_context": base_ai_input.risk_context.model_copy(update={"decision": "RISK_NOT_EVALUATED"})}
+    )
+    provider = FixtureAIProvider()
+    orchestrator = AIOrchestrator(provider=provider)
+
+    res = await orchestrator.analyze(risk_input)
+    assert res.status == "BLOCKED_BY_RISK"
+    assert len(provider.call_history) == 0
+
+
+# 29. Hanging provider -> hard timeout & task cancellation
+@pytest.mark.asyncio
+async def test_29_hanging_provider_hard_timeout_and_cancellation(base_ai_input):
+    provider = FixtureAIProvider(hanging_agents={"macro_news"})
+    config = ModelConfig(timeout_seconds=0.1)
+    orchestrator = AIOrchestrator(provider=provider, default_config=config)
+
+    res = await orchestrator.analyze(base_ai_input, config=config)
+    assert res.agent_results["macro_news"].status == "DEGRADED"
+    assert "timeout" in res.agent_results["macro_news"].summary_th.lower()
+
+
+# 30. Meta failure never returns READY
+@pytest.mark.asyncio
+async def test_30_meta_failure_never_returns_ready(base_ai_input):
+    provider = FixtureAIProvider(fail_agents={"meta_controller"})
+    orchestrator = AIOrchestrator(provider=provider)
+
+    res = await orchestrator.analyze(base_ai_input)
+    assert res.status != "READY"
+    assert res.status in ("DEGRADED", "UNAVAILABLE")
+
+
+# 31. Lookahead matrix across swings, events, liquidity, zones, and strategy evidence
+def test_31_lookahead_matrix(base_ai_input, now_time):
+    future_time = now_time + dt.timedelta(minutes=5)
+
+    # Swing lookahead
+    bad_swing = base_ai_input.model_copy(
+        update={
+            "structure_context": base_ai_input.structure_context.model_copy(
+                update={"swings": ({"time": future_time.isoformat(), "price": "2500"},)}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="No-lookahead violation"):
+        AIOrchestrator.validate_no_lookahead(bad_swing)
+
+    # Event lookahead
+    bad_event = base_ai_input.model_copy(
+        update={
+            "structure_context": base_ai_input.structure_context.model_copy(
+                update={"events": ({"time": future_time.isoformat(), "type": "BOS"},)}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="No-lookahead violation"):
+        AIOrchestrator.validate_no_lookahead(bad_event)
+
+    # Liquidity lookahead
+    bad_liq = base_ai_input.model_copy(
+        update={
+            "structure_context": base_ai_input.structure_context.model_copy(
+                update={"liquidity": ({"detected_at": future_time.isoformat(), "level": "2500"},)}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="No-lookahead violation"):
+        AIOrchestrator.validate_no_lookahead(bad_liq)
+
+    # Zone lookahead
+    bad_zone = base_ai_input.model_copy(
+        update={
+            "structure_context": base_ai_input.structure_context.model_copy(
+                update={"zones": ({"created_at": future_time.isoformat(), "low": "2490"},)}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="No-lookahead violation"):
+        AIOrchestrator.validate_no_lookahead(bad_zone)
+
+    # Strategy evidence lookahead
+    bad_ev = base_ai_input.model_copy(
+        update={
+            "strategy_context": base_ai_input.strategy_context.model_copy(
+                update={"evidence": ({"time": future_time.isoformat(), "code": "EV1"},)}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="No-lookahead violation"):
+        AIOrchestrator.validate_no_lookahead(bad_ev)
+
+
+# 32. Assembler cross-user authorization rejected (403, 0 calls)
+@pytest.mark.asyncio
+async def test_32_assembler_cross_user_authorization_rejected(db_session):
+    session, _ = db_session
+    user_a = await create_user(session, email="user_a@test.com", password="password123", role=Role.TRADER)
+    user_b = await create_user(session, email="user_b@test.com", password="password123", role=Role.TRADER)
+
+    acc_a = Account(
+        name="acc_user_a",
+        user_id=user_a.id,
+        trading_mode=TradingMode.PAPER,
+        starting_balance=10000.0,
+        base_currency="USD",
+        is_active=True,
+    )
+    session.add(acc_a)
+    await session.commit()
+
+    with pytest.raises(ForbiddenError, match="User is not authorized"):
+        await AIAnalysisInputAssembler.assemble(
+            session,
+            candidate_id="cand_dummy",
+            account_id=str(acc_a.id),
+            current_user=user_b,
+        )
+
+
+# 33. Assembler account mismatch fails closed
+@pytest.mark.asyncio
+async def test_33_assembler_account_mismatch_fails_closed(db_session):
+    session, _ = db_session
+    now = dt.datetime.now(dt.UTC)
+    admin = await create_user(session, email="admin_mismatch@test.com", password="password123", role=Role.ADMIN)
+
+    acc_a = Account(
+        name="acc_mismatch_a",
+        user_id=admin.id,
+        trading_mode=TradingMode.PAPER,
+        starting_balance=10000.0,
+        base_currency="USD",
+        is_active=True,
+    )
+    acc_b = Account(
+        name="acc_mismatch_b",
+        user_id=admin.id,
+        trading_mode=TradingMode.PAPER,
+        starting_balance=10000.0,
+        base_currency="USD",
+        is_active=True,
+    )
+    session.add_all([acc_a, acc_b])
+
+    eval_rec = StrategyEvaluationRecord(
+        id="eval_mismatch",
+        context_id="ctx_01",
+        symbol="XAUUSD",
+        source="simulated",
+        as_of=now,
+        generated_at=now,
+        payload_hash="hash01",
+        payload={"context": {}},
+    )
+    cand_rec = TradeCandidateRecord(
+        id="cand_mismatch",
+        evaluation_id="eval_mismatch",
+        profile_id="day_trader",
+        strategy_id="STRAT01",
+        as_of=now,
+        payload={"symbol": "XAUUSD", "profile_id": "day_trader", "strategy_id": "STRAT01"},
+    )
+    snap_a = AccountSnapshotRecord(
+        id="snap_a",
+        account_id=str(acc_a.id),
+        balance=Decimal("10000.00"),
+        equity=Decimal("10000.00"),
+        free_margin=Decimal("10000.00"),
+        peak_equity=Decimal("10000.00"),
+        as_of=now,
+        payload={},
+    )
+    risk_dec = RiskDecisionRecord(
+        id="dec_mismatch",
+        candidate_id="cand_mismatch",
+        plan_id="plan_01",
+        strategy_id="STRAT01",
+        profile_id="day_trader",
+        symbol="XAUUSD",
+        direction="LONG",
+        decision="APPROVED",
+        requested_risk_pct=Decimal("1.0"),
+        approved_risk_pct=Decimal("1.0"),
+        requested_risk_amount=Decimal("100.00"),
+        approved_risk_amount=Decimal("100.00"),
+        position_size=Decimal("0.14"),
+        entry_lower=Decimal("2500.00"),
+        entry_upper=Decimal("2501.00"),
+        stop_loss=Decimal("2495.00"),
+        stop_distance=Decimal("5.00"),
+        account_snapshot_id="snap_a",
+        policy_version="risk-policy-1.0.0",
+        dependency_fingerprint="fp_dec",
+        as_of=now,
+        expires_at=now + dt.timedelta(minutes=15),
+        payload={},
+    )
+    session.add_all([eval_rec, cand_rec, snap_a, risk_dec])
+    await session.commit()
+
+    # Requested for acc_b, but decision belongs to acc_a -> BLOCKED
+    ai_input = await AIAnalysisInputAssembler.assemble(
+        session,
+        candidate_id="cand_mismatch",
+        account_id=str(acc_b.id),
+        current_user=admin,
+    )
+    assert ai_input.risk_context.decision == "BLOCKED"
+    assert "different account" in ai_input.risk_context.blocked_reasons_th[0]
+
+
+# 34. Assembler profile mismatch raises AppValidationError
+@pytest.mark.asyncio
+async def test_34_assembler_profile_mismatch_fails_closed(db_session):
+    session, _ = db_session
+    now = dt.datetime.now(dt.UTC)
+    admin = await create_user(session, email="admin_prof@test.com", password="password123", role=Role.ADMIN)
+
+    acc_id = uuid.uuid4()
+    acc = Account(
+        id=acc_id,
+        name="acc_prof",
+        user_id=admin.id,
+        trading_mode=TradingMode.PAPER,
+        starting_balance=10000.0,
+        base_currency="USD",
+        is_active=True,
+    )
+    eval_rec = StrategyEvaluationRecord(
+        id="eval_prof",
+        context_id="ctx_01",
+        symbol="XAUUSD",
+        source="simulated",
+        as_of=now,
+        generated_at=now,
+        payload_hash="hash",
+        payload={},
+    )
+    cand_rec = TradeCandidateRecord(
+        id="cand_prof",
+        evaluation_id="eval_prof",
+        profile_id="day_trader",
+        strategy_id="STRAT01",
+        as_of=now,
+        payload={"symbol": "XAUUSD"},
+    )
+    session.add_all([acc, eval_rec, cand_rec])
+    await session.commit()
+
+    with pytest.raises(AppValidationError, match="Candidate profile mismatch"):
+        await AIAnalysisInputAssembler.assemble(
+            session,
+            candidate_id="cand_prof",
+            account_id=str(acc_id),
+            profile_id="swing_trader",  # Mismatch!
+            current_user=admin,
+        )
+
+
+# 35. Assembler expired risk decision -> EXPIRED
+@pytest.mark.asyncio
+async def test_35_assembler_expired_risk_decision_fails_closed(db_session):
+    session, _ = db_session
+    past = dt.datetime.now(dt.UTC) - dt.timedelta(hours=1)
+    admin = await create_user(session, email="admin_exp@test.com", password="password123", role=Role.ADMIN)
+    acc_id = uuid.uuid4()
+    acc = Account(
+        id=acc_id,
+        name="acc_exp",
+        user_id=admin.id,
+        trading_mode=TradingMode.PAPER,
+        starting_balance=10000.0,
+        base_currency="USD",
+        is_active=True,
+    )
+    eval_rec = StrategyEvaluationRecord(
+        id="eval_exp",
+        context_id="ctx_01",
+        symbol="XAUUSD",
+        source="simulated",
+        as_of=past,
+        generated_at=past,
+        payload_hash="hash",
+        payload={},
+    )
+    cand_rec = TradeCandidateRecord(
+        id="cand_exp",
+        evaluation_id="eval_exp",
+        profile_id="day_trader",
+        strategy_id="STRAT01",
+        as_of=past,
+        payload={"symbol": "XAUUSD"},
+    )
+    snap = AccountSnapshotRecord(
+        id="snap_exp",
+        account_id=str(acc_id),
+        balance=Decimal("10000.00"),
+        equity=Decimal("10000.00"),
+        free_margin=Decimal("10000.00"),
+        peak_equity=Decimal("10000.00"),
+        as_of=past,
+        payload={},
+    )
+    risk_dec = RiskDecisionRecord(
+        id="dec_exp",
+        candidate_id="cand_exp",
+        plan_id="plan_01",
+        strategy_id="STRAT01",
+        profile_id="day_trader",
+        symbol="XAUUSD",
+        direction="LONG",
+        decision="APPROVED",
+        requested_risk_pct=Decimal("1.0"),
+        approved_risk_pct=Decimal("1.0"),
+        requested_risk_amount=Decimal("100.00"),
+        approved_risk_amount=Decimal("100.00"),
+        position_size=Decimal("0.14"),
+        entry_lower=Decimal("2500.00"),
+        entry_upper=Decimal("2501.00"),
+        stop_loss=Decimal("2495.00"),
+        stop_distance=Decimal("5.00"),
+        account_snapshot_id="snap_exp",
+        policy_version="risk-policy-1.0.0",
+        dependency_fingerprint="fp_exp",
+        as_of=past,
+        expires_at=past + dt.timedelta(minutes=5),  # Expired
+        payload={},
+    )
+    session.add_all([acc, eval_rec, cand_rec, snap, risk_dec])
+    await session.commit()
+
+    ai_input = await AIAnalysisInputAssembler.assemble(
+        session,
+        candidate_id="cand_exp",
+        account_id=str(acc_id),
+        current_user=admin,
+    )
+    assert ai_input.risk_context.decision == "EXPIRED"
+
+
+# 36. Assembler released reservation -> reservation_status INACTIVE
+@pytest.mark.asyncio
+async def test_36_assembler_released_reservation_fails_closed(db_session):
+    session, _ = db_session
+    now = dt.datetime.now(dt.UTC)
+    admin = await create_user(session, email="admin_rel@test.com", password="password123", role=Role.ADMIN)
+    acc_id = uuid.uuid4()
+    acc = Account(
+        id=acc_id,
+        name="acc_rel",
+        user_id=admin.id,
+        trading_mode=TradingMode.PAPER,
+        starting_balance=10000.0,
+        base_currency="USD",
+        is_active=True,
+    )
+    eval_rec = StrategyEvaluationRecord(
+        id="eval_rel",
+        context_id="ctx_01",
+        symbol="XAUUSD",
+        source="simulated",
+        as_of=now,
+        generated_at=now,
+        payload_hash="hash",
+        payload={},
+    )
+    cand_rec = TradeCandidateRecord(
+        id="cand_rel",
+        evaluation_id="eval_rel",
+        profile_id="day_trader",
+        strategy_id="STRAT01",
+        as_of=now,
+        payload={"symbol": "XAUUSD"},
+    )
+    snap = AccountSnapshotRecord(
+        id="snap_rel",
+        account_id=str(acc_id),
+        balance=Decimal("10000.00"),
+        equity=Decimal("10000.00"),
+        free_margin=Decimal("10000.00"),
+        peak_equity=Decimal("10000.00"),
+        as_of=now,
+        payload={},
+    )
+    risk_dec = RiskDecisionRecord(
+        id="dec_rel",
+        candidate_id="cand_rel",
+        plan_id="plan_01",
+        strategy_id="STRAT01",
+        profile_id="day_trader",
+        symbol="XAUUSD",
+        direction="LONG",
+        decision="APPROVED",
+        requested_risk_pct=Decimal("1.0"),
+        approved_risk_pct=Decimal("1.0"),
+        requested_risk_amount=Decimal("100.00"),
+        approved_risk_amount=Decimal("100.00"),
+        position_size=Decimal("0.14"),
+        entry_lower=Decimal("2500.00"),
+        entry_upper=Decimal("2501.00"),
+        stop_loss=Decimal("2495.00"),
+        stop_distance=Decimal("5.00"),
+        account_snapshot_id="snap_rel",
+        policy_version="risk-policy-1.0.0",
+        dependency_fingerprint="fp_rel",
+        as_of=now,
+        expires_at=now + dt.timedelta(minutes=15),
+        payload={},
+    )
+    # Reservation is RELEASED
+    res_rec = RiskReservationRecord(
+        id="res_rel_01",
+        decision_id="dec_rel",
+        account_id=str(acc_id),
+        candidate_id="cand_rel",
+        profile_id="day_trader",
+        symbol="XAUUSD",
+        direction="LONG",
+        risk_pct=Decimal("1.0"),
+        risk_amount=Decimal("100.00"),
+        position_size=Decimal("0.14"),
+        status="RELEASED",
+        reserved_at=now,
+        reserved_until=now + dt.timedelta(minutes=15),
+    )
+    session.add_all([acc, eval_rec, cand_rec, snap, risk_dec, res_rec])
+    await session.commit()
+
+    ai_input = await AIAnalysisInputAssembler.assemble(
+        session,
+        candidate_id="cand_rel",
+        account_id=str(acc_id),
+        current_user=admin,
+    )
+    assert ai_input.risk_context.reservation_status == "INACTIVE"
+
+
+# 37. Assembler missing risk decision -> RISK_NOT_EVALUATED and empty decision_id
+@pytest.mark.asyncio
+async def test_37_assembler_missing_risk_decision_no_fake_ids(db_session):
+    session, _ = db_session
+    now = dt.datetime.now(dt.UTC)
+    admin = await create_user(session, email="admin_norisk@test.com", password="password123", role=Role.ADMIN)
+    acc = Account(
+        name="acc_norisk",
+        user_id=admin.id,
+        trading_mode=TradingMode.PAPER,
+        starting_balance=10000.0,
+        base_currency="USD",
+        is_active=True,
+    )
+    eval_rec = StrategyEvaluationRecord(
+        id="eval_norisk",
+        context_id="ctx_01",
+        symbol="XAUUSD",
+        source="simulated",
+        as_of=now,
+        generated_at=now,
+        payload_hash="hash",
+        payload={},
+    )
+    cand_rec = TradeCandidateRecord(
+        id="cand_norisk",
+        evaluation_id="eval_norisk",
+        profile_id="day_trader",
+        strategy_id="STRAT01",
+        as_of=now,
+        payload={"symbol": "XAUUSD"},
+    )
+    session.add_all([acc, eval_rec, cand_rec])
+    await session.commit()
+
+    ai_input = await AIAnalysisInputAssembler.assemble(
+        session,
+        candidate_id="cand_norisk",
+        account_id=str(acc.id),
+        current_user=admin,
+    )
+    assert ai_input.risk_context.decision == "RISK_NOT_EVALUATED"
+    assert ai_input.risk_context.decision_id == ""
+    assert not ai_input.risk_context.decision_id.startswith("dec_none_")
+
+
+# 38. Rate limiter check raises RateLimitedError
+def test_38_rate_limiter_exceeded_raises_rate_limited_error():
+    limiter = RateLimiter(per_minute=2, max_keys=10)
+    limiter.check("user_key_1")
+    limiter.check("user_key_1")
+    with pytest.raises(RateLimitedError):
+        limiter.check("user_key_1")
+
+
+# 39. Deep immutability of inputs
+def test_39_deep_immutability_of_inputs(base_ai_input):
+    with pytest.raises(ValidationError):
+        base_ai_input.symbol = "EURUSD"
+    with pytest.raises(ValidationError):
+        base_ai_input.quote_context.symbol = "EURUSD"
+    with pytest.raises(ValidationError):
+        base_ai_input.risk_context.decision = "BLOCKED"

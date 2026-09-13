@@ -6,7 +6,7 @@ never instructions.
 """
 
 import json
-from typing import Final
+from typing import Any, Final
 
 INJECTION_DEFENSE_HEADER: Final[str] = """
 CRITICAL SAFETY & AUTHORITY BOUNDARIES:
@@ -95,11 +95,26 @@ def get_prompt(prompt_id: str) -> str:
     return PROMPT_REGISTRY[prompt_id]
 
 
-def wrap_untrusted_data(payload: dict[str, object]) -> str:
+def wrap_untrusted_data(payload: dict[str, Any]) -> str:
     """Serialize payload to JSON and enclose within untrusted data delimiters.
 
-    This ensures complete structural separation between developer system instructions
-    and external / user-influenced text.
+    Escapes any rogue delimiter tokens to ensure inert encapsulation.
     """
     clean_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return f"<untrusted_external_data>\n{clean_json}\n</untrusted_external_data>"
+    sanitized = clean_json.replace("</untrusted_external_data>", "<\\/untrusted_external_data>")
+    return f"<untrusted_external_data>\n{sanitized}\n</untrusted_external_data>"
+
+
+def build_structured_payload(
+    trusted_context: dict[str, Any],
+    untrusted_evidence: dict[str, Any] | None = None,
+) -> str:
+    """Serialize payload as a structured JSON object with distinct trusted and untrusted roles.
+
+    Untrusted content is structured data only, immune to delimiter injection or escape.
+    """
+    payload = {
+        "trusted_context": trusted_context,
+        "untrusted_evidence": untrusted_evidence or {},
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
