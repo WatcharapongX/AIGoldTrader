@@ -157,7 +157,12 @@ async def evaluate_risk(
         from app.services.risk.account_state import PaperAccountStateService
 
         try:
-            await PaperAccountStateService.refresh_paper_account_snapshot(session, account_id=body.account_id, now=now)
+            await PaperAccountStateService.refresh_paper_account_snapshot(
+                session,
+                account_id=body.account_id,
+                now=now,
+                max_observation_age_seconds=policy.account_freshness_seconds,
+            )
         except Exception as exc:
             logger.debug("Paper account snapshot refresh skipped: %s", exc)
 
@@ -195,6 +200,13 @@ async def evaluate_risk(
     except IntegrityError:
         await session.rollback()
         # Recover canonical committed decision from concurrent worker race (SOL-P5-NEW-P1-018)
+        if session.get_bind().dialect.name == "postgresql":
+            from sqlalchemy import text
+
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": f"risk_account_{body.account_id}"},
+            )
         existing = await find_existing_decision(
             session=session,
             candidate_id=candidate.id,
@@ -203,6 +215,35 @@ async def evaluate_risk(
             now=now,
         )
         if existing is not None:
+            if existing.decision == "BLOCKED":
+                await portfolio_manager.release_candidate_reservations(
+                    session=session,
+                    account_id=account.account_id,
+                    candidate_id=candidate.id,
+                    now=now,
+                    reason=(
+                        existing.blocked_reasons_th[0]
+                        if existing.blocked_reasons_th
+                        else "Recovered blocked decision reconciliation"
+                    ),
+                )
+            else:
+                await portfolio_manager.create_reservation(
+                    session=session,
+                    decision_id=existing.id,
+                    account_id=account.account_id,
+                    candidate_id=candidate.id,
+                    profile_id=existing.profile_id,
+                    symbol=existing.symbol,
+                    direction=existing.direction,
+                    risk_pct=existing.approved_risk_pct,
+                    risk_amount=existing.approved_risk_amount,
+                    position_size=existing.position_size,
+                    policy=policy,
+                    now=now,
+                    reserved_until_cap=existing.expires_at,
+                )
+            await session.commit()
             return existing
         raise
 

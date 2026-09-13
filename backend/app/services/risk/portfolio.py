@@ -364,6 +364,7 @@ class PortfolioRiskManager:
         policy: RiskPolicy,
         now: dt.datetime,
         candidate_id: str | None = None,
+        reserved_until_cap: dt.datetime | None = None,
     ) -> RiskReservation:
         """Atomically records or updates an active reservation to maintain 1:1 consistency with RiskDecision.
 
@@ -374,6 +375,69 @@ class PortfolioRiskManager:
         it is atomically replaced.
         """
         reserved_until = now + dt.timedelta(seconds=policy.reservation_ttl_seconds)
+        if reserved_until_cap is not None:
+            reserved_until = min(reserved_until, reserved_until_cap)
+
+        # A cached decision may already own a RELEASED/EXPIRED reservation row.
+        # Reuse that canonical row so the decision_id unique constraint remains
+        # an invariant instead of preventing safe cache reconciliation.
+        exact = await session.scalar(
+            select(RiskReservationRecord)
+            .where(RiskReservationRecord.decision_id == decision_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if exact is not None:
+            if candidate_id:
+                conflicting = (
+                    await session.scalars(
+                        select(RiskReservationRecord)
+                        .where(
+                            RiskReservationRecord.account_id == account_id,
+                            RiskReservationRecord.candidate_id == candidate_id,
+                            RiskReservationRecord.status == "ACTIVE",
+                            RiskReservationRecord.id != exact.id,
+                        )
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                ).all()
+                for row in conflicting:
+                    row.status = "RELEASED"
+                    row.released_at = now
+                    row.release_reason = "SUPERSEDED_BY_CACHED_DECISION_RECONCILIATION"
+                if conflicting:
+                    await session.flush()
+
+            exact.account_id = account_id
+            exact.candidate_id = candidate_id
+            exact.profile_id = profile_id
+            exact.symbol = symbol
+            exact.direction = direction
+            exact.risk_pct = risk_pct
+            exact.risk_amount = risk_amount
+            exact.position_size = position_size
+            exact.status = "ACTIVE"
+            exact.reserved_at = now
+            exact.reserved_until = reserved_until
+            exact.released_at = None
+            exact.release_reason = None
+            await session.flush()
+            return RiskReservation(
+                id=exact.id,
+                decision_id=exact.decision_id,
+                account_id=exact.account_id,
+                candidate_id=exact.candidate_id,
+                profile_id=exact.profile_id,
+                symbol=exact.symbol,
+                direction=exact.direction,  # type: ignore[arg-type]
+                risk_pct=Decimal(str(exact.risk_pct)),
+                risk_amount=Decimal(str(exact.risk_amount)),
+                position_size=Decimal(str(exact.position_size)),
+                status="ACTIVE",
+                reserved_at=now,
+                reserved_until=reserved_until,
+            )
 
         # 1. Check for existing active reservation for this candidate under row lock
         if candidate_id:
@@ -385,6 +449,7 @@ class PortfolioRiskManager:
                     RiskReservationRecord.status == "ACTIVE",
                 )
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
             if existing is not None:
                 # Atomically update to guarantee 1:1 consistency with current decision
@@ -444,6 +509,7 @@ class PortfolioRiskManager:
                         RiskReservationRecord.status == "ACTIVE",
                     )
                     .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
                 if existing is not None:
                     # Atomically update existing to maintain exact consistency
@@ -489,6 +555,35 @@ class PortfolioRiskManager:
             reserved_at=now,
             reserved_until=reserved_until,
         )
+
+    async def release_candidate_reservations(
+        self,
+        session: AsyncSession,
+        account_id: str,
+        candidate_id: str,
+        now: dt.datetime,
+        reason: str,
+    ) -> int:
+        """Release every active reservation before returning a BLOCKED decision."""
+        active_rows = (
+            await session.scalars(
+                select(RiskReservationRecord)
+                .where(
+                    RiskReservationRecord.account_id == account_id,
+                    RiskReservationRecord.candidate_id == candidate_id,
+                    RiskReservationRecord.status == "ACTIVE",
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+        for row in active_rows:
+            row.status = "RELEASED"
+            row.released_at = now
+            row.release_reason = reason
+        if active_rows:
+            await session.flush()
+        return len(active_rows)
 
     async def check_budget_and_reserve(
         self,

@@ -317,3 +317,13 @@ test('parseRiskDecision preserves dependency_fingerprint', () => {
   assert.equal(dec.dependency_fingerprint, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
 });
 
+test('Kill Switch card authority never comes from stale portfolio metadata', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../src/features/risk/RiskWorkspace.tsx'),
+    'utf8',
+  );
+  const activeExpression = source.match(/const isKillSwitchActive = ([^;]+);/);
+  assert.ok(activeExpression, 'Kill Switch active expression must exist');
+  assert.match(activeExpression[1], /killSwitch\?\.state === 'ACTIVE'/);
+  assert.doesNotMatch(activeExpression[1], /portfolio/);
+});

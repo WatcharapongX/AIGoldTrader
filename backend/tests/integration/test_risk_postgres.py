@@ -486,15 +486,172 @@ def test_migration_0010_downgrade_barrier_and_seed_quarantine(isolated_postgres)
     assert dh_row[0] == "dh_default"
 
 
+def test_paper_account_state_postgresql_concurrency_semantics(isolated_postgres):  # noqa: F811
+    """Actual PostgreSQL gate for creation, observation, force, transitions, and policy TTL."""
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+    _alembic("upgrade", "head")
+
+    user_id = uuid.uuid4()
+    account_id = uuid.uuid4()
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES (%s, %s, 'dummy_hash', 'TRADER', true, NOW(), NOW())
+        """,
+        (user_id, f"account-concurrency-{user_id}@example.com"),
+    )
+    conn.execute(
+        """
+        INSERT INTO accounts (
+            id, user_id, name, trading_mode, starting_balance, base_currency,
+            is_active, created_at, updated_at
+        )
+        VALUES (%s, %s, 'Account Concurrency Gate', 'PAPER', 10000.00, 'USD', true, NOW(), NOW())
+        """,
+        (account_id, user_id),
+    )
+
+    async def run_account_matrix():
+        from app.models.risk import PaperAccountStateRecord
+        from app.services.risk.account_state import PaperAccountStateService
+
+        factory = get_session_factory()
+        account_key = str(account_id)
+
+        async def create_one():
+            async with factory() as session:
+                async with session.begin():
+                    state = await PaperAccountStateService.get_or_create_paper_state(session, account_key)
+                    return state.account_id, state.state_version
+
+        created = await asyncio.gather(*(create_one() for _ in range(10)))
+        assert created == [(account_key, 1)] * 10
+
+        observation_time = dt.datetime.now(dt.UTC)
+
+        async def observe_one(*, force: bool):
+            async with factory() as session:
+                async with session.begin():
+                    return await PaperAccountStateService.refresh_paper_account_snapshot(
+                        session,
+                        account_key,
+                        force=force,
+                        now=observation_time,
+                        max_observation_age_seconds=120,
+                    )
+
+        observations = await asyncio.gather(*(observe_one(force=False) for _ in range(10)))
+        assert len({item.id for item in observations}) == 1
+        assert {item.state_version for item in observations} == {1}
+
+        forced = await asyncio.gather(*(observe_one(force=True) for _ in range(10)))
+        assert len({item.id for item in forced}) == 10
+        assert {item.state_version for item in forced} == {1}
+
+        # Preload the same ORM object into every identity map before locking.
+        sessions = [factory() for _ in range(10)]
+        try:
+            preloaded = await asyncio.gather(
+                *(session.get(PaperAccountStateRecord, account_key) for session in sessions)
+            )
+            assert {state.state_version for state in preloaded if state is not None} == {1}
+
+            async def set_same_target(session):
+                state = await PaperAccountStateService.update_paper_account_state(
+                    session,
+                    account_key,
+                    balance=Decimal("11000.00"),
+                    now=dt.datetime.now(dt.UTC),
+                )
+                await session.commit()
+                return state.state_version
+
+            same_versions = await asyncio.gather(*(set_same_target(session) for session in sessions))
+            assert set(same_versions) == {2}
+        finally:
+            await asyncio.gather(*(session.close() for session in sessions))
+
+        sessions = [factory() for _ in range(10)]
+        try:
+            await asyncio.gather(
+                *(session.get(PaperAccountStateRecord, account_key) for session in sessions)
+            )
+
+            async def set_distinct_target(index, session):
+                target = Decimal("12000.00") + Decimal(index)
+                state = await PaperAccountStateService.update_paper_account_state(
+                    session,
+                    account_key,
+                    balance=target,
+                    now=dt.datetime.now(dt.UTC),
+                )
+                await session.commit()
+                return state.state_version
+
+            distinct_versions = await asyncio.gather(
+                *(set_distinct_target(index, session) for index, session in enumerate(sessions))
+            )
+            assert set(distinct_versions) == set(range(3, 13))
+        finally:
+            await asyncio.gather(*(session.close() for session in sessions))
+
+        async with factory() as session:
+            final_state = await session.get(PaperAccountStateRecord, account_key)
+            assert final_state is not None
+            assert final_state.state_version == 12
+            assert final_state.balance in {
+                Decimal("12000.00") + Decimal(index) for index in range(10)
+            }
+
+        ttl_results: dict[int, bool] = {}
+        for index, policy_freshness in enumerate((5, 30, 60, 120)):
+            baseline_time = observation_time + dt.timedelta(minutes=index + 1)
+            async with factory() as session:
+                async with session.begin():
+                    baseline = await PaperAccountStateService.refresh_paper_account_snapshot(
+                        session,
+                        account_key,
+                        force=True,
+                        now=baseline_time,
+                        max_observation_age_seconds=policy_freshness,
+                    )
+            async with factory() as session:
+                async with session.begin():
+                    observed = await PaperAccountStateService.refresh_paper_account_snapshot(
+                        session,
+                        account_key,
+                        now=baseline_time + dt.timedelta(seconds=20),
+                        max_observation_age_seconds=policy_freshness,
+                    )
+            ttl_results[policy_freshness] = observed.id == baseline.id
+
+        assert ttl_results == {5: False, 30: True, 60: True, 120: True}
+
+    try:
+        asyncio.run(run_account_matrix(), loop_factory=new_event_loop)
+    finally:
+        asyncio.run(dispose_engine())
+
+    assert conn.execute(
+        "SELECT count(*) FROM paper_account_states WHERE account_id = %s",
+        (str(account_id),),
+    ).fetchone()[0] == 1
+
+
 def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  # noqa: F811
     """P1-031 & P2-035:
     Real FastAPI HTTP API concurrency gate:
-    1. 10 concurrent POST /api/risk/evaluate calls for the same candidate/account.
+    1. Five rounds of 10 concurrent POST /api/risk/evaluate calls for the same
+       candidate/account.
        Assert: exactly 1 decision created in DB, 1 reservation created in DB,
        all 10 responses return 200 with identical decision ID and identical fingerprint.
-    2. 100 sequential POST /api/risk/evaluate calls:
+    2. 100 sequential and 100 safe-jitter POST /api/risk/evaluate calls:
        Assert: all return identical decision ID, 0 new reservations created.
-    3. 10 unauthorized POST /api/risk/evaluate calls from non-owner user:
+    3. Released/expired cache hits, 1.0 -> 0.5 -> 1.0 changes, and
+       APPROVED -> BLOCKED -> APPROVED -> cached BLOCKED transitions all
+       converge to an exact Decision/Reservation pair.
+    4. 10 unauthorized POST /api/risk/evaluate calls from non-owner user:
        Assert: all return 403 Forbidden with 0 state mutations in DB.
     """
     conn, schema = isolated_postgres
@@ -654,7 +811,7 @@ def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  
             id=uuid.UUID(other_user_id), email="other@example.com", role=Role.TRADER, is_active=True
         )
 
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
         static_quote = Quote(
             source="simulated",
@@ -667,6 +824,10 @@ def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  
             status="CONNECTED",
             timestamp=now,
         )
+        market_state = {
+            "bid": static_quote.bid,
+            "ask": static_quote.ask,
+        }
 
         class DummyProvider:
             source = "simulated"
@@ -674,7 +835,19 @@ def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  
             server = None
 
         mock_market = MagicMock()
-        mock_market.quote = static_quote
+        # Keep transport observations fresh while preserving the exact semantic
+        # dependency set. The quote timestamp is deliberately excluded from the
+        # safe-jitter decision fingerprint.
+        type(mock_market).quote = PropertyMock(
+            side_effect=lambda: static_quote.model_copy(
+                update={
+                    "bid": market_state["bid"],
+                    "ask": market_state["ask"],
+                    "spread": market_state["ask"] - market_state["bid"],
+                    "timestamp": dt.datetime.now(dt.UTC),
+                }
+            )
+        )
         mock_market.start = AsyncMock()
         mock_market.provider = DummyProvider()
         app.state.market = mock_market
@@ -706,16 +879,21 @@ def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  
                 "account_id": acc_id,
                 "requested_risk_pct": 1.0,
             }
-            tasks = [client.post("/api/risk/evaluate", json=req_body) for _ in range(10)]
-            responses = await asyncio.gather(*tasks)
+            dec_ids: set[str] = set()
+            fps: set[str] = set()
+            for round_number in range(5):
+                tasks = [client.post("/api/risk/evaluate", json=req_body) for _ in range(10)]
+                responses = await asyncio.gather(*tasks)
 
-            assert all(r.status_code == 200 for r in responses), (
-                f"Expected all 200, got {[r.status_code for r in responses]}"
-            )
-            dec_ids = {r.json()["id"] for r in responses}
-            assert len(dec_ids) == 1, f"Expected 1 decision ID, got {dec_ids}"
-            fps = {r.json()["dependency_fingerprint"] for r in responses}
-            assert len(fps) == 1, f"Expected 1 fingerprint, got {fps}"
+                assert all(r.status_code == 200 for r in responses), (
+                    f"Round {round_number + 1}: expected all 200, "
+                    f"got {[r.status_code for r in responses]}"
+                )
+                dec_ids.update(r.json()["id"] for r in responses)
+                fps.update(r.json()["dependency_fingerprint"] for r in responses)
+
+            assert len(dec_ids) == 1, f"Expected 1 decision ID across 5 rounds, got {dec_ids}"
+            assert len(fps) == 1, f"Expected 1 fingerprint across 5 rounds, got {fps}"
 
             # 2. 100 Sequential calls
             for _ in range(100):
@@ -723,7 +901,114 @@ def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  
                 assert res.status_code == 200
                 assert res.json()["id"] == list(dec_ids)[0]
 
-            # 3. Unauthorized access check
+            original_decision_id = next(iter(dec_ids))
+
+            # 3. 100 quote observations with economically irrelevant jitter.
+            for offset in range(100):
+                jitter = Decimal(offset) / Decimal("10000")
+                market_state["bid"] = Decimal("2500.00") + jitter
+                market_state["ask"] = Decimal("2500.30") + jitter
+                res = await client.post("/api/risk/evaluate", json=req_body)
+                assert res.status_code == 200
+                assert res.json()["id"] == original_decision_id
+
+            market_state["bid"] = Decimal("2500.00")
+            market_state["ask"] = Decimal("2500.30")
+
+            # 4. Released and expired cache hits must reactivate the exact row.
+            conn.execute(
+                """
+                UPDATE risk_reservations
+                SET status = 'RELEASED', released_at = NOW(), release_reason = 'HTTP_TEST_RELEASE'
+                WHERE decision_id = %s
+                """,
+                (original_decision_id,),
+            )
+            released_retry = await client.post("/api/risk/evaluate", json=req_body)
+            assert released_retry.status_code == 200
+            assert released_retry.json()["id"] == original_decision_id
+
+            conn.execute(
+                """
+                UPDATE risk_reservations
+                SET status = 'ACTIVE', reserved_until = NOW() - interval '1 second'
+                WHERE decision_id = %s
+                """,
+                (original_decision_id,),
+            )
+            expired_retry = await client.post("/api/risk/evaluate", json=req_body)
+            assert expired_retry.status_code == 200
+            assert expired_retry.json()["id"] == original_decision_id
+            exact = conn.execute(
+                """
+                SELECT decision_id, status, risk_pct, reserved_until > NOW()
+                FROM risk_reservations
+                WHERE account_id = %s AND status = 'ACTIVE'
+                """,
+                (acc_id,),
+            ).fetchall()
+            assert exact == [(original_decision_id, "ACTIVE", Decimal("1.0000"), True)]
+
+            # 5. Both risk directions must replace the active pair atomically.
+            half_body = {**req_body, "requested_risk_pct": 0.5}
+            half = await client.post("/api/risk/evaluate", json=half_body)
+            assert half.status_code == 200
+            assert half.json()["decision"] in {"APPROVED", "REDUCED"}
+            assert Decimal(str(half.json()["approved_risk_pct"])) == Decimal("0.5")
+            half_id = half.json()["id"]
+            assert half_id != original_decision_id
+            half_pair = conn.execute(
+                """
+                SELECT decision_id, risk_pct FROM risk_reservations
+                WHERE account_id = %s AND status = 'ACTIVE'
+                """,
+                (acc_id,),
+            ).fetchall()
+            assert half_pair == [(half_id, Decimal("0.5000"))]
+
+            full_again = await client.post("/api/risk/evaluate", json=req_body)
+            assert full_again.status_code == 200
+            assert full_again.json()["id"] == original_decision_id
+            full_pair = conn.execute(
+                """
+                SELECT decision_id, risk_pct FROM risk_reservations
+                WHERE account_id = %s AND status = 'ACTIVE'
+                """,
+                (acc_id,),
+            ).fetchall()
+            assert full_pair == [(original_decision_id, Decimal("1.0000"))]
+
+            # 6. Cached BLOCKED must release a newer approval before returning.
+            market_state["ask"] = Decimal("2505.00")
+            blocked = await client.post("/api/risk/evaluate", json=req_body)
+            assert blocked.status_code == 200
+            assert blocked.json()["decision"] == "BLOCKED"
+            blocked_id = blocked.json()["id"]
+            assert conn.execute(
+                "SELECT count(*) FROM risk_reservations WHERE account_id = %s AND status = 'ACTIVE'",
+                (acc_id,),
+            ).fetchone()[0] == 0
+
+            market_state["ask"] = Decimal("2500.30")
+            approved_again = await client.post("/api/risk/evaluate", json=req_body)
+            assert approved_again.status_code == 200
+            assert approved_again.json()["id"] == original_decision_id
+
+            market_state["ask"] = Decimal("2505.00")
+            cached_blocked = await client.post("/api/risk/evaluate", json=req_body)
+            assert cached_blocked.status_code == 200
+            assert cached_blocked.json()["id"] == blocked_id
+            assert conn.execute(
+                "SELECT count(*) FROM risk_reservations WHERE account_id = %s AND status = 'ACTIVE'",
+                (acc_id,),
+            ).fetchone()[0] == 0
+
+            market_state["ask"] = Decimal("2500.30")
+            final_approved = await client.post("/api/risk/evaluate", json=req_body)
+            assert final_approved.status_code == 200
+            assert final_approved.json()["id"] == original_decision_id
+
+            # 7. Unauthorized access check
             app.dependency_overrides[get_current_user] = lambda: unauthorized_user
             for _ in range(10):
                 unauth_res = await client.post("/api/risk/evaluate", json=req_body)
@@ -736,11 +1021,11 @@ def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  
     finally:
         asyncio.run(dispose_engine())
 
-    # Assert exactly 1 decision and 1 active reservation
+    # Two approved risk levels plus one blocked state, with one current reservation.
     dec_count = conn.execute(
         "SELECT count(*) FROM risk_decisions WHERE candidate_id = 'cand_http_conc'"
     ).fetchone()[0]
-    assert dec_count == 1, f"Expected exactly 1 decision in DB, got {dec_count}"
+    assert dec_count == 3, f"Expected exactly 3 decisions in DB, got {dec_count}"
 
     res_count = conn.execute(
         "SELECT count(*) FROM risk_reservations WHERE account_id = %s AND status = 'ACTIVE'",
@@ -875,3 +1160,42 @@ def test_migration_0010_dirty_state_reconciliation(isolated_postgres):  # noqa: 
     assert len(dh_rows) == 1, f"Expected 1 deduplicated data health row, got {len(dh_rows)}"
     assert dh_rows[0][3] >= 5, f"Expected consecutive_failures >= 5, got {dh_rows[0][3]}"
 
+    # A post-migration cache hit for the lower-risk decision must converge the
+    # survivor chosen by the migration to that exact Decision/Reservation pair.
+    async def reconcile_cached_lower_risk_decision():
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                await portfolio_manager.create_reservation(
+                    session=session,
+                    decision_id="dec_dup_2",
+                    account_id=acc_ids[0],
+                    candidate_id="cand_dup_01",
+                    profile_id="day_trader",
+                    symbol="XAUUSD",
+                    direction="LONG",
+                    risk_pct=Decimal("0.5"),
+                    risk_amount=Decimal("50.00"),
+                    position_size=Decimal("0.07"),
+                    policy=RiskPolicy(news_risk_enabled=False),
+                    now=dt.datetime.now(dt.UTC),
+                )
+
+    try:
+        asyncio.run(reconcile_cached_lower_risk_decision(), loop_factory=new_event_loop)
+    finally:
+        asyncio.run(dispose_engine())
+
+    converged = conn.execute(
+        """
+        SELECT decision_id, status, risk_pct
+        FROM risk_reservations
+        WHERE account_id = %s AND candidate_id = 'cand_dup_01'
+        ORDER BY decision_id
+        """,
+        (acc_ids[0],),
+    ).fetchall()
+    assert converged == [
+        ("dec_dup_1", "RELEASED", Decimal("1.0000")),
+        ("dec_dup_2", "ACTIVE", Decimal("0.5000")),
+    ]

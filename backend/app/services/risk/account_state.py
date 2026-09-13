@@ -57,6 +57,7 @@ class PaperAccountStateService:
                 | (PaperAccountStateRecord.account_id == acc_row.name)
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if state_row is not None:
             return state_row
@@ -154,6 +155,7 @@ class PaperAccountStateService:
             select(PaperAccountStateRecord)
             .where(PaperAccountStateRecord.account_id == canonical_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         return state_row
 
@@ -201,6 +203,7 @@ class PaperAccountStateService:
                 | (PaperAccountStateRecord.account_id == account_id)
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if state is None:
             state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, effective_now)
@@ -259,6 +262,7 @@ class PaperAccountStateService:
         account_id: str = "default_paper_account",
         force: bool = False,
         now: dt.datetime | None = None,
+        max_observation_age_seconds: int = 0,
     ) -> AccountSnapshot:
         """Produces authoritative AccountSnapshot observing current PaperAccountState.
 
@@ -267,6 +271,9 @@ class PaperAccountStateService:
         Sets as_of = observation_time (authoritative observation freshness timestamp).
         Generates unique observation ID to prevent PK collision on repeated observations.
         """
+        if max_observation_age_seconds < 0:
+            raise ValueError("max_observation_age_seconds must be non-negative")
+
         observation_time = now or dt.datetime.now(dt.UTC)
         state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, observation_time)
 
@@ -276,7 +283,8 @@ class PaperAccountStateService:
         state_updated_at = _to_utc(state.state_updated_at) or observation_time
         account_slug = str(account_id)[:8]
 
-        # If not forced and existing snapshot with same state_version and unexpired age exists, reuse to prevent churn
+        # Reuse is controlled by the caller's authority contract (normally RiskPolicy),
+        # never by a hidden service-level safety TTL.
         latest_row = (
             await session.scalars(
                 select(AccountSnapshotRecord)
@@ -291,7 +299,7 @@ class PaperAccountStateService:
             payload = latest_row.payload or {}
             if payload.get("state_version") == state.state_version:
                 age_sec = (observation_time - latest_as_of).total_seconds()
-                if age_sec <= 60:
+                if age_sec <= max_observation_age_seconds:
                     return AccountSnapshot.model_validate(latest_row.payload)
 
         # Unique observation ID ensuring no collision on forced observation or multiple observations
@@ -341,4 +349,3 @@ class PaperAccountStateService:
         session.add(record)
         await session.flush()
         return snapshot
-

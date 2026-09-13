@@ -269,27 +269,13 @@ class RiskEngine:
             """Atomically releases any active reservations for this candidate when evaluation blocks
             (SOL High Round 3 Section 13).
             """
-            from sqlalchemy import select
-
-            from app.models.risk import RiskReservationRecord
-
-            active_rows = (
-                await session.scalars(
-                    select(RiskReservationRecord)
-                    .where(
-                        RiskReservationRecord.account_id == account.account_id,
-                        RiskReservationRecord.candidate_id == candidate.id,
-                        RiskReservationRecord.status == "ACTIVE",
-                    )
-                    .with_for_update()
-                )
-            ).all()
-            for r in active_rows:
-                r.status = "RELEASED"
-                r.released_at = now
-                r.release_reason = reason
-            if active_rows:
-                await session.flush()
+            await portfolio_manager.release_candidate_reservations(
+                session=session,
+                account_id=account.account_id,
+                candidate_id=candidate.id,
+                now=now,
+                reason=reason,
+            )
 
         # 7. Calculate current portfolio exposure for fingerprint (sole source: DB reservations)
         # Exclude candidate's own active reservation so baseline exposure and fingerprint
@@ -334,6 +320,29 @@ class RiskEngine:
             now=now,
         )
         if existing_decision is not None:
+            if existing_decision.decision == "BLOCKED":
+                reason = (
+                    existing_decision.blocked_reasons_th[0]
+                    if existing_decision.blocked_reasons_th
+                    else "Cached blocked decision reconciliation"
+                )
+                await _release_pending_active_reservations(reason)
+            else:
+                await portfolio_manager.create_reservation(
+                    session=session,
+                    decision_id=existing_decision.id,
+                    account_id=account.account_id,
+                    candidate_id=candidate.id,
+                    profile_id=existing_decision.profile_id,
+                    symbol=existing_decision.symbol,
+                    direction=existing_decision.direction,
+                    risk_pct=existing_decision.approved_risk_pct,
+                    risk_amount=existing_decision.approved_risk_amount,
+                    position_size=existing_decision.position_size,
+                    policy=policy,
+                    now=now,
+                    reserved_until_cap=existing_decision.expires_at,
+                )
             return existing_decision
 
         # 8. Check gate conditions

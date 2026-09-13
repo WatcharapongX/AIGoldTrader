@@ -184,7 +184,7 @@ export function RiskWorkspace() {
 
   const isKillSwitchNotReady = killSwitchStatus !== 'READY';
   const isKillSwitchUnknown = isKillSwitchNotReady || !killSwitch || killSwitch?.state === 'UNKNOWN';
-  const isKillSwitchActive = !isKillSwitchUnknown && (killSwitch?.state === 'ACTIVE' || portfolio?.kill_switch_active);
+  const isKillSwitchActive = !isKillSwitchUnknown && killSwitch?.state === 'ACTIVE';
 
   // Portfolio budget calculation
   const hasPortfolio = portfolioStatus === 'READY' && !!portfolio;

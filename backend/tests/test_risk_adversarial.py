@@ -1345,7 +1345,7 @@ async def test_cross_process_kill_switch_data_health_persistence(db_session, tes
     """P2-038: Data health failures persist in database and trigger Kill Switch across manager instances."""
     session, _ = db_session
     from app.models.risk import DataHealthRecord
-    from app.services.risk.kill_switch import KillSwitchManager
+    from app.services.risk.kill_switch import KillSwitchManager, data_health_record_id
 
     ks1 = KillSwitchManager()
     # 1st stale quote
@@ -1357,7 +1357,7 @@ async def test_cross_process_kill_switch_data_health_persistence(db_session, tes
         session, test_account, test_policy, quote_stale=True, quote_stale_reason="Stale 2"
     )
 
-    dh_row = await session.get(DataHealthRecord, "dh_market_data_default")
+    dh_row = await session.get(DataHealthRecord, data_health_record_id("market_data", "default"))
     assert dh_row is not None
     assert dh_row.consecutive_failures == 2
 
@@ -1877,7 +1877,7 @@ async def test_data_health_multi_provider_isolation(db_session, test_account, te
     """SOL-P5-P2-038: Multi-provider isolation; healthy ticks do not reset unrelated providers."""
     session, _ = db_session
     from app.models.risk import DataHealthRecord
-    from app.services.risk.kill_switch import KillSwitchManager
+    from app.services.risk.kill_switch import KillSwitchManager, data_health_record_id
 
     ks = KillSwitchManager()
 
@@ -1904,8 +1904,8 @@ async def test_data_health_multi_provider_isolation(db_session, test_account, te
         source="tick",
     )
 
-    mt5_row = await session.get(DataHealthRecord, "dh_mt5_iux")
-    replay_row = await session.get(DataHealthRecord, "dh_replay_tick")
+    mt5_row = await session.get(DataHealthRecord, data_health_record_id("mt5", "iux"))
+    replay_row = await session.get(DataHealthRecord, data_health_record_id("replay", "tick"))
     assert mt5_row is not None and mt5_row.consecutive_failures == 2
     assert replay_row is not None and replay_row.consecutive_failures == 1
 
@@ -1947,6 +1947,164 @@ def test_frontend_kill_switch_decoupling_logic():
 
     assert is_kill_switch_unknown is False
     assert kill_switch["state"] == "INACTIVE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reservation_state", ["RELEASED", "EXPIRED"])
+async def test_cached_approval_reconciles_missing_current_reservation(
+    db_session,
+    test_candidate,
+    test_plan,
+    test_account,
+    test_policy,
+    test_spec,
+    test_quote,
+    now_time,
+    reservation_state,
+):
+    """R4-P1-039: cached approval is returned only with exact current coverage."""
+    session, _ = db_session
+    policy = test_policy.model_copy(update={"news_risk_enabled": False})
+    decision = await risk_engine.evaluate_candidate(
+        session, test_candidate, test_plan, test_account, policy, test_spec, test_quote, as_of=now_time
+    )
+    await persist_risk_decision(session, decision)
+    await session.flush()
+
+    reservation = await session.scalar(
+        select(RiskReservationRecord).where(RiskReservationRecord.decision_id == decision.id)
+    )
+    assert reservation is not None
+    if reservation_state == "RELEASED":
+        reservation.status = "RELEASED"
+        reservation.released_at = now_time
+    else:
+        reservation.reserved_until = now_time - dt.timedelta(seconds=1)
+    await session.flush()
+
+    cached = await risk_engine.evaluate_candidate(
+        session, test_candidate, test_plan, test_account, policy, test_spec, test_quote, as_of=now_time
+    )
+    assert cached.id == decision.id
+    current = (
+        await session.scalars(
+            select(RiskReservationRecord).where(
+                RiskReservationRecord.account_id == test_account.account_id,
+                RiskReservationRecord.candidate_id == test_candidate.id,
+                RiskReservationRecord.status == "ACTIVE",
+                RiskReservationRecord.reserved_until > now_time,
+            )
+        )
+    ).all()
+    assert len(current) == 1
+    assert current[0].decision_id == cached.id
+    assert current[0].risk_pct == cached.approved_risk_pct
+    assert current[0].risk_amount == cached.approved_risk_amount
+    assert current[0].position_size == cached.position_size
+
+
+@pytest.mark.asyncio
+async def test_cached_blocked_recurrence_releases_newer_reservation(
+    db_session, test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time
+):
+    """R4-P1-040: cached BLOCKED cannot coexist with a newer active reservation."""
+    session, _ = db_session
+    policy = test_policy.model_copy(update={"news_risk_enabled": False})
+    stale_account = test_account.model_copy(update={"as_of": now_time - dt.timedelta(minutes=10)})
+    blocked = await risk_engine.evaluate_candidate(
+        session, test_candidate, test_plan, stale_account, policy, test_spec, test_quote, as_of=now_time
+    )
+    assert blocked.decision == "BLOCKED"
+    await persist_risk_decision(session, blocked)
+
+    approved = await risk_engine.evaluate_candidate(
+        session, test_candidate, test_plan, test_account, policy, test_spec, test_quote, as_of=now_time
+    )
+    assert approved.decision == "APPROVED"
+    await persist_risk_decision(session, approved)
+    await session.flush()
+
+    cached_blocked = await risk_engine.evaluate_candidate(
+        session, test_candidate, test_plan, stale_account, policy, test_spec, test_quote, as_of=now_time
+    )
+    assert cached_blocked.id == blocked.id
+    active = (
+        await session.scalars(
+            select(RiskReservationRecord).where(
+                RiskReservationRecord.account_id == test_account.account_id,
+                RiskReservationRecord.candidate_id == test_candidate.id,
+                RiskReservationRecord.status == "ACTIVE",
+            )
+        )
+    ).all()
+    assert active == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("freshness_seconds", "expects_reuse"),
+    [(5, False), (30, True), (60, True), (120, True)],
+)
+async def test_paper_snapshot_reuse_obeys_policy_freshness(
+    db_session, now_time, freshness_seconds, expects_reuse
+):
+    """R4-P2-043: a caller-supplied policy TTL is the only reuse authority."""
+    session, _ = db_session
+    from app.services.risk.account_state import PaperAccountStateService
+
+    acc_id = uuid.uuid4()
+    session.add(
+        Account(
+            id=acc_id,
+            user_id=uuid.uuid4(),
+            name=f"ttl_{freshness_seconds}_{acc_id.hex[:6]}",
+            trading_mode=TradingMode.PAPER,
+            starting_balance=Decimal("10000.00"),
+            is_active=True,
+        )
+    )
+    await session.flush()
+    first = await PaperAccountStateService.refresh_paper_account_snapshot(
+        session, str(acc_id), force=True, now=now_time
+    )
+    observed = await PaperAccountStateService.refresh_paper_account_snapshot(
+        session,
+        str(acc_id),
+        now=now_time + dt.timedelta(seconds=20),
+        max_observation_age_seconds=freshness_seconds,
+    )
+    assert (observed.id == first.id) is expects_reuse
+    assert observed.as_of == (first.as_of if expects_reuse else now_time + dt.timedelta(seconds=20))
+
+
+@pytest.mark.asyncio
+async def test_data_health_identity_is_unambiguous_and_bounded(
+    db_session, test_account, test_policy
+):
+    """R4-P2-044: distinct legal authority pairs never share a synthetic PK."""
+    session, _ = db_session
+    from app.models.risk import DataHealthRecord
+    from app.services.risk.kill_switch import KillSwitchManager, data_health_record_id
+
+    assert data_health_record_id("a_b", "c") != data_health_record_id("a", "b_c")
+    assert len(data_health_record_id("p" * 64, "s" * 64)) <= 64
+    with pytest.raises(ValueError):
+        data_health_record_id("p" * 65, "s")
+
+    manager = KillSwitchManager()
+    for provider, source in (("a_b", "c"), ("a", "b_c"), ("p" * 64, "s" * 64)):
+        await manager.evaluate_automatic_triggers(
+            session,
+            test_account,
+            test_policy,
+            quote_stale=True,
+            quote_stale_reason="identity-boundary",
+            provider=provider,
+            source=source,
+        )
+    rows = (await session.scalars(select(DataHealthRecord))).all()
+    pairs = {(row.provider, row.source) for row in rows}
+    assert {("a_b", "c"), ("a", "b_c"), ("p" * 64, "s" * 64)} <= pairs
 
 
 @pytest.mark.asyncio

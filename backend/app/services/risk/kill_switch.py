@@ -4,6 +4,8 @@ Kill Switch state dominates all risk decisions; if active, all risk approvals ar
 """
 
 import datetime as dt
+import hashlib
+import json
 import uuid
 from decimal import Decimal
 from typing import NamedTuple, cast
@@ -20,6 +22,21 @@ from app.services.risk.domain import (
     KillSwitchTrigger,
     RiskPolicy,
 )
+
+DATA_HEALTH_COMPONENT_MAX_LENGTH = 64
+
+
+def data_health_record_id(provider: str, source: str) -> str:
+    """Return a stable, bounded identity for the canonical provider/source pair."""
+    for field_name, value in (("provider", provider), ("source", source)):
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"Data health {field_name} must be a non-empty string")
+        if len(value) > DATA_HEALTH_COMPONENT_MAX_LENGTH:
+            raise ValueError(
+                f"Data health {field_name} exceeds {DATA_HEALTH_COMPONENT_MAX_LENGTH} characters"
+            )
+    canonical = json.dumps([provider, source], ensure_ascii=False, separators=(",", ":"))
+    return f"dh_{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:60]}"
 
 
 class KillSwitchCheck(NamedTuple):
@@ -272,7 +289,7 @@ class KillSwitchManager:
         # Data health trigger with cross-process persistent tracking scoped by (provider, source) (SOL-P5-P2-038)
         now_utc = dt.datetime.now(dt.UTC)
         threshold = getattr(policy, "data_health_consecutive_failures", 3)
-        row_id = f"dh_{provider}_{source}"
+        row_id = data_health_record_id(provider, source)
         is_postgres = session.get_bind().dialect.name == "postgresql"
 
         if is_postgres:
