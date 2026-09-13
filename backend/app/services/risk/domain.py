@@ -296,6 +296,7 @@ class RiskDecision(BaseModel):
     as_of: AwareDatetime
     expires_at: AwareDatetime
     dependency_fingerprint: str = ""
+    trade_plan_fingerprint: str = ""
     market_provenance: MarketProvenance | None = None
     news_provenance: NewsRiskProvenance | None = None
     execution_blocked: Literal["NO_EXECUTION_ANALYSIS_ONLY"] = "NO_EXECUTION_ANALYSIS_ONLY"

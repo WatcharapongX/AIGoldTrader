@@ -1,6 +1,7 @@
 """Phase 6.1 account/risk binding and authoritative-input PostgreSQL gate."""
 
 import asyncio
+import copy
 import datetime as dt
 from decimal import Decimal
 
@@ -18,11 +19,13 @@ from app.main import create_app
 from app.models import Role
 from app.models.account import Account, TradingMode
 from app.models.risk import AccountSnapshotRecord, RiskDecisionRecord, RiskReservationRecord
+from app.models.strategy import TradeCandidateRecord
 from app.services.ai.assembler import AIAnalysisInputAssembler
 from app.services.ai.orchestrator import AIOrchestrator
 from app.services.ai.provider import FixtureAIProvider
 from app.services.market_data.domain import Quote
 from app.services.market_data.service import MarketService
+from app.services.strategy.domain import compute_trade_plan_fingerprint
 from app.services.users import create_user
 from tests.test_ai_authoritative_api import RecordingOrchestrator, seed_authoritative_chain
 
@@ -77,7 +80,7 @@ def test_ai_account_reservation_and_authoritative_api_postgres(isolated_postgres
                 free_margin=Decimal("10000.00"),
                 peak_equity=Decimal("10000.00"),
                 as_of=now + dt.timedelta(seconds=1),
-                payload={},
+                payload={"trade_plan_fingerprint": compute_trade_plan_fingerprint(candidate, candidate.plan)},
             )
             decision_b = RiskDecisionRecord(
                 id="decision-postgres-newer-b",
@@ -216,6 +219,26 @@ def test_ai_account_reservation_and_authoritative_api_postgres(isolated_postgres
             assert authoritative.risk_context.reservation_id == reservation_a.id
             assert authoritative.risk_context.reservation_status == "ACTIVE"
             assert authoritative.kill_switch_context.state == "INACTIVE"
+
+            candidate_row = await session.get(TradeCandidateRecord, candidate.id)
+            assert candidate_row is not None
+            mutated_payload = copy.deepcopy(candidate_row.payload)
+            mutated_payload["plan"]["targets"][0]["price"] = "2511.00"
+            candidate_row.payload = mutated_payload
+            await session.commit()
+            market.quote = market.quote.model_copy(update={"timestamp": dt.datetime.now(dt.UTC)})
+            mutated_recorder = RecordingOrchestrator()
+            monkeypatch.setattr(ai_api, "ai_orchestrator", mutated_recorder)
+
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                mutated_response = await client.post(
+                    "/api/ai-analysis/evaluate",
+                    json={"candidate_id": candidate.id, "account_id": str(account_a.id)},
+                )
+            assert mutated_response.status_code == 200, mutated_response.text
+            assert mutated_response.json()["status"] == "BLOCKED_BY_UPSTREAM"
+            assert mutated_recorder.inputs[0].risk_context.reservation_status == "MISMATCHED"
+            assert mutated_recorder.provider.call_history == []
 
     async def bounded_matrix() -> None:
         await asyncio.wait_for(run_matrix(), timeout=60)

@@ -9,7 +9,7 @@ import time
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.services.ai.domain import (
     META_CONTROLLER_ID,
@@ -35,7 +35,9 @@ class ModelConfig(BaseModel):
     provider: str = "fixture"
     model_alias: str = "fast-advisory"
     temperature: Decimal = Field(default=Decimal("0.0"), ge=Decimal("0.0"), le=Decimal("1.0"))
+    max_input_tokens: int = Field(default=8192, ge=1, le=1_000_000)
     max_output_tokens: int = Field(default=1024, ge=64, le=8192)
+    max_total_tokens: int = Field(default=9216, ge=65, le=1_008_192)
     timeout_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
     max_retries: int = Field(default=1, ge=0, le=5)
     schema_version: str = PROMPT_SCHEMA_VERSION
@@ -46,11 +48,17 @@ class ProviderResult(BaseModel):
 
     content: str
     raw_payload: dict[str, Any] = Field(default_factory=dict)
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
     duration_ms: float = 0.0
     model_used: str = "fixture-v1"
+
+    @model_validator(mode="after")
+    def consistent_token_accounting(self):
+        if self.total_tokens != self.prompt_tokens + self.completion_tokens:
+            raise ValueError("total_tokens must equal prompt_tokens + completion_tokens")
+        return self
 
 
 class AIProvider(abc.ABC):
@@ -79,68 +87,17 @@ async def analyze_with_controls(
     model_config: ModelConfig,
     timeout_seconds: float | None = None,
 ) -> ProviderResult:
-    """Call a provider with one total deadline, bounded retries, and local byte budgets."""
-    input_bytes = len(system_prompt.encode("utf-8")) + len(user_payload.encode("utf-8"))
-    if input_bytes > MAX_INPUT_BYTES_PER_AGENT:
-        raise InputBudgetExceeded(
-            f"Provider input budget exceeded for {agent_id}: {input_bytes}>{MAX_INPUT_BYTES_PER_AGENT}"
-        )
+    """Execute through the killable provider boundary with one overall deadline."""
+    from app.services.ai.execution import provider_executor
 
-    timeout = timeout_seconds or model_config.timeout_seconds
-    deadline = asyncio.get_running_loop().time() + timeout
-    last_error: BaseException | None = None
-    for attempt in range(model_config.max_retries + 1):
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            raise TimeoutError(f"Provider deadline exhausted for {agent_id}") from last_error
-        try:
-            result = await asyncio.wait_for(
-                provider.analyze(
-                    agent_id=agent_id,
-                    system_prompt=system_prompt,
-                    user_payload=user_payload,
-                    model_config=model_config,
-                    timeout_seconds=remaining,
-                ),
-                timeout=remaining,
-            )
-            content_bytes = len(result.content.encode("utf-8"))
-            raw_bytes = len(
-                json.dumps(
-                    result.raw_payload,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    default=str,
-                ).encode("utf-8")
-            )
-            if content_bytes > MAX_PROVIDER_OUTPUT_BYTES or raw_bytes > MAX_PROVIDER_OUTPUT_BYTES:
-                raise OutputBudgetExceeded(
-                    f"Provider output budget exceeded for {agent_id}: "
-                    f"content={content_bytes},raw={raw_bytes},limit={MAX_PROVIDER_OUTPUT_BYTES}"
-                )
-            if result.completion_tokens > model_config.max_output_tokens:
-                raise OutputBudgetExceeded(
-                    f"Provider completion budget exceeded for {agent_id}: "
-                    f"{result.completion_tokens}>{model_config.max_output_tokens}"
-                )
-            return result
-        except (InputBudgetExceeded, OutputBudgetExceeded):
-            raise
-        except asyncio.CancelledError:
-            raise
-        except (TimeoutError, RuntimeError) as exc:
-            last_error = exc
-            if attempt >= model_config.max_retries:
-                raise
-            logger.info(
-                "Retrying transient provider failure for %s (%s/%s): %s",
-                agent_id,
-                attempt + 1,
-                model_config.max_retries,
-                exc,
-            )
-    raise RuntimeError(f"Provider retry loop exhausted for {agent_id}") from last_error
+    return await provider_executor.execute(
+        provider,
+        agent_id=agent_id,
+        system_prompt=system_prompt,
+        user_payload=user_payload,
+        model_config=model_config,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 class FixtureAIProvider(AIProvider):

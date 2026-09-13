@@ -9,7 +9,7 @@ import datetime as dt
 import hashlib
 import json
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -38,6 +38,17 @@ MetaStatus = Literal[
     "BLOCKED_BY_UPSTREAM",
 ]
 AuthorityAvailability = Literal["AVAILABLE", "STALE", "UNAVAILABLE"]
+
+# Explicit Phase 3 -> AI temporal projection audit. Every clock on the actual
+# upstream evidence models is represented as a typed AI field and is checked by
+# the orchestrator; no listed safety clock is authoritative only in data_json.
+PHASE3_TEMPORAL_FIELD_MAP: Final[dict[str, tuple[str, ...]]] = {
+    "SwingPoint": ("swing_time", "confirmed_at"),
+    "StructureEvent": ("swing_time", "occurred_at", "confirmed_at"),
+    "LiquidityLevel": ("created_at", "confirmed_at", "swept_at", "ended_at"),
+    "Zone": ("occurred_at", "confirmed_at", "ended_at"),
+    "DealingRange": ("origin_time", "confirmed_at"),
+}
 
 # Explicit analytical agent IDs
 ANALYTICAL_AGENT_IDS = (
@@ -169,13 +180,14 @@ class AISwingEvidence(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def canonicalize(cls, value: Any):
-        return value if isinstance(value, cls) else _canonical_evidence(value, ("swing_time", "confirmed_at"))
+        return value if isinstance(value, cls) else _canonical_evidence(value, PHASE3_TEMPORAL_FIELD_MAP["SwingPoint"])
 
 
 class AIStructureEvent(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     id: str = ""
     kind: str = ""
+    swing_time: AwareDatetime
     occurred_at: AwareDatetime | None = None
     created_at: AwareDatetime | None = None
     detected_at: AwareDatetime | None = None
@@ -186,7 +198,7 @@ class AIStructureEvent(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def canonicalize(cls, value: Any):
-        fields = ("occurred_at", "created_at", "detected_at", "confirmed_at", "available_at")
+        fields = PHASE3_TEMPORAL_FIELD_MAP["StructureEvent"] + ("created_at", "detected_at", "available_at")
         return value if isinstance(value, cls) else _canonical_evidence(value, fields)
 
 
@@ -204,7 +216,7 @@ class AILiquidityEvidence(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def canonicalize(cls, value: Any):
-        fields = ("created_at", "detected_at", "confirmed_at", "swept_at", "ended_at")
+        fields = PHASE3_TEMPORAL_FIELD_MAP["LiquidityLevel"] + ("detected_at",)
         return value if isinstance(value, cls) else _canonical_evidence(value, fields)
 
 
@@ -221,7 +233,7 @@ class AIZoneEvidence(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def canonicalize(cls, value: Any):
-        fields = ("occurred_at", "created_at", "confirmed_at", "ended_at")
+        fields = PHASE3_TEMPORAL_FIELD_MAP["Zone"] + ("created_at",)
         return value if isinstance(value, cls) else _canonical_evidence(value, fields)
 
 
@@ -236,7 +248,9 @@ class AIDealingRangeEvidence(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def canonicalize(cls, value: Any):
-        return value if isinstance(value, cls) else _canonical_evidence(value, ("origin_time", "confirmed_at"))
+        return value if isinstance(value, cls) else _canonical_evidence(
+            value, PHASE3_TEMPORAL_FIELD_MAP["DealingRange"]
+        )
 
 
 class AIMarketStructureContext(BaseModel):

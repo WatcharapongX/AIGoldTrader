@@ -65,6 +65,7 @@ class AIOrchestrator:
         for event in structure.events:
             reject_future(
                 "structure event",
+                event.swing_time,
                 event.occurred_at,
                 event.created_at,
                 event.detected_at,
@@ -423,10 +424,7 @@ class AIOrchestrator:
                     token_usage=None,
                 )
             try:
-                return await asyncio.wait_for(
-                    agent.execute(ai_input, self.provider, effective_config, timeout_seconds=timeout),
-                    timeout=timeout,
-                )
+                return await agent.execute(ai_input, self.provider, effective_config, timeout_seconds=timeout)
             except TimeoutError:
                 logger.warning("Agent %s timed out after %s seconds (hard cancel)", agent.agent_id, timeout)
                 return AgentAnalysisResult(
@@ -471,15 +469,12 @@ class AIOrchestrator:
         # ---------------------------------------------------------
         meta_timeout = effective_config.timeout_seconds
         try:
-            meta_result = await asyncio.wait_for(
-                self.meta_controller.execute(
-                    ai_input=ai_input,
-                    agent_results=agent_results_map,
-                    provider=self.provider,
-                    config=effective_config,
-                    timeout_seconds=meta_timeout,
-                ),
-                timeout=meta_timeout,
+            meta_result = await self.meta_controller.execute(
+                ai_input=ai_input,
+                agent_results=agent_results_map,
+                provider=self.provider,
+                config=effective_config,
+                timeout_seconds=meta_timeout,
             )
         except TimeoutError:
             logger.warning("MetaController timed out after %s seconds (hard cancel)", meta_timeout)

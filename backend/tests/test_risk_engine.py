@@ -25,6 +25,7 @@ from app.services.strategy.domain import (
     SetupCandidate,
     Target,
     TradePlanSuggestion,
+    compute_trade_plan_fingerprint,
 )
 
 
@@ -169,6 +170,7 @@ async def test_normal_approved_decision(
     assert decision.approved_risk_pct == Decimal("1.0000")
     assert decision.position_size > Decimal("0")
     assert decision.direction == "LONG"
+    assert decision.trade_plan_fingerprint == compute_trade_plan_fingerprint(candidate, plan)
     assert decision.execution_blocked == "NO_EXECUTION_ANALYSIS_ONLY"
     assert len(decision.blocked_reasons_th) == 0
     assert any("อนุมัติแผนเทรดตามปกติ" in r for r in decision.reasons_th)

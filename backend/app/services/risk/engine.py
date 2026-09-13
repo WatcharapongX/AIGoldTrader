@@ -30,7 +30,7 @@ from app.services.risk.kill_switch import kill_switch_manager
 from app.services.risk.portfolio import portfolio_manager
 from app.services.risk.repository import find_existing_decision
 from app.services.risk.sizing import calculate_position_size
-from app.services.strategy.domain import SetupCandidate, TradePlanSuggestion
+from app.services.strategy.domain import SetupCandidate, TradePlanSuggestion, compute_trade_plan_fingerprint
 
 
 class RiskEngine:
@@ -56,6 +56,7 @@ class RiskEngine:
         entry_lower = Decimal(str(plan.entry_lower))
         entry_upper = Decimal(str(plan.entry_upper))
         stop_loss = Decimal(str(plan.stop_loss))
+        plan_fingerprint = compute_trade_plan_fingerprint(candidate, plan)
 
         # 0. Transaction-level advisory lock on account to prevent concurrency races across workers (SOL-P5-P1-004)
         if session.get_bind().dialect.name == "postgresql":
@@ -434,6 +435,7 @@ class RiskEngine:
                 reasons=["การตรวจสอบเบื้องต้นไม่ผ่านเกณฑ์ความปลอดภัยของ Risk Policy"],
                 news_prov=news_prov,
                 dependency_fingerprint=fingerprint,
+                trade_plan_fingerprint=plan_fingerprint,
             )
 
         # 9. Portfolio budget capacity check (pure check, no reservation yet - SOL-P5-P1-008)
@@ -471,6 +473,7 @@ class RiskEngine:
                 blocked_reasons=blocked_reasons_th,
                 reasons=["ความเสี่ยงรวมของพอร์ตโฟลิโอเกินเกณฑ์ที่กำหนด"],
                 dependency_fingerprint=fingerprint,
+                trade_plan_fingerprint=plan_fingerprint,
             )
 
         # 10. Position sizing with approved risk amount
@@ -504,6 +507,7 @@ class RiskEngine:
                 blocked_reasons=blocked_reasons_th,
                 reasons=["ไม่สามารถจัดสรรขนาดสัญญาให้สอดคล้องกับงบความเสี่ยงที่ได้รับการอนุมัติ"],
                 dependency_fingerprint=fingerprint,
+                trade_plan_fingerprint=plan_fingerprint,
             )
 
         # 11. Final Sizing Succeeded: Atomically create reservation in DB
@@ -569,6 +573,7 @@ class RiskEngine:
             as_of=now,
             expires_at=min(plan.expires_at, now + dt.timedelta(seconds=policy.reservation_ttl_seconds)),
             dependency_fingerprint=fingerprint,
+            trade_plan_fingerprint=plan_fingerprint,
             market_provenance=market_prov,
             news_provenance=news_prov,
             execution_blocked="NO_EXECUTION_ANALYSIS_ONLY",
@@ -589,6 +594,7 @@ class RiskEngine:
         news_prov: NewsRiskProvenance | None = None,
         dependency_fingerprint: str = "",
         evaluation_intent_id: str = "",
+        trade_plan_fingerprint: str = "",
     ) -> RiskDecision:
         entry_lower = Decimal(str(plan.entry_lower))
         entry_upper = Decimal(str(plan.entry_upper))
@@ -628,6 +634,7 @@ class RiskEngine:
             as_of=now,
             expires_at=now + dt.timedelta(seconds=policy.reservation_ttl_seconds),
             dependency_fingerprint=dependency_fingerprint,
+            trade_plan_fingerprint=trade_plan_fingerprint,
             market_provenance=market_prov,
             news_provenance=news_prov,
             execution_blocked="NO_EXECUTION_ANALYSIS_ONLY",

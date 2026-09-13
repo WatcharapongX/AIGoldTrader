@@ -688,7 +688,11 @@ def test_31_lookahead_matrix(base_ai_input, now_time):
     bad_event = base_ai_input.model_copy(
         update={
             "structure_context": base_ai_input.structure_context.model_copy(
-                update={"events": (AIStructureEvent(kind="BOS", confirmed_at=future_time),)}
+                update={
+                    "events": (
+                        AIStructureEvent(kind="BOS", swing_time=now_time, confirmed_at=future_time),
+                    )
+                }
             )
         }
     )

@@ -271,7 +271,12 @@ def test_real_replay_provider_object_source_adapter() -> None:
     ("field", "replacement"),
     [
         ("swings", lambda future: (AISwingEvidence(swing_time=future),)),
-        ("events", lambda future: (AIStructureEvent(kind="BOS", confirmed_at=future),)),
+        (
+            "events",
+            lambda future: (
+                AIStructureEvent(kind="BOS", swing_time=future - dt.timedelta(seconds=1), confirmed_at=future),
+            ),
+        ),
         ("liquidity", lambda future: (AILiquidityEvidence(confirmed_at=future),)),
         ("zones", lambda future: (AIZoneEvidence(kind="FVG", confirmed_at=future),)),
     ],
@@ -362,6 +367,8 @@ def test_evidence_is_deeply_immutable_and_detached_from_source(evidence_type) ->
         "confirmed_at": now.isoformat(),
         "details": {"levels": ["2500.00"]},
     }
+    if evidence_type is AIStructureEvent:
+        source["swing_time"] = (now - dt.timedelta(minutes=1)).isoformat()
     evidence = evidence_type.model_validate(source)
     captured = evidence.data_json
     source["details"]["levels"].append("9999.00")
@@ -493,7 +500,12 @@ class OversizedOutputProvider(FixtureAIProvider):
             return result.model_copy(update={"content": "X" * 20_000})
         if self.mode == "raw":
             return result.model_copy(update={"raw_payload": {"blob": "X" * 20_000}})
-        return result.model_copy(update={"completion_tokens": 2_000})
+        return result.model_copy(
+            update={
+                "completion_tokens": 2_000,
+                "total_tokens": result.prompt_tokens + 2_000,
+            }
+        )
 
 
 @pytest.mark.asyncio

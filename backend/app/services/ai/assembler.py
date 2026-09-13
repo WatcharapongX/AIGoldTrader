@@ -50,7 +50,7 @@ from app.services.ai.domain import (
 from app.services.analysis.domain import AnalysisSnapshot
 from app.services.news.domain import NewsStrategyContext
 from app.services.risk.kill_switch import kill_switch_manager
-from app.services.strategy.domain import SetupCandidate
+from app.services.strategy.domain import SetupCandidate, compute_trade_plan_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -535,10 +535,12 @@ class AIAnalysisInputAssembler:
                 unavailable_reason=str(exc),
             )
 
+        current_plan_fingerprint = ""
         try:
             if candidate_domain is None or candidate_domain.plan is None:
                 raise ValueError("TradePlan is absent")
             plan = candidate_domain.plan
+            current_plan_fingerprint = compute_trade_plan_fingerprint(candidate_domain, plan)
             trade_plan_context = AITradePlanContext(
                 availability="AVAILABLE",
                 plan_id=plan.id,
@@ -563,7 +565,11 @@ class AIAnalysisInputAssembler:
         if (
             risk_context.decision in ("APPROVED", "REDUCED")
             and (
-                strategy_context.availability != "AVAILABLE"
+                not current_plan_fingerprint
+                or decision_row is None
+                or not str(decision_row.payload.get("trade_plan_fingerprint") or "")
+                or str(decision_row.payload.get("trade_plan_fingerprint")) != current_plan_fingerprint
+                or strategy_context.availability != "AVAILABLE"
                 or trade_plan_context.availability != "AVAILABLE"
                 or (decision_row is not None and str(decision_row.plan_id) != trade_plan_context.plan_id)
                 or (decision_row is not None and str(decision_row.strategy_id) != strategy_context.strategy_id)

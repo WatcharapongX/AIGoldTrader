@@ -16,7 +16,7 @@ from app.services.risk.domain import (
     RiskPolicy,
     SymbolSpecification,
 )
-from app.services.strategy.domain import SetupCandidate, TradePlanSuggestion
+from app.services.strategy.domain import SetupCandidate, TradePlanSuggestion, compute_trade_plan_fingerprint
 
 
 def compute_evaluation_intent_identity(
@@ -39,6 +39,7 @@ def compute_evaluation_intent_identity(
         "entry_upper": format(Decimal(str(plan.entry_upper)), ".5f"),
         "stop_loss": format(Decimal(str(plan.stop_loss)), ".5f"),
         "requested_risk_pct": format(requested_risk_pct, ".4f"),
+        "trade_plan_fingerprint": compute_trade_plan_fingerprint(candidate, plan),
     }
     serialized = json.dumps(intent_obj, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -147,6 +148,7 @@ def compute_risk_dependency_fingerprint(
         }
 
     plan_payload = {
+        "semantic_fingerprint": compute_trade_plan_fingerprint(candidate, plan),
         "id": plan.id,
         "direction": plan.direction,
         "entry_lower": format(Decimal(str(plan.entry_lower)), ".5f"),

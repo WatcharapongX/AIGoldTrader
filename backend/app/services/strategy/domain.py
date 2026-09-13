@@ -352,6 +352,29 @@ class SetupCandidate(Model):
     plan: TradePlanSuggestion | None
 
 
+def compute_trade_plan_fingerprint(candidate: SetupCandidate, plan: TradePlanSuggestion) -> str:
+    """Canonical identity of the complete authoritative TradePlan meaning.
+
+    Phase 4 does not otherwise define a plan fingerprint. This projection keeps
+    target ordering, every target field, invalidation, lifetime, evidence, and
+    candidate/strategy identity in one shared contract for Risk and AI binding.
+    """
+    return fingerprint(
+        {
+            "schema": "trade-plan-semantic-v1",
+            "candidate": {
+                "id": candidate.id,
+                "profile_id": candidate.profile_id,
+                "strategy_id": candidate.strategy_id,
+                "strategy_version": candidate.strategy_version,
+                "symbol": candidate.symbol,
+                "direction": candidate.direction,
+            },
+            "plan": plan.model_dump(mode="json"),
+        }
+    )
+
+
 class Transition(Model):
     id: str
     candidate_id: str

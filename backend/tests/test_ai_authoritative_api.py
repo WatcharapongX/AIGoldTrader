@@ -1,6 +1,7 @@
 """Authoritative Phase 2–5 assembly and FastAPI roundtrip probes."""
 
 import asyncio
+import copy
 import datetime as dt
 from decimal import Decimal
 
@@ -35,6 +36,7 @@ from app.services.strategy.domain import (
     StrategyMarketContext,
     Target,
     TradePlanSuggestion,
+    compute_trade_plan_fingerprint,
 )
 
 
@@ -280,7 +282,7 @@ async def seed_authoritative_chain(session, account_id: str, now: dt.datetime, s
         free_margin=Decimal("10000.00"),
         peak_equity=Decimal("10000.00"),
         as_of=now,
-        payload={},
+        payload={"trade_plan_fingerprint": compute_trade_plan_fingerprint(candidate, candidate.plan)},
     )
     decision = RiskDecisionRecord(
         id=f"decision-{suffix}",
@@ -305,7 +307,7 @@ async def seed_authoritative_chain(session, account_id: str, now: dt.datetime, s
         dependency_fingerprint=f"risk-dependency-{suffix}",
         as_of=now,
         expires_at=now + dt.timedelta(minutes=15),
-        payload={},
+        payload={"trade_plan_fingerprint": compute_trade_plan_fingerprint(candidate, candidate.plan)},
     )
     reservation = RiskReservationRecord(
         id=f"reservation-{suffix}",
@@ -557,3 +559,166 @@ async def test_every_reservation_semantic_mismatch_blocks_provider(
     assert assembled.risk_context.reservation_status == "MISMATCHED"
     assert result.status == "BLOCKED_BY_UPSTREAM"
     assert provider.call_history == []
+
+
+_TRADE_PLAN_MUTATIONS = (
+    "plan_id",
+    "direction",
+    "entry_lower",
+    "entry_upper",
+    "entry_source",
+    "stop_loss",
+    "stop_source",
+    "invalidation",
+    "tp1",
+    "tp2",
+    "target_rr",
+    "target_order_identity",
+    "score",
+    "evidence",
+    "warnings",
+    "news_state",
+    "context_id",
+    "as_of",
+    "expiry",
+)
+
+
+def mutate_trade_plan_payload(payload: dict, mutation: str, now: dt.datetime) -> dict:
+    mutated = copy.deepcopy(payload)
+    plan = mutated["plan"]
+    if mutation == "plan_id":
+        plan["id"] = "plan-reused-with-new-meaning"
+    elif mutation == "direction":
+        plan["direction"] = "SHORT"
+        plan["stop_loss"] = "2502.00"
+        plan["targets"][0]["price"] = "2490.00"
+        plan["targets"][1]["price"] = "2480.00"
+    elif mutation == "entry_lower":
+        plan["entry_lower"] = "2499.50"
+    elif mutation == "entry_upper":
+        plan["entry_upper"] = "2501.50"
+    elif mutation == "entry_source":
+        plan["entry_source_id"] = "zone-revised"
+    elif mutation == "stop_loss":
+        plan["stop_loss"] = "2494.00"
+    elif mutation == "stop_source":
+        plan["stop_source_id"] = "swing-revised"
+    elif mutation == "invalidation":
+        plan["invalidation_th"] = "ยกเลิกเมื่อโครงสร้างใหม่เสีย"
+    elif mutation == "tp1":
+        plan["targets"][0]["price"] = "2511.00"
+    elif mutation == "tp2":
+        plan["targets"][1]["price"] = "2521.00"
+    elif mutation == "target_rr":
+        plan["targets"][0]["rr"] = "1.6"
+    elif mutation == "target_order_identity":
+        first, second = plan["targets"]
+        first["name"], second["name"] = second["name"], first["name"]
+        first["source_id"], second["source_id"] = second["source_id"], first["source_id"]
+    elif mutation == "score":
+        plan["score"] = 87
+    elif mutation == "evidence":
+        plan["evidence"][0]["description_th"] = "หลักฐานแผนถูกแก้ไข"
+    elif mutation == "warnings":
+        plan["warnings_th"] = ["คำเตือนใหม่"]
+    elif mutation == "news_state":
+        plan["news_state"] = "ELEVATED"
+    elif mutation == "context_id":
+        plan["context_id"] = "strategy-context-revised"
+    elif mutation == "as_of":
+        plan["as_of"] = (now - dt.timedelta(seconds=1)).isoformat()
+    elif mutation == "expiry":
+        plan["expires_at"] = (now + dt.timedelta(hours=3)).isoformat()
+    else:  # pragma: no cover - the parameter matrix is exhaustive
+        raise AssertionError(f"Unknown mutation: {mutation}")
+    return mutated
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", _TRADE_PLAN_MUTATIONS)
+async def test_any_trade_plan_mutation_invalidates_prior_risk_authority(
+    client,
+    auth_headers,
+    db_session,
+    monkeypatch,
+    mutation: str,
+) -> None:
+    session, factory = db_session
+    account = await session.scalar(select(Account).where(Account.name == "default_paper_account"))
+    assert account is not None
+    now = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
+    _, _, candidate, _, _ = await seed_authoritative_chain(
+        session, str(account.id), now, f"plan-binding-{mutation}"
+    )
+
+    candidate_row = await session.get(TradeCandidateRecord, candidate.id)
+    assert candidate_row is not None
+    candidate_row.payload = mutate_trade_plan_payload(candidate_row.payload, mutation, now)
+    await session.commit()
+
+    market = MarketService(factory, get_settings())
+    market.quote = Quote(
+        symbol="XAUUSD", timestamp=dt.datetime.now(dt.UTC), bid=Decimal("2500.00"),
+        ask=Decimal("2500.30"), volume=Decimal("1"), source="simulated",
+        mode="SIMULATED", spread=Decimal("0.30"), status="CONNECTED",
+    )
+
+    async def keep_injected_quote() -> None:
+        return None
+
+    monkeypatch.setattr(market, "start", keep_injected_quote)
+    client.app.state.market = market
+    recorder = RecordingOrchestrator()
+    monkeypatch.setattr(ai_api, "ai_orchestrator", recorder)
+    response = client.post(
+        "/api/ai-analysis/evaluate", headers=auth_headers,
+        json={"candidate_id": candidate.id, "account_id": str(account.id)},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "BLOCKED_BY_UPSTREAM"
+    assert recorder.inputs[0].risk_context.reservation_status == "MISMATCHED"
+    assert recorder.provider.call_history == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_risk_decision_without_plan_fingerprint_fails_closed(
+    client,
+    auth_headers,
+    db_session,
+    monkeypatch,
+) -> None:
+    session, factory = db_session
+    account = await session.scalar(select(Account).where(Account.name == "default_paper_account"))
+    assert account is not None
+    now = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
+    _, _, candidate, decision, _ = await seed_authoritative_chain(
+        session, str(account.id), now, "legacy-missing-plan-binding"
+    )
+    decision.payload = {}
+    await session.commit()
+
+    market = MarketService(factory, get_settings())
+    market.quote = Quote(
+        symbol="XAUUSD", timestamp=dt.datetime.now(dt.UTC), bid=Decimal("2500.00"),
+        ask=Decimal("2500.30"), volume=Decimal("1"), source="simulated",
+        mode="SIMULATED", spread=Decimal("0.30"), status="CONNECTED",
+    )
+
+    async def keep_injected_quote() -> None:
+        return None
+
+    monkeypatch.setattr(market, "start", keep_injected_quote)
+    client.app.state.market = market
+    recorder = RecordingOrchestrator()
+    monkeypatch.setattr(ai_api, "ai_orchestrator", recorder)
+    response = client.post(
+        "/api/ai-analysis/evaluate", headers=auth_headers,
+        json={"candidate_id": candidate.id, "account_id": str(account.id)},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "BLOCKED_BY_UPSTREAM"
+    assert recorder.inputs[0].risk_context.reservation_status == "MISMATCHED"
+    assert recorder.provider.call_history == []

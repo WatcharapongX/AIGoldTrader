@@ -7,7 +7,7 @@ Zero execution authority; cannot place orders, modify risk, or bypass safety mec
 import logging
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -26,6 +26,10 @@ ai_rate_limiter = RateLimiter(per_minute=30, max_keys=10000)
 
 
 class AIEvaluationRequest(BaseModel):
+    """Current-state advisory request; historical/replay fields are not supported in Phase 6.1."""
+
+    model_config = ConfigDict(extra="forbid")
+
     candidate_id: str
     account_id: str = Field(description="Account UUID or account name")
     profile_id: str | None = Field(default=None, description="Optional trader profile ID")
