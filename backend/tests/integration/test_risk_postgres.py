@@ -747,3 +747,131 @@ def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  
         (acc_id,),
     ).fetchone()[0]
     assert res_count == 1, f"Expected exactly 1 active reservation in DB, got {res_count}"
+
+
+def test_migration_0010_dirty_state_reconciliation(isolated_postgres):  # noqa: F811
+    """SOL-P5 Round 3 Section 16, 17, 18:
+    1. Upgrade to 0010_phase5_account_authority.
+    2. Seed dirty state:
+       - 3 paper accounts (A, B, C) with snapshots to test multi-account backfill.
+       - Duplicate active reservations for (account A, candidate 1) with risk 1.0% and 0.5%.
+       - Duplicate data health records for same (provider, source).
+    3. Upgrade to head (through 0011 and 0012).
+    4. Verify:
+       - Exactly 3 paper_account_states rows created (1 for each account, no cross-account state leakage).
+       - Duplicate active reservation resolved: higher risk (1.0%) kept ACTIVE, 0.5% marked RELEASED.
+       - Unique index uq_risk_reservations_active_candidate created successfully.
+       - Duplicate data health records merged conservatively: max consecutive_failures kept.
+       - Unique constraint uq_data_health_provider_source created successfully.
+    """
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+    _alembic("upgrade", "0010_phase5_safety_closure")
+
+    uid = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES (%(uid)s, 'migration_test@example.com', 'dummy_hash', 'TRADER', true, NOW(), NOW())
+        """,
+        {"uid": uid},
+    )
+
+    # 1. Seed 3 accounts with snapshots
+    acc_ids = [str(uuid.uuid4()) for _ in range(3)]
+    for i, acc_id in enumerate(acc_ids):
+        conn.execute(
+            """
+            INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, is_active, created_at, updated_at)
+            VALUES (%(id)s, %(uid)s, %(name)s, 'PAPER', %(bal)s, true, NOW(), NOW())
+            """,
+            {"id": acc_id, "uid": uid, "name": f"Paper Acc {i+1}", "bal": 10000.00 * (i + 1)},
+        )
+        conn.execute(
+            """
+            INSERT INTO account_snapshots (
+                id, account_id, balance, equity, free_margin, daily_realized_pnl, weekly_realized_pnl,
+                peak_equity, open_risk_pct, reserved_risk_pct, consecutive_losses, trading_mode,
+                source, as_of, payload
+            ) VALUES (
+                %(sid)s, %(aid)s, %(bal)s, %(bal)s, %(bal)s, 0.00, 0.00,
+                %(bal)s, 0.0000, 0.0000, 0, 'PAPER', 'PAPER_ACCOUNT_STATE', NOW(), '{}'
+            )
+            """,
+            {"sid": f"snap_acc_{i}", "aid": acc_id, "bal": 10000.00 * (i + 1)},
+        )
+
+    # 2. Seed risk decisions and duplicate active reservations for same candidate and account 0
+    conn.execute(
+        """
+        INSERT INTO risk_decisions (
+            id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
+            decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
+            approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
+            stop_distance, account_snapshot_id, policy_version, as_of, expires_at, payload,
+            dependency_fingerprint
+        ) VALUES
+        ('dec_dup_1', 'cand_dup_01', 'plan_1', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
+         'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
+         'snap_acc_0', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}', 'fp_dup_1'),
+        ('dec_dup_2', 'cand_dup_01', 'plan_2', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
+         'APPROVED', 0.5, 0.5, 50.0, 50.0, 0.07, 2500.0, 2502.0, 2495.0, 7.0,
+         'snap_acc_0', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}', 'fp_dup_2')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO risk_reservations (
+            id, decision_id, account_id, profile_id, symbol, direction, risk_pct,
+            risk_amount, position_size, status, reserved_at, reserved_until
+        ) VALUES
+        ('res_dup_high', 'dec_dup_1', %(aid)s, 'day_trader', 'XAUUSD', 'LONG', 1.0000, 100.00,
+         0.14, 'ACTIVE', NOW(), NOW() + interval '5 min'),
+        ('res_dup_low', 'dec_dup_2', %(aid)s, 'day_trader', 'XAUUSD', 'LONG', 0.5000, 50.00,
+         0.07, 'ACTIVE', NOW(), NOW() + interval '5 min')
+        """,
+        {"aid": acc_ids[0]},
+    )
+
+    # 3. Seed duplicate data health records with same provider and source (0010 had non-unique index)
+    conn.execute(
+        """
+        INSERT INTO data_health_records (
+            id, provider, source, consecutive_failures, last_failure_at, last_healthy_at, updated_at, payload
+        )
+        VALUES
+        ('dh_dup_1', 'market_data', 'default', 2, NOW(), NOW(), NOW(), '{}'),
+        ('dh_dup_2', 'market_data', 'default', 5, NOW(), NOW(), NOW(), '{}')
+        """
+    )
+
+    # Upgrade through 0011 and 0012 to head
+    _alembic("upgrade", "head")
+    _alembic("check")
+
+    # Verify 3 paper account states created with matching starting balances
+    states = conn.execute(
+        "SELECT account_id, balance FROM paper_account_states WHERE account_id = ANY(%s) ORDER BY balance",
+        (acc_ids,),
+    ).fetchall()
+    assert len(states) == 3, f"Expected 3 paper account states, got {len(states)}"
+    assert [float(s[1]) for s in states] == [10000.0, 20000.0, 30000.0]
+
+    # Verify duplicate active reservation resolved (higher risk 1.0% is ACTIVE, 0.5% is RELEASED)
+    res_high = conn.execute(
+        "SELECT status, risk_pct FROM risk_reservations WHERE id = 'res_dup_high'"
+    ).fetchone()
+    res_low = conn.execute(
+        "SELECT status, risk_pct FROM risk_reservations WHERE id = 'res_dup_low'"
+    ).fetchone()
+    assert res_high[0] == "ACTIVE" and float(res_high[1]) == 1.0
+    assert res_low[0] == "RELEASED"
+
+    # Verify duplicate data health records deduplicated conservatively (max failures preserved)
+    dh_rows = conn.execute(
+        "SELECT id, provider, source, consecutive_failures FROM data_health_records "
+        "WHERE provider = 'market_data' AND source = 'default'"
+    ).fetchall()
+    assert len(dh_rows) == 1, f"Expected 1 deduplicated data health row, got {len(dh_rows)}"
+    assert dh_rows[0][3] >= 5, f"Expected consecutive_failures >= 5, got {dh_rows[0][3]}"
+

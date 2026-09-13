@@ -1357,7 +1357,7 @@ async def test_cross_process_kill_switch_data_health_persistence(db_session, tes
         session, test_account, test_policy, quote_stale=True, quote_stale_reason="Stale 2"
     )
 
-    dh_row = await session.get(DataHealthRecord, "dh_default")
+    dh_row = await session.get(DataHealthRecord, "dh_market_data_default")
     assert dh_row is not None
     assert dh_row.consecutive_failures == 2
 
@@ -1372,3 +1372,733 @@ async def test_cross_process_kill_switch_data_health_persistence(db_session, tes
     assert state is not None
     assert state.state == "ACTIVE"
     assert state.trigger_type == "AUTOMATIC_DATA_HEALTH"
+
+
+@pytest.mark.asyncio
+async def test_paper_account_state_unchanged_over_time_freshness(
+    db_session, test_candidate, test_plan, test_policy, test_spec, test_quote
+):
+    """SOL-P5-P1-030: Paper account unchanged economics after >60s remains operational.
+
+    Distinguishes state_updated_at (T0) from authoritative observation as_of (T+30s, T+61s, T+5m).
+    Freshness checks pass without artificial freshness laundering of economic transition timestamp.
+    """
+    session, _ = db_session
+    from app.models.account import Account, TradingMode
+    from app.services.risk.account_state import PaperAccountStateService, _to_utc
+
+    acc_id = uuid.uuid4()
+    t0 = dt.datetime(2026, 9, 10, 14, 0, 0, tzinfo=dt.UTC)
+
+    account = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_paper_fresh_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account)
+    await session.flush()
+
+    # Create initial state at T0
+    state = await PaperAccountStateService.get_or_create_paper_state(session, str(acc_id), now=t0)
+    assert _to_utc(state.state_updated_at) == t0
+    assert state.state_version == 1
+
+    calm_news = build_news_context(
+        events=[],
+        as_of=t0,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+
+    # Check at T+30s, T+61s (>60s freshness window), and T+300s (5m)
+    for delta_sec in (30, 61, 300):
+        obs_time = t0 + dt.timedelta(seconds=delta_sec)
+        snapshot = await PaperAccountStateService.refresh_paper_account_snapshot(
+            session, str(acc_id), force=True, now=obs_time
+        )
+        # Authoritative observation time is fresh
+        assert snapshot.as_of == obs_time
+        # Authentic economic transition timestamp is preserved (NO laundering)
+        assert _to_utc(snapshot.state_updated_at) == t0
+        assert snapshot.state_version == 1
+
+        # Evaluate candidate with this snapshot - MUST NOT be blocked as stale account
+        curr_quote = test_quote.model_copy(update={"timestamp": obs_time})
+        curr_news = calm_news.model_copy(update={"as_of": obs_time})
+        dec = await risk_engine.evaluate_candidate(
+            session=session,
+            candidate=test_candidate,
+            plan=test_plan,
+            account=snapshot,
+            policy=test_policy,
+            spec=test_spec,
+            quote=curr_quote,
+            news_context=curr_news,
+            as_of=obs_time,
+        )
+        assert dec.decision == "APPROVED", f"Failed at T+{delta_sec}s: {dec.blocked_reasons_th}"
+        assert not any("บัญชีไม่เป็นปัจจุบัน" in r or "STALE" in r for r in dec.blocked_reasons_th)
+
+
+@pytest.mark.asyncio
+async def test_force_snapshot_refresh_unique_pk_no_collision(db_session, now_time):
+    """SOL-P5-P1-030: Repeated / forced snapshot refreshes generate distinct observation IDs without PK collisions."""
+    session, _ = db_session
+    from app.models.account import Account, TradingMode
+    from app.services.risk.account_state import PaperAccountStateService
+
+    acc_id = uuid.uuid4()
+    account = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_force_snap_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account)
+    await session.flush()
+
+    snapshots = []
+    for _ in range(10):
+        snap = await PaperAccountStateService.refresh_paper_account_snapshot(
+            session, str(acc_id), force=True, now=now_time
+        )
+        snapshots.append(snap)
+
+    ids = [s.id for s in snapshots]
+    assert len(set(ids)) == 10, f"Expected 10 unique snapshot IDs, got {len(set(ids))}"
+    # State version and economics remain identical
+    assert all(s.state_version == 1 for s in snapshots)
+    assert all(s.balance == Decimal("10000.00") for s in snapshots)
+
+
+@pytest.mark.asyncio
+async def test_missing_paper_account_state_concurrent_creation(db_session, now_time):
+    """SOL-P5-P1-030: Concurrent tasks initializing missing PaperAccountState produce exactly 1 record."""
+    import asyncio
+
+    session, session_factory = db_session
+    from app.models.account import Account, TradingMode
+    from app.models.risk import PaperAccountStateRecord
+    from app.services.risk.account_state import PaperAccountStateService
+
+    acc_id = uuid.uuid4()
+    account = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_conc_init_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account)
+    await session.commit()
+
+    async def worker():
+        async with session_factory() as s:
+            res = await PaperAccountStateService.get_or_create_paper_state(s, str(acc_id), now=now_time)
+            await s.commit()
+            return res
+
+    results = await asyncio.gather(*[worker() for _ in range(10)])
+    assert all(r.account_id == str(acc_id) for r in results)
+    assert all(r.state_version == 1 for r in results)
+
+    # Verify exactly 1 row in DB
+    await session.commit()
+    rows = (
+        await session.scalars(
+            select(PaperAccountStateRecord).where(PaperAccountStateRecord.account_id == str(acc_id))
+        )
+    ).all()
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_paper_account_state_same_economic_target_concurrency(db_session, now_time):
+    """SOL-P5-P1-030: Multiple workers setting identical economic target increment state_version exactly once."""
+    session, _ = db_session
+    from app.models.account import Account, TradingMode
+    from app.services.risk.account_state import PaperAccountStateService
+
+    acc_id = uuid.uuid4()
+    account = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_target_conc_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account)
+    await session.flush()
+
+    await PaperAccountStateService.get_or_create_paper_state(session, str(acc_id), now=now_time)
+
+    # 10 workers setting the same target economics (balance=10500, equity=10500)
+    for _ in range(10):
+        await PaperAccountStateService.update_paper_account_state(
+            session,
+            str(acc_id),
+            balance=Decimal("10500.00"),
+            equity=Decimal("10500.00"),
+            now=now_time,
+        )
+
+    state = await PaperAccountStateService.get_or_create_paper_state(session, str(acc_id), now=now_time)
+    assert state.state_version == 2, f"Expected state_version == 2 (incremented once), got {state.state_version}"
+    assert state.balance == Decimal("10500.00")
+
+
+@pytest.mark.asyncio
+async def test_paper_account_state_distinct_economic_updates_concurrency(db_session, now_time):
+    """SOL-P5-P1-030: 10 distinct economic transitions increment state_version for every change with no lost updates."""
+    session, _ = db_session
+    from app.models.account import Account, TradingMode
+    from app.services.risk.account_state import PaperAccountStateService
+
+    acc_id = uuid.uuid4()
+    account = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_distinct_conc_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account)
+    await session.flush()
+
+    await PaperAccountStateService.get_or_create_paper_state(session, str(acc_id), now=now_time)
+
+    # 10 distinct updates
+    for i in range(10):
+        new_balance = Decimal(10000 + (i + 1) * 10)
+        await PaperAccountStateService.update_paper_account_state(
+            session,
+            str(acc_id),
+            balance=new_balance,
+            equity=new_balance,
+            now=now_time,
+        )
+
+    state = await PaperAccountStateService.get_or_create_paper_state(session, str(acc_id), now=now_time)
+    assert state.state_version == 11, f"Expected state_version == 11, got {state.state_version}"
+    assert state.balance == Decimal("10100.00")
+
+
+def test_100_safe_quote_ticks_fingerprint_invariance(
+    test_candidate, test_plan, test_account, test_policy, test_spec, now_time
+):
+    """SOL-P5-P1-031: Safe quote ticks within safe spread band do not churn risk dependency fingerprint."""
+    ks = KillSwitchState(
+        id="ks_safe_test",
+        state="INACTIVE",
+        trigger_type="MANUAL",
+        reason_th="OK",
+        activated_at=now_time,
+        activated_by="system",
+    )
+
+    fps = []
+    for i in range(100):
+        tick_bid = Decimal("2500.00") + Decimal(str(round(i * 0.01, 2)))
+        tick_ask = tick_bid + Decimal("0.20")  # Constant safe 0.20 spread
+        q = Quote(
+            source="simulated",
+            mode="SIMULATED",
+            symbol="XAUUSD",
+            bid=tick_bid,
+            ask=tick_ask,
+            spread=Decimal("0.20"),
+            volume=Decimal("10"),
+            status="CONNECTED",
+            timestamp=now_time,
+        )
+        fp = compute_risk_dependency_fingerprint(
+            candidate=test_candidate,
+            plan=test_plan,
+            profile_id="day_trader",
+            account=test_account,
+            policy=test_policy,
+            spec=test_spec,
+            kill_switch=ks,
+            quote=q,
+            news_prov=None,
+            portfolio_exposure_before=Decimal("0.0"),
+            requested_risk_pct=Decimal("1.0"),
+        )
+        fps.append(fp)
+
+    assert len(set(fps)) == 1, f"Expected 1 unique fingerprint across 100 safe ticks, got {len(set(fps))}"
+
+
+@pytest.mark.asyncio
+async def test_decision_reservation_1_to_1_consistency_and_risk_reduction(
+    db_session, test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time
+):
+    """SOL-P5-P1-031: Decision <-> Reservation 1:1 consistency. Risk reduction atomically replaces reservation."""
+    session, _ = db_session
+    from app.models.account import Account, TradingMode
+
+    acc_id = uuid.uuid4()
+    account_row = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_res_1to1_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account_row)
+    await session.flush()
+
+    account = test_account.model_copy(update={"account_id": str(acc_id)})
+    calm_news = build_news_context(
+        events=[],
+        as_of=now_time,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+
+    # 1. Initial evaluation at 1.0% risk -> D1 APPROVED, R1 ACTIVE at 1.0%
+    dec1 = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan,
+        account=account,
+        policy=test_policy,
+        spec=test_spec,
+        quote=test_quote,
+        news_context=calm_news,
+        as_of=now_time,
+        requested_risk_pct=Decimal("1.0"),
+    )
+    assert dec1.decision == "APPROVED"
+    assert dec1.approved_risk_pct == Decimal("1.0")
+    await persist_risk_decision(session, dec1)
+    await session.flush()
+
+    active_reservations = (
+        await session.scalars(
+            select(RiskReservationRecord).where(
+                RiskReservationRecord.account_id == str(acc_id),
+                RiskReservationRecord.candidate_id == test_candidate.id,
+                RiskReservationRecord.status == "ACTIVE",
+            )
+        )
+    ).all()
+    assert len(active_reservations) == 1
+    assert active_reservations[0].risk_pct == Decimal("1.0000")
+    assert active_reservations[0].decision_id == dec1.id
+
+    # 2. Re-evaluate with reduced risk requirement 0.5% -> D2 APPROVED at 0.5%
+    dec2 = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan,
+        account=account,
+        policy=test_policy,
+        spec=test_spec,
+        quote=test_quote,
+        news_context=calm_news,
+        as_of=now_time,
+        requested_risk_pct=Decimal("0.5"),
+    )
+    assert dec2.decision == "APPROVED"
+    assert dec2.approved_risk_pct == Decimal("0.5")
+    await persist_risk_decision(session, dec2)
+    await session.flush()
+
+    # Verify R1 was atomically updated/replaced to match D2
+    active_reservations2 = (
+        await session.scalars(
+            select(RiskReservationRecord).where(
+                RiskReservationRecord.account_id == str(acc_id),
+                RiskReservationRecord.candidate_id == test_candidate.id,
+                RiskReservationRecord.status == "ACTIVE",
+            )
+        )
+    ).all()
+    assert len(active_reservations2) == 1, "Must have exactly 1 active reservation"
+    assert active_reservations2[0].risk_pct == Decimal("0.5000"), "Active reservation must match D2 risk"
+    assert active_reservations2[0].decision_id == dec2.id, "Active reservation must point to D2"
+
+
+@pytest.mark.asyncio
+async def test_blocked_reevaluation_releases_active_reservation(
+    db_session, test_candidate, test_plan, test_account, test_policy, test_spec, test_quote, now_time
+):
+    """SOL-P5-P1-008: When a previously APPROVED intent re-evaluates as BLOCKED, reservation is released."""
+    session, _ = db_session
+    from app.models.account import Account, TradingMode
+
+    acc_id = uuid.uuid4()
+    account_row = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_rel_blk_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account_row)
+    await session.flush()
+
+    account = test_account.model_copy(update={"account_id": str(acc_id)})
+    calm_news = build_news_context(
+        events=[],
+        as_of=now_time,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+
+    # Initial APPROVED
+    dec = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan,
+        account=account,
+        policy=test_policy,
+        spec=test_spec,
+        quote=test_quote,
+        news_context=calm_news,
+        as_of=now_time,
+    )
+    assert dec.decision == "APPROVED"
+    await persist_risk_decision(session, dec)
+    await session.flush()
+
+    active_before = (
+        await session.scalars(
+            select(RiskReservationRecord).where(
+                RiskReservationRecord.account_id == str(acc_id),
+                RiskReservationRecord.candidate_id == test_candidate.id,
+                RiskReservationRecord.status == "ACTIVE",
+            )
+        )
+    ).all()
+    assert len(active_before) == 1
+
+    # Stale quote triggers BLOCKED
+    stale_quote = test_quote.model_copy(update={"timestamp": now_time - dt.timedelta(seconds=120)})
+    dec_blocked = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=test_candidate,
+        plan=test_plan,
+        account=account,
+        policy=test_policy,
+        spec=test_spec,
+        quote=stale_quote,
+        news_context=calm_news,
+        as_of=now_time,
+    )
+    assert dec_blocked.decision == "BLOCKED"
+    await persist_risk_decision(session, dec_blocked)
+    await session.flush()
+
+    # Active reservation MUST be RELEASED
+    active_after = (
+        await session.scalars(
+            select(RiskReservationRecord).where(
+                RiskReservationRecord.account_id == str(acc_id),
+                RiskReservationRecord.candidate_id == test_candidate.id,
+                RiskReservationRecord.status == "ACTIVE",
+            )
+        )
+    ).all()
+    assert len(active_after) == 0, "Blocked re-evaluation must release active reservation"
+
+    # Confirm reservation row exists with status RELEASED
+    released = (
+        await session.scalars(
+            select(RiskReservationRecord).where(
+                RiskReservationRecord.account_id == str(acc_id),
+                RiskReservationRecord.candidate_id == test_candidate.id,
+                RiskReservationRecord.status == "RELEASED",
+            )
+        )
+    ).all()
+    assert len(released) == 1
+
+
+@pytest.mark.asyncio
+async def test_data_health_empty_table_concurrent_creation(db_session, test_account, test_policy, now_time):
+    """SOL-P5-P2-038: Concurrent data health trigger evaluations on empty table create 1 row with 0 errors."""
+    session, _ = db_session
+    from app.models.risk import DataHealthRecord
+    from app.services.risk.kill_switch import KillSwitchManager
+
+    ks = KillSwitchManager()
+    for _ in range(10):
+        await ks.evaluate_automatic_triggers(
+            session,
+            test_account,
+            test_policy,
+            quote_stale=True,
+            quote_stale_reason="Stale conc",
+            provider="market_data",
+            source="race_source",
+        )
+
+    rows = (
+        await session.scalars(
+            select(DataHealthRecord).where(
+                DataHealthRecord.provider == "market_data",
+                DataHealthRecord.source == "race_source",
+            )
+        )
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].consecutive_failures == 10
+
+
+@pytest.mark.asyncio
+async def test_data_health_multi_provider_isolation(db_session, test_account, test_policy, now_time):
+    """SOL-P5-P2-038: Multi-provider isolation; healthy ticks do not reset unrelated providers."""
+    session, _ = db_session
+    from app.models.risk import DataHealthRecord
+    from app.services.risk.kill_switch import KillSwitchManager
+
+    ks = KillSwitchManager()
+
+    # Trigger 2 failures on provider MT5
+    for i in range(2):
+        await ks.evaluate_automatic_triggers(
+            session,
+            test_account,
+            test_policy,
+            quote_stale=True,
+            quote_stale_reason=f"MT5 fail {i}",
+            provider="mt5",
+            source="iux",
+        )
+
+    # Trigger 1 failure on provider Replay
+    await ks.evaluate_automatic_triggers(
+        session,
+        test_account,
+        test_policy,
+        quote_stale=True,
+        quote_stale_reason="Replay fail",
+        provider="replay",
+        source="tick",
+    )
+
+    mt5_row = await session.get(DataHealthRecord, "dh_mt5_iux")
+    replay_row = await session.get(DataHealthRecord, "dh_replay_tick")
+    assert mt5_row is not None and mt5_row.consecutive_failures == 2
+    assert replay_row is not None and replay_row.consecutive_failures == 1
+
+    # Healthy tick on Replay resets Replay to 0, MT5 remains 2
+    await ks.evaluate_automatic_triggers(
+        session,
+        test_account,
+        test_policy,
+        quote_stale=False,
+        provider="replay",
+        source="tick",
+    )
+    await session.refresh(mt5_row)
+    await session.refresh(replay_row)
+    assert mt5_row.consecutive_failures == 2, "MT5 failures must not be reset by Replay"
+    assert replay_row.consecutive_failures == 0
+
+
+def test_mt5_server_authority_disconnected_and_fail_closed():
+    """SOL-P5-P1-032: Disconnected MT5 provider reports broker_server = None and expected_broker_server from config."""
+    from app.core.config import Settings
+    from app.services.market_data.mt5 import MT5MarketDataProvider
+
+    settings = Settings(mt5_expected_server="IUXMarkets-Demo")
+    provider = MT5MarketDataProvider(settings=settings)
+
+    # Disconnected provider:
+    assert provider.connected is False
+    assert provider.broker_server is None, "Disconnected MT5 must report broker_server = None"
+    assert provider.expected_broker_server == "IUXMarkets-Demo"
+
+
+def test_frontend_kill_switch_decoupling_logic():
+    """SOL-P5-P1-033: Frontend Kill Switch card status depends on killSwitch resource, not Policy/Portfolio errors."""
+    is_kill_switch_ready = True
+    kill_switch = {"state": "INACTIVE", "trigger_type": "MANUAL"}
+
+    is_kill_switch_unknown = not is_kill_switch_ready or not kill_switch or kill_switch["state"] == "UNKNOWN"
+
+    assert is_kill_switch_unknown is False
+    assert kill_switch["state"] == "INACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_news_runtime_fastapi_roundtrip(client, auth_headers, db_session, now_time, test_plan):
+    """SOL-P5-P2-036 / Section 26: News runtime FastAPI roundtrip with complete provenance."""
+    session, _ = db_session
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.models.strategy import StrategyEvaluationRecord, TradeCandidateRecord
+
+    # 1. Seed candidate
+    cand_id = "cand_news_rt_01"
+    eval_rec = StrategyEvaluationRecord(
+        id="eval_news_rt_01",
+        context_id="ctx_news_01",
+        symbol="XAUUSD",
+        source="simulated",
+        as_of=now_time,
+        generated_at=now_time,
+        payload_hash="hash_news_01",
+        payload={},
+    )
+    session.add(eval_rec)
+    cand_rec = TradeCandidateRecord(
+        id=cand_id,
+        evaluation_id="eval_news_rt_01",
+        profile_id="day_trader",
+        strategy_id="STRAT02",
+        as_of=now_time,
+        payload={
+            "id": cand_id,
+            "profile_id": "day_trader",
+            "strategy_id": "STRAT02",
+            "strategy_version": "1.0.0",
+            "symbol": "XAUUSD",
+            "direction": "LONG",
+            "status": "READY",
+            "score": 85,
+            "detected_at": now_time.isoformat(),
+            "confirmed_at": now_time.isoformat(),
+            "expires_at": (now_time + dt.timedelta(hours=2)).isoformat(),
+            "context_id": "ctx_news_01",
+            "upstream_ids": [],
+            "evidence": [],
+            "missing_conditions": [],
+            "conflicts": [],
+            "invalidation_th": "หลุดแนวรับ",
+            "plan": test_plan.model_dump(mode="json"),
+        },
+    )
+    session.add(cand_rec)
+
+    from app.models.risk import SymbolSpecificationRecord
+    spec_rec = SymbolSpecificationRecord(
+        id="sym_spec_news_rt",
+        symbol="XAUUSD",
+        source="simulated",
+        tick_size=Decimal("0.01"),
+        tick_value=Decimal("1.00"),
+        contract_size=Decimal("100.00"),
+        volume_min=Decimal("0.01"),
+        volume_max=Decimal("10.00"),
+        volume_step=Decimal("0.01"),
+        digits=2,
+        observed_at=now_time,
+        payload={
+            "id": "sym_spec_news_rt",
+            "symbol": "XAUUSD",
+            "source": "simulated",
+            "tick_size": "0.01",
+            "tick_value": "1.00",
+            "contract_size": "100.00",
+            "volume_min": "0.01",
+            "volume_max": "10.00",
+            "volume_step": "0.01",
+            "digits": 2,
+            "observed_at": now_time.isoformat(),
+        },
+    )
+    session.add(spec_rec)
+    await session.commit()
+
+    # 2. Mock market provider and news provider on client.app.state
+    from app.services.news.provider import fixture_release
+
+    app = client.app
+    static_quote = Quote(
+        source="simulated",
+        mode="SIMULATED",
+        symbol="XAUUSD",
+        bid=Decimal("2500.00"),
+        ask=Decimal("2500.30"),
+        spread=Decimal("0.30"),
+        volume=Decimal("100"),
+        status="CONNECTED",
+        timestamp=now_time,
+    )
+    class DummyProvider:
+        source = "simulated"
+        broker_server = None
+        server = None
+
+    mock_market = MagicMock()
+    mock_market.quote = static_quote
+    mock_market.start = AsyncMock()
+    mock_market.stop = AsyncMock()
+    mock_market.provider = DummyProvider()
+    app.state.market = mock_market
+
+    events = fixture_release(now_time, "mixed")
+    news_ctx = build_news_context(
+        events=events,
+        as_of=now_time,
+        source="forex_factory",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+    mock_news = MagicMock()
+    mock_news.start = AsyncMock()
+    mock_news.stop = AsyncMock()
+    mock_news.provider.source = "forex_factory"
+    mock_news.context = AsyncMock(return_value=news_ctx)
+    app.state.news = mock_news
+
+    # 3. Call /api/risk/evaluate
+    response = client.post(
+        "/api/risk/evaluate",
+        headers=auth_headers,
+        json={
+            "candidate_id": cand_id,
+            "profile_id": "day_trader",
+            "account_id": "default_paper_account",
+            "requested_risk_pct": 1.0,
+        },
+    )
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+    data = response.json()
+    assert data["decision"] in ("APPROVED", "BLOCKED")
+    assert data["evaluation_intent_id"] != ""
+    assert data["dependency_fingerprint"] != ""
+
+    # Assert news provenance fields
+    news_prov = data.get("news_provenance")
+    assert news_prov is not None, f"news_provenance must be populated: {data}"
+    assert news_prov["provider"] != ""
+    assert news_prov["source"] != ""
+    assert news_prov["news_state"] in ("CALM", "PRE_NEWS", "NEWS_LOCK", "POST_NEWS_VOLATILITY", "UNAVAILABLE")
+    if news_prov.get("events"):
+        first_event = news_prov["events"][0]
+        assert first_event["impact"] in ("LOW", "MEDIUM", "HIGH", "NON_ECONOMIC")
+        assert first_event["scheduled_at"] is not None

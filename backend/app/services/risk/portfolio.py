@@ -365,10 +365,56 @@ class PortfolioRiskManager:
         now: dt.datetime,
         candidate_id: str | None = None,
     ) -> RiskReservation:
-        """Atomically records a reservation ONLY after final sizing succeeds (SOL-P5-P1-008)."""
-        reservation_id = f"res_{uuid.uuid4().hex[:24]}"
+        """Atomically records or updates an active reservation to maintain 1:1 consistency with RiskDecision.
+
+        Hard invariant (SOL High Round 3 Section 10-12):
+        An APPROVED/REDUCED RiskDecision must correspond to exactly one active reservation with matching
+        decision_id, account, candidate, profile, symbol, direction, risk_pct, risk_amount, position_size.
+        If a prior reservation exists for the same candidate with different risk (e.g. 1.0% -> 0.5%),
+        it is atomically replaced.
+        """
         reserved_until = now + dt.timedelta(seconds=policy.reservation_ttl_seconds)
 
+        # 1. Check for existing active reservation for this candidate under row lock
+        if candidate_id:
+            existing = await session.scalar(
+                select(RiskReservationRecord)
+                .where(
+                    RiskReservationRecord.account_id == account_id,
+                    RiskReservationRecord.candidate_id == candidate_id,
+                    RiskReservationRecord.status == "ACTIVE",
+                )
+                .with_for_update()
+            )
+            if existing is not None:
+                # Atomically update to guarantee 1:1 consistency with current decision
+                existing.decision_id = decision_id
+                existing.profile_id = profile_id
+                existing.symbol = symbol
+                existing.direction = direction
+                existing.risk_pct = risk_pct
+                existing.risk_amount = risk_amount
+                existing.position_size = position_size
+                existing.reserved_at = now
+                existing.reserved_until = reserved_until
+                await session.flush()
+                return RiskReservation(
+                    id=existing.id,
+                    decision_id=existing.decision_id,
+                    account_id=existing.account_id,
+                    candidate_id=existing.candidate_id,
+                    profile_id=existing.profile_id,
+                    symbol=existing.symbol,
+                    direction=existing.direction,  # type: ignore[arg-type]
+                    risk_pct=Decimal(str(existing.risk_pct)),
+                    risk_amount=Decimal(str(existing.risk_amount)),
+                    position_size=Decimal(str(existing.position_size)),
+                    status="ACTIVE",
+                    reserved_at=now,
+                    reserved_until=reserved_until,
+                )
+
+        reservation_id = f"res_{uuid.uuid4().hex[:24]}"
         record = RiskReservationRecord(
             id=reservation_id,
             decision_id=decision_id,
@@ -391,23 +437,26 @@ class PortfolioRiskManager:
         except IntegrityError:
             if candidate_id:
                 existing = await session.scalar(
-                    select(RiskReservationRecord).where(
+                    select(RiskReservationRecord)
+                    .where(
                         RiskReservationRecord.account_id == account_id,
                         RiskReservationRecord.candidate_id == candidate_id,
                         RiskReservationRecord.status == "ACTIVE",
                     )
+                    .with_for_update()
                 )
                 if existing is not None:
-                    res_at = (
-                        existing.reserved_at
-                        if existing.reserved_at.tzinfo
-                        else existing.reserved_at.replace(tzinfo=dt.UTC)
-                    )
-                    res_until = (
-                        existing.reserved_until
-                        if existing.reserved_until.tzinfo
-                        else existing.reserved_until.replace(tzinfo=dt.UTC)
-                    )
+                    # Atomically update existing to maintain exact consistency
+                    existing.decision_id = decision_id
+                    existing.profile_id = profile_id
+                    existing.symbol = symbol
+                    existing.direction = direction
+                    existing.risk_pct = risk_pct
+                    existing.risk_amount = risk_amount
+                    existing.position_size = position_size
+                    existing.reserved_at = now
+                    existing.reserved_until = reserved_until
+                    await session.flush()
                     return RiskReservation(
                         id=existing.id,
                         decision_id=existing.decision_id,
@@ -420,8 +469,8 @@ class PortfolioRiskManager:
                         risk_amount=Decimal(str(existing.risk_amount)),
                         position_size=Decimal(str(existing.position_size)),
                         status="ACTIVE",
-                        reserved_at=res_at,
-                        reserved_until=res_until,
+                        reserved_at=now,
+                        reserved_until=reserved_until,
                     )
             raise
 

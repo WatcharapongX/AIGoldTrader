@@ -22,7 +22,10 @@ from app.services.risk.domain import (
     RiskPolicy,
     SymbolSpecification,
 )
-from app.services.risk.fingerprint import compute_risk_dependency_fingerprint
+from app.services.risk.fingerprint import (
+    compute_evaluation_intent_identity,
+    compute_risk_dependency_fingerprint,
+)
 from app.services.risk.kill_switch import kill_switch_manager
 from app.services.risk.portfolio import portfolio_manager
 from app.services.risk.repository import find_existing_decision
@@ -253,7 +256,42 @@ class RiskEngine:
 
         cooldown_active, _ = is_cooldown_active(account, policy, now)
 
-        # 6. Calculate current portfolio exposure for fingerprint (sole source: DB reservations)
+        # 6. Calculate stable evaluation intent identity (SOL High Round 3 Section 7 & 8)
+        intent_id = compute_evaluation_intent_identity(
+            candidate=candidate,
+            plan=plan,
+            profile_id=candidate.profile_id,
+            account_id=account.account_id,
+            requested_risk_pct=target_risk_pct,
+        )
+
+        async def _release_pending_active_reservations(reason: str):
+            """Atomically releases any active reservations for this candidate when evaluation blocks
+            (SOL High Round 3 Section 13).
+            """
+            from sqlalchemy import select
+
+            from app.models.risk import RiskReservationRecord
+
+            active_rows = (
+                await session.scalars(
+                    select(RiskReservationRecord)
+                    .where(
+                        RiskReservationRecord.account_id == account.account_id,
+                        RiskReservationRecord.candidate_id == candidate.id,
+                        RiskReservationRecord.status == "ACTIVE",
+                    )
+                    .with_for_update()
+                )
+            ).all()
+            for r in active_rows:
+                r.status = "RELEASED"
+                r.released_at = now
+                r.release_reason = reason
+            if active_rows:
+                await session.flush()
+
+        # 7. Calculate current portfolio exposure for fingerprint (sole source: DB reservations)
         # Exclude candidate's own active reservation so baseline exposure and fingerprint
         # are deterministic across retries
         active_reservations = await portfolio_manager.get_active_reservations(session, account.account_id, now)
@@ -267,7 +305,7 @@ class RiskEngine:
         )
         current_exposure = account.open_risk_pct + current_reserved
 
-        # 7. Compute canonical deterministic dependency fingerprint & ID
+        # 8. Compute canonical deterministic dependency fingerprint & ID
         fingerprint = compute_risk_dependency_fingerprint(
             candidate=candidate,
             plan=plan,
@@ -287,7 +325,7 @@ class RiskEngine:
         )
         decision_id = f"dec_{fingerprint[:24]}"
 
-        # 8. Check idempotency cache with full dependency fingerprint inside lock (SOL-P5-P1-001, 004)
+        # 9. Check idempotency cache with full dependency fingerprint inside lock (SOL-P5-P1-001, 004)
         existing_decision = await find_existing_decision(
             session=session,
             candidate_id=candidate.id,
@@ -372,8 +410,10 @@ class RiskEngine:
 
         # If any gate failed, fail closed (ZERO reservation created)
         if blocked_reasons_th:
+            await _release_pending_active_reservations(blocked_reasons_th[0])
             return self._blocked_decision(
                 decision_id=decision_id,
+                evaluation_intent_id=intent_id,
                 candidate=candidate,
                 plan=plan,
                 account=account,
@@ -407,8 +447,10 @@ class RiskEngine:
 
         if not budget_check.allowed:
             blocked_reasons_th.append(budget_check.reason_th or "วงเงินความเสี่ยงพอร์ตโฟลิโอไม่เพียงพอ")
+            await _release_pending_active_reservations(blocked_reasons_th[0])
             return self._blocked_decision(
                 decision_id=decision_id,
+                evaluation_intent_id=intent_id,
                 candidate=candidate,
                 plan=plan,
                 account=account,
@@ -438,8 +480,10 @@ class RiskEngine:
 
         if not final_sizing.is_valid:
             blocked_reasons_th.append(final_sizing.error_th or "การคำนวณขนาดสัญญาขั้นสุดท้ายไม่ผ่าน")
+            await _release_pending_active_reservations(blocked_reasons_th[0])
             return self._blocked_decision(
                 decision_id=decision_id,
+                evaluation_intent_id=intent_id,
                 candidate=candidate,
                 plan=plan,
                 account=account,
@@ -485,6 +529,7 @@ class RiskEngine:
 
         return RiskDecision(
             id=decision_id,
+            evaluation_intent_id=intent_id,
             candidate_id=candidate.id,
             plan_id=plan.id,
             strategy_id=candidate.strategy_id,
@@ -534,6 +579,7 @@ class RiskEngine:
         reasons: list[str],
         news_prov: NewsRiskProvenance | None = None,
         dependency_fingerprint: str = "",
+        evaluation_intent_id: str = "",
     ) -> RiskDecision:
         entry_lower = Decimal(str(plan.entry_lower))
         entry_upper = Decimal(str(plan.entry_upper))
@@ -542,6 +588,7 @@ class RiskEngine:
 
         return RiskDecision(
             id=decision_id,
+            evaluation_intent_id=evaluation_intent_id,
             candidate_id=candidate.id,
             plan_id=plan.id,
             strategy_id=candidate.strategy_id,

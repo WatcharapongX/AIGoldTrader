@@ -110,16 +110,25 @@ class MT5MarketDataProvider(MarketDataProvider):
         self.last_quote: dt.datetime | None = None
 
     @property
+    def expected_broker_server(self) -> str | None:
+        """Configured expected MT5 server."""
+        return self.settings.mt5_expected_server or None
+
+    @property
     def broker_server(self) -> str | None:
-        """Exposes authoritative broker server from MT5 account_info or configured expected server."""
-        if self._gateway is not None:
+        """Exposes authoritative broker server ONLY when live connected to MT5 terminal.
+
+        Returns None when disconnected to avoid masquerading configuration as live authority
+        (SOL High Round 3 Section 22).
+        """
+        if self.connected and self._gateway is not None:
             try:
                 acc = self._gateway.call("account_info")
                 if acc is not None and getattr(acc, "server", None):
                     return str(acc.server)
             except Exception as exc:
                 logger.debug("Failed to read broker server from MT5 account_info: %s", exc)
-        return self.settings.mt5_expected_server or None
+        return None
 
     async def connect(self):
         await asyncio.to_thread(self._connect)

@@ -76,6 +76,10 @@ class MarketDataProvider(ABC):
     def broker_server(self) -> str | None:
         return None
 
+    @property
+    def expected_broker_server(self) -> str | None:
+        return None
+
     async def candle_updates(self, now: dt.datetime) -> list[Candle]:
         return []
 

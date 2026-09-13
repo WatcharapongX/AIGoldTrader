@@ -48,13 +48,16 @@ class PaperAccountStateService:
 
         canonical_id = str(acc_row.id) if account_id == str(acc_row.id) else account_id
 
-        # 2. Query PaperAccountStateRecord
-        state_row = await session.get(PaperAccountStateRecord, canonical_id)
-        if state_row is None and canonical_id != account_id:
-            state_row = await session.get(PaperAccountStateRecord, account_id)
-        if state_row is None and acc_row.name:
-            state_row = await session.get(PaperAccountStateRecord, acc_row.name)
-
+        # 2. Query PaperAccountStateRecord under row lock if available
+        state_row = await session.scalar(
+            select(PaperAccountStateRecord)
+            .where(
+                (PaperAccountStateRecord.account_id == canonical_id)
+                | (PaperAccountStateRecord.account_id == account_id)
+                | (PaperAccountStateRecord.account_id == acc_row.name)
+            )
+            .with_for_update()
+        )
         if state_row is not None:
             return state_row
 
@@ -106,28 +109,52 @@ class PaperAccountStateService:
             if payload.get("last_loss_at"):
                 last_loss = dt.datetime.fromisoformat(payload["last_loss_at"])
 
-        state_row = PaperAccountStateRecord(
-            account_id=canonical_id,
-            state_version=state_ver,
-            balance=bal,
-            equity=eq,
-            free_margin=fm,
-            daily_realized_pnl=dpnl,
-            weekly_realized_pnl=wpnl,
-            floating_pnl=fl_pnl,
-            peak_equity=peq,
-            open_risk_pct=orp,
-            reserved_risk_pct=rrp,
-            open_positions_count=pos_count,
-            consecutive_losses=cl,
-            last_loss_at=last_loss,
-            cooldown_until=cd_until,
-            state_updated_at=state_updated,
-            last_observed_at=effective_now,
-            payload={},
+        # 4. Atomic insert to eliminate concurrent initial-row creation race
+        is_postgres = session.get_bind().dialect.name == "postgresql"
+        values_dict = {
+            "account_id": canonical_id,
+            "state_version": state_ver,
+            "balance": bal,
+            "equity": eq,
+            "free_margin": fm,
+            "daily_realized_pnl": dpnl,
+            "weekly_realized_pnl": wpnl,
+            "floating_pnl": fl_pnl,
+            "peak_equity": peq,
+            "open_risk_pct": orp,
+            "reserved_risk_pct": rrp,
+            "open_positions_count": pos_count,
+            "consecutive_losses": cl,
+            "last_loss_at": last_loss,
+            "cooldown_until": cd_until,
+            "state_updated_at": state_updated,
+            "last_observed_at": effective_now,
+            "payload": {},
+        }
+        if is_postgres:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            pg_stmt = (
+                pg_insert(PaperAccountStateRecord)
+                .values(**values_dict)
+                .on_conflict_do_nothing(index_elements=["account_id"])
+            )
+            await session.execute(pg_stmt)
+        else:
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            sqlite_stmt = (
+                sqlite_insert(PaperAccountStateRecord)
+                .values(**values_dict)
+                .on_conflict_do_nothing(index_elements=["account_id"])
+            )
+            await session.execute(sqlite_stmt)
+
+        state_row = await session.scalar(
+            select(PaperAccountStateRecord)
+            .where(PaperAccountStateRecord.account_id == canonical_id)
+            .with_for_update()
         )
-        session.add(state_row)
-        await session.flush()
         return state_row
 
     @staticmethod
@@ -151,9 +178,32 @@ class PaperAccountStateService:
         """Updates economic fields. Increments state_version and updates state_updated_at
 
         ONLY when safety-relevant economics actually change (SOL-P5-P1-030).
+        Serializes updates under row lock to prevent concurrency races.
         """
         effective_now = now or dt.datetime.now(dt.UTC)
-        state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, effective_now)
+
+        # 1. Resolve canonical ID
+        try:
+            parsed_uuid = uuid.UUID(account_id)
+            acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
+        except (ValueError, TypeError):
+            acc_row = await session.scalar(select(Account).where(Account.name == account_id))
+
+        canonical_id = str(acc_row.id) if (acc_row is not None and account_id == str(acc_row.id)) else account_id
+        if acc_row is None:
+            canonical_id = account_id
+
+        # 2. Acquire row lock before comparing/updating state
+        state = await session.scalar(
+            select(PaperAccountStateRecord)
+            .where(
+                (PaperAccountStateRecord.account_id == canonical_id)
+                | (PaperAccountStateRecord.account_id == account_id)
+            )
+            .with_for_update()
+        )
+        if state is None:
+            state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, effective_now)
 
         has_economic_change = False
 
@@ -214,6 +264,8 @@ class PaperAccountStateService:
 
         Strictly preserves free_margin (never resets to equity).
         Maintains authentic economic timestamp (state_updated_at) without freshness laundering.
+        Sets as_of = observation_time (authoritative observation freshness timestamp).
+        Generates unique observation ID to prevent PK collision on repeated observations.
         """
         observation_time = now or dt.datetime.now(dt.UTC)
         state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, observation_time)
@@ -223,9 +275,8 @@ class PaperAccountStateService:
 
         state_updated_at = _to_utc(state.state_updated_at) or observation_time
         account_slug = str(account_id)[:8]
-        snap_id = f"snap_paper_{account_slug}_{int(state_updated_at.timestamp())}_{state.state_version}"
 
-        # If not forced and existing snapshot with same state_version and unexpired age exists, reuse
+        # If not forced and existing snapshot with same state_version and unexpired age exists, reuse to prevent churn
         latest_row = (
             await session.scalars(
                 select(AccountSnapshotRecord)
@@ -243,7 +294,9 @@ class PaperAccountStateService:
                 if age_sec <= 60:
                     return AccountSnapshot.model_validate(latest_row.payload)
 
-        # Snapshot strictly preserves free_margin, floating_pnl, and economic state_version
+        # Unique observation ID ensuring no collision on forced observation or multiple observations
+        snap_id = f"snap_paper_{account_slug}_{uuid.uuid4().hex[:16]}"
+
         snapshot = AccountSnapshot(
             id=snap_id,
             account_id=account_id,
@@ -265,7 +318,7 @@ class PaperAccountStateService:
             observed_at=observation_time,
             trading_mode="PAPER",
             source="PAPER_ACCOUNT_STATE",
-            as_of=state_updated_at,
+            as_of=observation_time,
         )
 
         record = AccountSnapshotRecord(

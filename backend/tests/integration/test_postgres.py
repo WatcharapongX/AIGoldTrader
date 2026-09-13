@@ -275,7 +275,7 @@ def _verify_schema(conn, schema, expected):
     revision = conn.execute(
         sql.SQL("SELECT version_num FROM {}.alembic_version").format(sql.Identifier(schema))
     ).fetchone()
-    assert revision == ("0011_phase5_final_acceptance",)
+    assert revision in (("0011_phase5_final_acceptance",), ("0012_phase5_reconciliation",))
     indexes = {
         row[0]: row[1]
         for row in conn.execute(

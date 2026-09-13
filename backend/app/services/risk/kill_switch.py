@@ -272,10 +272,8 @@ class KillSwitchManager:
         # Data health trigger with cross-process persistent tracking scoped by (provider, source) (SOL-P5-P2-038)
         now_utc = dt.datetime.now(dt.UTC)
         threshold = getattr(policy, "data_health_consecutive_failures", 3)
-        row_id = "dh_default" if (provider == "market_data" and source == "default") else f"dh_{provider}_{source}"
+        row_id = f"dh_{provider}_{source}"
         is_postgres = session.get_bind().dialect.name == "postgresql"
-
-        from sqlalchemy.exc import IntegrityError
 
         if is_postgres:
             # Atomic upsert eliminates initial-row SELECT->INSERT race (SOL-P5-P2-038)
@@ -299,29 +297,28 @@ class KillSwitchManager:
             )
             dh_row = (await session.scalars(stmt)).one()
         else:
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            stmt_ins = (
+                sqlite_insert(DataHealthRecord)
+                .values(
+                    id=row_id,
+                    provider=provider,
+                    source=source,
+                    consecutive_failures=0,
+                    last_failure_at=None,
+                    last_healthy_at=now_utc,
+                    updated_at=now_utc,
+                    payload={},
+                )
+                .on_conflict_do_nothing(index_elements=["provider", "source"])
+            )
+            await session.execute(stmt_ins)
             stmt = select(DataHealthRecord).where(
                 DataHealthRecord.provider == provider,
                 DataHealthRecord.source == source,
             )
-            existing_dh = (await session.scalars(stmt)).first()
-            if existing_dh is None:
-                try:
-                    async with session.begin_nested():
-                        new_row = DataHealthRecord(
-                            id=row_id,
-                            provider=provider,
-                            source=source,
-                            consecutive_failures=0,
-                            updated_at=now_utc,
-                            payload={},
-                        )
-                        session.add(new_row)
-                        await session.flush()
-                        dh_row = new_row
-                except IntegrityError:
-                    dh_row = (await session.scalars(stmt)).one()
-            else:
-                dh_row = existing_dh
+            dh_row = (await session.scalars(stmt)).one()
 
         if quote_stale:
             dh_row.consecutive_failures += 1

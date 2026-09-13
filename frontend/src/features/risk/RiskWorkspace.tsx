@@ -183,7 +183,7 @@ export function RiskWorkspace() {
   };
 
   const isKillSwitchNotReady = killSwitchStatus !== 'READY';
-  const isKillSwitchUnknown = isKillSwitchNotReady || !killSwitch || killSwitch?.state === 'UNKNOWN' || !!error;
+  const isKillSwitchUnknown = isKillSwitchNotReady || !killSwitch || killSwitch?.state === 'UNKNOWN';
   const isKillSwitchActive = !isKillSwitchUnknown && (killSwitch?.state === 'ACTIVE' || portfolio?.kill_switch_active);
 
   // Portfolio budget calculation

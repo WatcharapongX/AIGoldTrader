@@ -267,6 +267,7 @@ class RiskDecision(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: str
+    evaluation_intent_id: str = ""
     candidate_id: str
     plan_id: str
     strategy_id: str

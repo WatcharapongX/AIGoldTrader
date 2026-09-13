@@ -67,14 +67,40 @@ def compute_risk_dependency_fingerprint(
     symbol spec, policy version, portfolio budget, or temporal safety validity alters the fingerprint,
     guaranteeing safe re-evaluation. Volatile quote arrival microsecond jitter is excluded.
     """
-    quote_payload = None
-    if quote:
+    # Derive semantic market risk state without raw bid/ask price jitter (SOL High Round 3 Section 9)
+    if quote is None:
+        market_safety_state = "UNAVAILABLE"
+        spread_band = "UNKNOWN"
+        quote_payload = {
+            "source": "none",
+            "mode": "none",
+            "market_safety_state": market_safety_state,
+            "spread_band": spread_band,
+            "is_stale": True,
+        }
+    else:
+        in_post_news = bool(news_prov and news_prov.in_post_news_window)
+        if quote_is_stale:
+            market_safety_state = "STALE"
+        elif quote.spread > policy.max_spread_absolute:
+            market_safety_state = "SPREAD_BLOCKED"
+        elif in_post_news and quote.spread > policy.max_spread_absolute * Decimal("0.8"):
+            market_safety_state = "POST_NEWS_SPREAD_BLOCKED"
+        else:
+            market_safety_state = "AVAILABLE_SAFE"
+
+        if quote.spread <= policy.max_spread_absolute * Decimal("0.8"):
+            spread_band = "ACCEPTABLE"
+        elif quote.spread <= policy.max_spread_absolute:
+            spread_band = "ELEVATED"
+        else:
+            spread_band = "EXCESSIVE"
+
         quote_payload = {
             "source": quote.source,
             "mode": quote.mode,
-            "bid": format(Decimal(str(quote.bid)), ".5f"),
-            "ask": format(Decimal(str(quote.ask)), ".5f"),
-            "spread": format(Decimal(str(quote.spread)), ".5f"),
+            "market_safety_state": market_safety_state,
+            "spread_band": spread_band,
             "is_stale": quote_is_stale,
         }
 
