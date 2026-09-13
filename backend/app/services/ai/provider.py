@@ -17,6 +17,16 @@ from app.services.ai.domain import (
 )
 
 logger = logging.getLogger(__name__)
+MAX_INPUT_BYTES_PER_AGENT = 20_000
+MAX_PROVIDER_OUTPUT_BYTES = 10_000
+
+
+class InputBudgetExceeded(ValueError):
+    """Serialized provider input exceeds the safe local boundary."""
+
+
+class OutputBudgetExceeded(ValueError):
+    """Provider output exceeds the safe local boundary."""
 
 
 class ModelConfig(BaseModel):
@@ -58,6 +68,79 @@ class AIProvider(abc.ABC):
     ) -> ProviderResult:
         """Execute model analysis asynchronously with strict timeout and structured output."""
         pass
+
+
+async def analyze_with_controls(
+    provider: AIProvider,
+    *,
+    agent_id: str,
+    system_prompt: str,
+    user_payload: str,
+    model_config: ModelConfig,
+    timeout_seconds: float | None = None,
+) -> ProviderResult:
+    """Call a provider with one total deadline, bounded retries, and local byte budgets."""
+    input_bytes = len(system_prompt.encode("utf-8")) + len(user_payload.encode("utf-8"))
+    if input_bytes > MAX_INPUT_BYTES_PER_AGENT:
+        raise InputBudgetExceeded(
+            f"Provider input budget exceeded for {agent_id}: {input_bytes}>{MAX_INPUT_BYTES_PER_AGENT}"
+        )
+
+    timeout = timeout_seconds or model_config.timeout_seconds
+    deadline = asyncio.get_running_loop().time() + timeout
+    last_error: BaseException | None = None
+    for attempt in range(model_config.max_retries + 1):
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise TimeoutError(f"Provider deadline exhausted for {agent_id}") from last_error
+        try:
+            result = await asyncio.wait_for(
+                provider.analyze(
+                    agent_id=agent_id,
+                    system_prompt=system_prompt,
+                    user_payload=user_payload,
+                    model_config=model_config,
+                    timeout_seconds=remaining,
+                ),
+                timeout=remaining,
+            )
+            content_bytes = len(result.content.encode("utf-8"))
+            raw_bytes = len(
+                json.dumps(
+                    result.raw_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            )
+            if content_bytes > MAX_PROVIDER_OUTPUT_BYTES or raw_bytes > MAX_PROVIDER_OUTPUT_BYTES:
+                raise OutputBudgetExceeded(
+                    f"Provider output budget exceeded for {agent_id}: "
+                    f"content={content_bytes},raw={raw_bytes},limit={MAX_PROVIDER_OUTPUT_BYTES}"
+                )
+            if result.completion_tokens > model_config.max_output_tokens:
+                raise OutputBudgetExceeded(
+                    f"Provider completion budget exceeded for {agent_id}: "
+                    f"{result.completion_tokens}>{model_config.max_output_tokens}"
+                )
+            return result
+        except (InputBudgetExceeded, OutputBudgetExceeded):
+            raise
+        except asyncio.CancelledError:
+            raise
+        except (TimeoutError, RuntimeError) as exc:
+            last_error = exc
+            if attempt >= model_config.max_retries:
+                raise
+            logger.info(
+                "Retrying transient provider failure for %s (%s/%s): %s",
+                agent_id,
+                attempt + 1,
+                model_config.max_retries,
+                exc,
+            )
+    raise RuntimeError(f"Provider retry loop exhausted for {agent_id}") from last_error
 
 
 class FixtureAIProvider(AIProvider):
@@ -182,7 +265,7 @@ class FixtureAIProvider(AIProvider):
                 "directional_bias": bias,
                 "evidence_strength": strength,
                 "summary_th": f"รายงานการวิเคราะห์ของ {agent_id} สำหรับ {symbol} พบปัจจัยสนับสนุนทิศทาง {bias}",
-                "evidence_refs": [f"fixture://ref_{agent_id}_01", f"fixture://ref_{agent_id}_02"],
+                "evidence_refs": [f"fixture://{agent_id}/ref-01", f"fixture://{agent_id}/ref-02"],
                 "supporting_factors_th": [f"ปัจจัยสนับสนุนที่ 1 จาก {agent_id}", f"ปัจจัยสนับสนุนที่ 2 จาก {agent_id}"],
                 "conflicting_factors_th": [],
                 "warnings_th": [],

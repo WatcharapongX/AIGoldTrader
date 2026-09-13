@@ -45,6 +45,7 @@ from app.services.ai.domain import (
     AgentAnalysisResult,
     AIAnalysisInput,
     AIKillSwitchContext,
+    AILiquidityEvidence,
     AIMarketQuoteContext,
     AIMarketStructureContext,
     AINewsContext,
@@ -52,7 +53,11 @@ from app.services.ai.domain import (
     AIProvenance,
     AIRiskDecisionContext,
     AIStrategyContext,
+    AIStrategyEvidence,
+    AIStructureEvent,
+    AISwingEvidence,
     AITradePlanContext,
+    AIZoneEvidence,
     compute_semantic_input_fingerprint,
 )
 from app.services.ai.orchestrator import AIOrchestrator
@@ -85,6 +90,9 @@ def base_ai_input(now_time) -> AIAnalysisInput:
         internal_state="BULLISH",
         external_state="BULLISH",
         regime="TRENDING_UP",
+        source="simulated",
+        context_id="ctx_adv_01",
+        algorithm_version="structure-test-v1",
         current_sessions=("LONDON",),
         swings=(),
         events=(),
@@ -97,6 +105,8 @@ def base_ai_input(now_time) -> AIAnalysisInput:
         as_of=now_time,
         events=(),
         event_ids=(),
+        source="fixture_news",
+        context_fingerprint="news-fp-adv-01",
     )
     strategy = AIStrategyContext(
         candidate_id="cand_adv_01",
@@ -120,6 +130,7 @@ def base_ai_input(now_time) -> AIAnalysisInput:
         take_profit_2=Decimal("2520.00"),
         risk_reward_ratio=Decimal("2.0"),
         invalidation_th="หลุดแนวรับ",
+        as_of=now_time,
         expires_at=now_time + dt.timedelta(hours=2),
     )
     risk = AIRiskDecisionContext(
@@ -335,6 +346,7 @@ def test_11_future_news_data_rejected_by_lookahead_validator(base_ai_input, now_
                             impact="HIGH",
                             scheduled_at=future_time,
                             available_at=future_time,
+                            updated_at=future_time,
                         ),
                     )
                 }
@@ -665,7 +677,7 @@ def test_31_lookahead_matrix(base_ai_input, now_time):
     bad_swing = base_ai_input.model_copy(
         update={
             "structure_context": base_ai_input.structure_context.model_copy(
-                update={"swings": ({"time": future_time.isoformat(), "price": "2500"},)}
+                update={"swings": (AISwingEvidence(swing_time=future_time),)}
             )
         }
     )
@@ -676,7 +688,7 @@ def test_31_lookahead_matrix(base_ai_input, now_time):
     bad_event = base_ai_input.model_copy(
         update={
             "structure_context": base_ai_input.structure_context.model_copy(
-                update={"events": ({"time": future_time.isoformat(), "type": "BOS"},)}
+                update={"events": (AIStructureEvent(kind="BOS", confirmed_at=future_time),)}
             )
         }
     )
@@ -687,7 +699,7 @@ def test_31_lookahead_matrix(base_ai_input, now_time):
     bad_liq = base_ai_input.model_copy(
         update={
             "structure_context": base_ai_input.structure_context.model_copy(
-                update={"liquidity": ({"detected_at": future_time.isoformat(), "level": "2500"},)}
+                update={"liquidity": (AILiquidityEvidence(detected_at=future_time),)}
             )
         }
     )
@@ -698,7 +710,7 @@ def test_31_lookahead_matrix(base_ai_input, now_time):
     bad_zone = base_ai_input.model_copy(
         update={
             "structure_context": base_ai_input.structure_context.model_copy(
-                update={"zones": ({"created_at": future_time.isoformat(), "low": "2490"},)}
+                update={"zones": (AIZoneEvidence(created_at=future_time),)}
             )
         }
     )
@@ -709,7 +721,7 @@ def test_31_lookahead_matrix(base_ai_input, now_time):
     bad_ev = base_ai_input.model_copy(
         update={
             "strategy_context": base_ai_input.strategy_context.model_copy(
-                update={"evidence": ({"time": future_time.isoformat(), "code": "EV1"},)}
+                update={"evidence": (AIStrategyEvidence(kind="EV1", confirmed_at=future_time),)}
             )
         }
     )
@@ -825,15 +837,15 @@ async def test_33_assembler_account_mismatch_fails_closed(db_session):
     session.add_all([eval_rec, cand_rec, snap_a, risk_dec])
     await session.commit()
 
-    # Requested for acc_b, but decision belongs to acc_a -> BLOCKED
+    # Account binding happens in SQL, so acc_a's decision is not selected for acc_b.
     ai_input = await AIAnalysisInputAssembler.assemble(
         session,
         candidate_id="cand_mismatch",
         account_id=str(acc_b.id),
         current_user=admin,
     )
-    assert ai_input.risk_context.decision == "BLOCKED"
-    assert "different account" in ai_input.risk_context.blocked_reasons_th[0]
+    assert ai_input.risk_context.decision == "RISK_NOT_EVALUATED"
+    assert ai_input.risk_context.blocked_reasons_th
 
 
 # 34. Assembler profile mismatch raises AppValidationError
@@ -1059,7 +1071,7 @@ async def test_36_assembler_released_reservation_fails_closed(db_session):
         account_id=str(acc_id),
         current_user=admin,
     )
-    assert ai_input.risk_context.reservation_status == "INACTIVE"
+    assert ai_input.risk_context.reservation_status == "MISMATCHED"
 
 
 # 37. Assembler missing risk decision -> RISK_NOT_EVALUATED and empty decision_id

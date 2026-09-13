@@ -149,6 +149,7 @@ def test_semantic_fingerprint_ignores_clock_jitter():
         spread=Decimal("0.30"),
         timestamp=t0,
         is_stale=False,
+        source="simulated",
     )
     structure = AIMarketStructureContext(
         symbol="XAUUSD",
@@ -158,16 +159,26 @@ def test_semantic_fingerprint_ignores_clock_jitter():
         internal_state="BULLISH",
         external_state="BULLISH",
         current_sessions=("LONDON",),
+        source="simulated",
+        context_id="ctx_structure_01",
+        algorithm_version="structure-test-v1",
     )
-    news = AINewsContext(news_state="CALM", as_of=t0)
+    news = AINewsContext(
+        news_state="CALM",
+        as_of=t0,
+        source="fixture_news",
+        context_fingerprint="news-fp-01",
+    )
     strategy = AIStrategyContext(
         candidate_id="cand_01",
         strategy_id="STRAT01",
+        strategy_version="1.0.0",
         profile_id="day_trader",
         symbol="XAUUSD",
         direction="LONG",
         score=85,
         detected_at=t0,
+        status="READY",
     )
     trade_plan = AITradePlanContext(
         plan_id="plan_01",
@@ -178,6 +189,8 @@ def test_semantic_fingerprint_ignores_clock_jitter():
         take_profit_2=Decimal("2520.00"),
         risk_reward_ratio=Decimal("2.0"),
         invalidation_th="หลุดแนวรับ",
+        as_of=t0,
+        expires_at=t0 + dt.timedelta(hours=2),
     )
     risk = AIRiskDecisionContext(
         decision_id="dec_01",
@@ -261,6 +274,7 @@ async def test_full_orchestrator_happy_path():
         spread=Decimal("0.30"),
         timestamp=now,
         is_stale=False,
+        source="simulated",
     )
     structure = AIMarketStructureContext(
         symbol="XAUUSD",
@@ -270,16 +284,26 @@ async def test_full_orchestrator_happy_path():
         internal_state="BULLISH",
         external_state="BULLISH",
         current_sessions=("LONDON",),
+        source="simulated",
+        context_id="ctx_structure_01",
+        algorithm_version="structure-test-v1",
     )
-    news = AINewsContext(news_state="CALM", as_of=now)
+    news = AINewsContext(
+        news_state="CALM",
+        as_of=now,
+        source="fixture_news",
+        context_fingerprint="news-fp-01",
+    )
     strategy = AIStrategyContext(
         candidate_id="cand_01",
         strategy_id="STRAT01",
+        strategy_version="1.0.0",
         profile_id="day_trader",
         symbol="XAUUSD",
         direction="LONG",
         score=85,
         detected_at=now,
+        status="READY",
     )
     trade_plan = AITradePlanContext(
         plan_id="plan_01",
@@ -290,6 +314,8 @@ async def test_full_orchestrator_happy_path():
         take_profit_2=Decimal("2520.00"),
         risk_reward_ratio=Decimal("2.0"),
         invalidation_th="หลุดแนวรับ",
+        as_of=now,
+        expires_at=now + dt.timedelta(hours=2),
     )
     risk = AIRiskDecisionContext(
         decision_id="dec_01",

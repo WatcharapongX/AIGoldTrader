@@ -11,7 +11,7 @@ import json
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 VERSION = "ai-1.0.0"
 PROMPT_SCHEMA_VERSION = "prompt-1.0.0"
@@ -37,6 +37,7 @@ MetaStatus = Literal[
     "BLOCKED_BY_RISK",
     "BLOCKED_BY_UPSTREAM",
 ]
+AuthorityAvailability = Literal["AVAILABLE", "STALE", "UNAVAILABLE"]
 
 # Explicit analytical agent IDs
 ANALYTICAL_AGENT_IDS = (
@@ -117,18 +118,125 @@ class AIMarketQuoteContext(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    availability: AuthorityAvailability = "AVAILABLE"
     symbol: str
-    bid: Decimal = Decimal("0.0")
-    ask: Decimal = Decimal("0.0")
-    spread: Decimal = Decimal("0.0")
-    timestamp: AwareDatetime
+    bid: Decimal | None = None
+    ask: Decimal | None = None
+    spread: Decimal | None = None
+    timestamp: AwareDatetime | None = None
     is_stale: bool = False
-    source: str = "simulated"
+    source: str = ""
+    unavailable_reason: str = ""
 
     @field_validator("timestamp")
     @classmethod
-    def utc_clock(cls, v: dt.datetime) -> dt.datetime:
-        return v.astimezone(dt.UTC)
+    def utc_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
+        return v.astimezone(dt.UTC) if v is not None else None
+
+    @model_validator(mode="after")
+    def authoritative_quote(self):
+        if self.availability in ("AVAILABLE", "STALE"):
+            if self.bid is None or self.ask is None or self.spread is None or self.timestamp is None or not self.source:
+                raise ValueError("Available quote requires values, observed timestamp, and source")
+            if self.bid <= 0 or self.ask <= 0 or self.ask < self.bid or self.spread != self.ask - self.bid:
+                raise ValueError("Invalid authoritative quote values")
+        return self
+
+
+def _canonical_evidence(value: Any, temporal_fields: tuple[str, ...]) -> dict[str, Any]:
+    """Copy evidence into typed clocks plus immutable canonical JSON metadata."""
+    if isinstance(value, BaseModel):
+        raw = value.model_dump(mode="json")
+    elif isinstance(value, dict):
+        raw = dict(value)
+    else:
+        raise TypeError("Evidence must be a mapping or Pydantic model")
+    projected = {name: raw.get(name) for name in temporal_fields if raw.get(name) is not None}
+    projected["id"] = str(raw.get("id") or "")
+    projected["kind"] = str(raw.get("kind") or raw.get("code") or "")
+    projected["data_json"] = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return projected
+
+
+class AISwingEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = ""
+    kind: str = ""
+    swing_time: AwareDatetime | None = None
+    confirmed_at: AwareDatetime | None = None
+    data_json: str = "{}"
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize(cls, value: Any):
+        return value if isinstance(value, cls) else _canonical_evidence(value, ("swing_time", "confirmed_at"))
+
+
+class AIStructureEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = ""
+    kind: str = ""
+    occurred_at: AwareDatetime | None = None
+    created_at: AwareDatetime | None = None
+    detected_at: AwareDatetime | None = None
+    confirmed_at: AwareDatetime | None = None
+    available_at: AwareDatetime | None = None
+    data_json: str = "{}"
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize(cls, value: Any):
+        fields = ("occurred_at", "created_at", "detected_at", "confirmed_at", "available_at")
+        return value if isinstance(value, cls) else _canonical_evidence(value, fields)
+
+
+class AILiquidityEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = ""
+    kind: str = ""
+    created_at: AwareDatetime | None = None
+    detected_at: AwareDatetime | None = None
+    confirmed_at: AwareDatetime | None = None
+    swept_at: AwareDatetime | None = None
+    ended_at: AwareDatetime | None = None
+    data_json: str = "{}"
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize(cls, value: Any):
+        fields = ("created_at", "detected_at", "confirmed_at", "swept_at", "ended_at")
+        return value if isinstance(value, cls) else _canonical_evidence(value, fields)
+
+
+class AIZoneEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = ""
+    kind: str = ""
+    occurred_at: AwareDatetime | None = None
+    created_at: AwareDatetime | None = None
+    confirmed_at: AwareDatetime | None = None
+    ended_at: AwareDatetime | None = None
+    data_json: str = "{}"
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize(cls, value: Any):
+        fields = ("occurred_at", "created_at", "confirmed_at", "ended_at")
+        return value if isinstance(value, cls) else _canonical_evidence(value, fields)
+
+
+class AIDealingRangeEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = ""
+    kind: str = ""
+    origin_time: AwareDatetime | None = None
+    confirmed_at: AwareDatetime | None = None
+    data_json: str = "{}"
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize(cls, value: Any):
+        return value if isinstance(value, cls) else _canonical_evidence(value, ("origin_time", "confirmed_at"))
 
 
 class AIMarketStructureContext(BaseModel):
@@ -136,23 +244,43 @@ class AIMarketStructureContext(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    availability: AuthorityAvailability = "AVAILABLE"
     symbol: str
-    timeframe: str = "M15"
-    as_of: AwareDatetime
-    internal_state: str = "UNKNOWN"
-    external_state: str = "UNKNOWN"
-    regime: str = "UNKNOWN"
+    timeframe: str | None = None
+    as_of: AwareDatetime | None = None
+    source: str = ""
+    context_id: str = ""
+    algorithm_version: str = ""
+    internal_state: str | None = None
+    external_state: str | None = None
+    regime: str | None = None
     current_sessions: tuple[str, ...] = ()
-    swings: tuple[dict[str, Any], ...] = ()
-    events: tuple[dict[str, Any], ...] = ()
-    liquidity: tuple[dict[str, Any], ...] = ()
-    zones: tuple[dict[str, Any], ...] = ()
-    dealing_range: dict[str, Any] | None = None
+    swings: tuple[AISwingEvidence, ...] = ()
+    events: tuple[AIStructureEvent, ...] = ()
+    liquidity: tuple[AILiquidityEvidence, ...] = ()
+    zones: tuple[AIZoneEvidence, ...] = ()
+    dealing_range: AIDealingRangeEvidence | None = None
+    unavailable_reason: str = ""
 
     @field_validator("as_of")
     @classmethod
-    def utc_clock(cls, v: dt.datetime) -> dt.datetime:
-        return v.astimezone(dt.UTC)
+    def utc_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
+        return v.astimezone(dt.UTC) if v is not None else None
+
+    @model_validator(mode="after")
+    def authoritative_structure(self):
+        if self.availability == "AVAILABLE" and (
+            self.as_of is None
+            or not self.timeframe
+            or not self.source
+            or not self.context_id
+            or not self.algorithm_version
+            or self.internal_state is None
+            or self.external_state is None
+            or self.regime is None
+        ):
+            raise ValueError("Available structure requires a complete authoritative identity and state")
+        return self
 
 
 class AINewsEventContext(BaseModel):
@@ -166,15 +294,29 @@ class AINewsEventContext(BaseModel):
     impact: str
     scheduled_at: AwareDatetime
     available_at: AwareDatetime
+    updated_at: AwareDatetime
+    released_at: AwareDatetime | None = None
     actual: str | None = None
     forecast: str | None = None
     previous: str | None = None
     revision_version: int | None = None
 
-    @field_validator("scheduled_at", "available_at")
+    @field_validator("scheduled_at", "available_at", "updated_at", "released_at")
     @classmethod
-    def utc_clock(cls, v: dt.datetime) -> dt.datetime:
-        return v.astimezone(dt.UTC)
+    def utc_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
+        return v.astimezone(dt.UTC) if v is not None else None
+
+    @model_validator(mode="after")
+    def valid_vintage(self):
+        if not self.id or not self.title or not self.currency or not self.impact:
+            raise ValueError("News event requires canonical identity and classification")
+        if self.updated_at > self.available_at:
+            raise ValueError("News revision update cannot be visible before its availability")
+        if self.released_at is not None and not self.scheduled_at <= self.released_at <= self.available_at:
+            raise ValueError("News release time must fall between schedule and availability")
+        if self.actual is not None and self.released_at is None:
+            raise ValueError("News actual requires a release timestamp")
+        return self
 
 
 class AINewsContext(BaseModel):
@@ -182,21 +324,55 @@ class AINewsContext(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    news_state: str = "CALM"  # CALM, EVENT_RISK_ACTIVE, UNAVAILABLE
+    availability: AuthorityAvailability = "AVAILABLE"
+    news_state: str | None = None
     in_blackout: bool = False
     in_pre_news_window: bool = False
     in_post_news_window: bool = False
-    as_of: AwareDatetime
+    as_of: AwareDatetime | None = None
     events: tuple[AINewsEventContext, ...] = ()
     event_ids: tuple[str, ...] = ()
     description_th: str = ""
     source: str = ""
     revision_version: int | None = None
+    context_fingerprint: str = ""
+    unavailable_reason: str = ""
 
     @field_validator("as_of")
     @classmethod
-    def utc_clock(cls, v: dt.datetime) -> dt.datetime:
-        return v.astimezone(dt.UTC)
+    def utc_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
+        return v.astimezone(dt.UTC) if v is not None else None
+
+    @model_validator(mode="after")
+    def authoritative_news(self):
+        if self.availability == "AVAILABLE" and (
+            self.as_of is None or not self.news_state or not self.source or not self.context_fingerprint
+        ):
+            raise ValueError("Available news requires state, as_of, source, and fingerprint")
+        canonical_ids = tuple(event.id for event in self.events)
+        if self.availability == "AVAILABLE" and (
+            self.event_ids != canonical_ids or len(set(canonical_ids)) != len(canonical_ids)
+        ):
+            raise ValueError("News event_ids must exactly match unique canonical event identities")
+        return self
+
+
+class AIStrategyEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = ""
+    kind: str = ""
+    created_at: AwareDatetime | None = None
+    detected_at: AwareDatetime | None = None
+    confirmed_at: AwareDatetime | None = None
+    available_at: AwareDatetime | None = None
+    expires_at: AwareDatetime | None = None
+    data_json: str = "{}"
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize(cls, value: Any):
+        fields = ("created_at", "detected_at", "confirmed_at", "available_at", "expires_at")
+        return value if isinstance(value, cls) else _canonical_evidence(value, fields)
 
 
 class AIStrategyContext(BaseModel):
@@ -204,27 +380,41 @@ class AIStrategyContext(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    availability: AuthorityAvailability = "AVAILABLE"
     candidate_id: str
     strategy_id: str
-    strategy_version: str = "1.0.0"
+    strategy_version: str = ""
     profile_id: str
     symbol: str
-    direction: str  # LONG, SHORT
-    score: int = 0
-    detected_at: AwareDatetime
+    direction: str | None = None
+    score: int | None = None
+    detected_at: AwareDatetime | None = None
     confirmed_at: AwareDatetime | None = None
-    status: str = "PENDING"
-    evidence: tuple[dict[str, Any], ...] = ()
+    status: str = ""
+    evidence: tuple[AIStrategyEvidence, ...] = ()
+    unavailable_reason: str = ""
 
     @field_validator("detected_at")
     @classmethod
-    def utc_clock(cls, v: dt.datetime) -> dt.datetime:
-        return v.astimezone(dt.UTC)
+    def utc_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
+        return v.astimezone(dt.UTC) if v is not None else None
 
     @field_validator("confirmed_at")
     @classmethod
     def utc_confirmed_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
         return v.astimezone(dt.UTC) if v is not None else None
+
+    @model_validator(mode="after")
+    def authoritative_strategy(self):
+        if self.availability == "AVAILABLE" and (
+            not self.strategy_version
+            or self.direction not in ("LONG", "SHORT")
+            or self.score is None
+            or self.detected_at is None
+            or not self.status
+        ):
+            raise ValueError("Available strategy requires canonical direction, version, score, time, and status")
+        return self
 
 
 class AITradePlanContext(BaseModel):
@@ -232,20 +422,41 @@ class AITradePlanContext(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    plan_id: str
-    entry_lower: Decimal
-    entry_upper: Decimal
-    stop_loss: Decimal
+    availability: AuthorityAvailability = "AVAILABLE"
+    plan_id: str = ""
+    entry_lower: Decimal | None = None
+    entry_upper: Decimal | None = None
+    stop_loss: Decimal | None = None
     take_profit_1: Decimal | None = None
     take_profit_2: Decimal | None = None
     risk_reward_ratio: Decimal | None = None
     invalidation_th: str = ""
+    as_of: AwareDatetime | None = None
+    created_at: AwareDatetime | None = None
     expires_at: AwareDatetime | None = None
+    evidence: tuple[AIStrategyEvidence, ...] = ()
+    unavailable_reason: str = ""
 
-    @field_validator("expires_at")
+    @field_validator("as_of", "created_at", "expires_at")
     @classmethod
     def utc_clock(cls, v: dt.datetime | None) -> dt.datetime | None:
         return v.astimezone(dt.UTC) if v is not None else None
+
+    @model_validator(mode="after")
+    def authoritative_plan(self):
+        if self.availability == "AVAILABLE" and (
+            not self.plan_id
+            or self.entry_lower is None
+            or self.entry_upper is None
+            or self.stop_loss is None
+            or self.as_of is None
+            or self.expires_at is None
+            or self.entry_lower <= 0
+            or self.entry_upper < self.entry_lower
+            or self.stop_loss <= 0
+        ):
+            raise ValueError("Available trade plan requires valid canonical geometry")
+        return self
 
 
 class AIRiskDecisionContext(BaseModel):
@@ -266,7 +477,7 @@ class AIRiskDecisionContext(BaseModel):
     as_of: AwareDatetime
     expires_at: AwareDatetime
     reservation_id: str | None = None
-    reservation_status: str | None = None  # ACTIVE, RELEASED, EXPIRED, NONE
+    reservation_status: str | None = None  # ACTIVE, RELEASED, EXPIRED, MISMATCHED, NONE
     blocked_reasons_th: tuple[str, ...] = ()
 
     @field_validator("as_of", "expires_at")
@@ -299,7 +510,7 @@ class AIProvenance(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    market_source: str = "simulated"
+    market_source: str = ""
     market_context_id: str = ""
     structure_context_id: str = ""
     news_provider: str = ""
@@ -323,7 +534,7 @@ def compute_semantic_input_fingerprint(
     symbol: str,
     account_id: str,
     profile_id: str,
-    as_of: dt.datetime,
+    as_of: dt.datetime | None,
     quote_context: AIMarketQuoteContext,
     structure_context: AIMarketStructureContext,
     news_context: AINewsContext,
@@ -341,7 +552,6 @@ def compute_semantic_input_fingerprint(
         "symbol": symbol,
         "account_id": account_id,
         "profile_id": profile_id,
-        "as_of": as_of.isoformat(),
         "quote": quote_context.model_dump(mode="json"),
         "structure": structure_context.model_dump(mode="json"),
         "news": news_context.model_dump(mode="json"),
@@ -381,13 +591,20 @@ class AIAnalysisInput(BaseModel):
     kill_switch_context: AIKillSwitchContext
     provenance: AIProvenance
 
-    input_versions: dict[str, str] = Field(default_factory=dict)
+    input_versions: tuple[tuple[str, str], ...] = ()
     input_fingerprint: str = ""
 
     @field_validator("analysis_requested_at", "as_of")
     @classmethod
     def utc_clock(cls, v: dt.datetime) -> dt.datetime:
         return v.astimezone(dt.UTC)
+
+    @field_validator("input_versions", mode="before")
+    @classmethod
+    def immutable_versions(cls, value: Any):
+        if isinstance(value, dict):
+            return tuple(sorted((str(k), str(v)) for k, v in value.items()))
+        return value
 
     # Backwards-compatible convenience properties
     @property

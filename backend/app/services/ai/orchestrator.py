@@ -13,7 +13,6 @@ Pre-flight checks short-circuit immediately without calling any AI models when:
 import asyncio
 import datetime as dt
 import logging
-from typing import Any
 
 from app.services.ai.agents import (
     BaseAnalyticalAgent,
@@ -30,10 +29,6 @@ from app.services.ai.provider import AIProvider, FixtureAIProvider, ModelConfig
 
 logger = logging.getLogger(__name__)
 
-MAX_INPUT_CHARS_PER_AGENT = 20000
-MAX_PROVIDER_OUTPUT_CHARS = 10000
-
-
 class AIOrchestrator:
     """Orchestrates the safety-gated execution of the multi-agent AI advisory layer."""
 
@@ -43,18 +38,6 @@ class AIOrchestrator:
         self.agents = get_all_analytical_agents()
         self.meta_controller = MetaController()
 
-    @staticmethod
-    def _parse_time(val: Any) -> dt.datetime:
-        """Parse datetime strictly into UTC datetime; raise ValueError on failure."""
-        if isinstance(val, dt.datetime):
-            return val if val.tzinfo is not None else val.replace(tzinfo=dt.UTC)
-        if isinstance(val, str):
-            try:
-                return dt.datetime.fromisoformat(val.replace("Z", "+00:00"))
-            except Exception as exc:
-                raise ValueError(f"Malformed temporal string: {val}") from exc
-        raise ValueError(f"Unparseable temporal type: {type(val).__name__} ({val})")
-
     @classmethod
     def validate_no_lookahead(cls, ai_input: AIAnalysisInput) -> None:
         """Validate that no information dated after as_of is present in the input.
@@ -63,64 +46,90 @@ class AIOrchestrator:
         """
         as_of = ai_input.as_of
 
-        # 1. Market quote timestamp (strict: quote timestamp <= as_of)
-        quote_ts = ai_input.quote_context.timestamp
-        if quote_ts > as_of:
-            raise ValueError(f"No-lookahead violation: quote timestamp ({quote_ts}) is in future of as_of ({as_of})")
+        def reject_future(label: str, *values: dt.datetime | None) -> None:
+            for value in values:
+                if value is not None and value > as_of:
+                    raise ValueError(f"No-lookahead violation: {label} ({value}) > as_of ({as_of})")
 
-        # 2. News context scheduled_at and available_at
-        for ev in ai_input.news_context.events:
-            if ev.scheduled_at > as_of:
-                raise ValueError(f"No-lookahead violation: news scheduled_at ({ev.scheduled_at}) > as_of ({as_of})")
-            if ev.available_at > as_of:
-                raise ValueError(f"No-lookahead violation: news available_at ({ev.available_at}) > as_of ({as_of})")
+        quote = ai_input.quote_context
+        if quote.availability == "UNAVAILABLE" or quote.timestamp is None:
+            raise ValueError("Authoritative market quote unavailable")
+        reject_future("quote timestamp", quote.timestamp)
 
-        # 3. Market structure timestamps (swings, events, liquidity, zones)
-        struct = ai_input.structure_context
-        if struct.as_of > as_of:
-            raise ValueError(f"No-lookahead violation: structure context as_of ({struct.as_of}) > as_of ({as_of})")
+        structure = ai_input.structure_context
+        if structure.availability != "AVAILABLE" or structure.as_of is None:
+            raise ValueError("Authoritative market structure unavailable")
+        reject_future("structure as_of", structure.as_of)
+        for swing in structure.swings:
+            reject_future("swing", swing.swing_time, swing.confirmed_at)
+        for event in structure.events:
+            reject_future(
+                "structure event",
+                event.occurred_at,
+                event.created_at,
+                event.detected_at,
+                event.confirmed_at,
+                event.available_at,
+            )
+        for liquidity in structure.liquidity:
+            reject_future(
+                "liquidity",
+                liquidity.created_at,
+                liquidity.detected_at,
+                liquidity.confirmed_at,
+                liquidity.swept_at,
+                liquidity.ended_at,
+            )
+        for zone in structure.zones:
+            reject_future("zone", zone.occurred_at, zone.created_at, zone.confirmed_at, zone.ended_at)
+        if structure.dealing_range is not None:
+            reject_future(
+                "dealing range",
+                structure.dealing_range.origin_time,
+                structure.dealing_range.confirmed_at,
+            )
 
-        for swing in struct.swings:
-            t = swing.get("time") or swing.get("confirmed_at") or swing.get("timestamp")
-            if t is not None:
-                parsed_t = cls._parse_time(t)
-                if parsed_t > as_of:
-                    raise ValueError(f"No-lookahead violation: swing point time ({parsed_t}) > as_of ({as_of})")
+        news = ai_input.news_context
+        if news.availability == "AVAILABLE":
+            reject_future("news context as_of", news.as_of)
+            for news_event in news.events:
+                reject_future(
+                    "news event",
+                    news_event.scheduled_at,
+                    news_event.available_at,
+                    news_event.updated_at,
+                    news_event.released_at,
+                )
+        elif ai_input.strategy_context.strategy_id in ("STRAT05", "STRAT06"):
+            raise ValueError("Authoritative news is required for this strategy")
 
-        for event in struct.events:
-            t = event.get("time") or event.get("created_at") or event.get("timestamp")
-            if t is not None:
-                parsed_t = cls._parse_time(t)
-                if parsed_t > as_of:
-                    raise ValueError(f"No-lookahead violation: structure event time ({parsed_t}) > as_of ({as_of})")
+        strategy = ai_input.strategy_context
+        if strategy.availability != "AVAILABLE" or strategy.detected_at is None:
+            raise ValueError("Authoritative strategy candidate unavailable")
+        reject_future("candidate", strategy.detected_at, strategy.confirmed_at)
+        for evidence in strategy.evidence:
+            reject_future(
+                "strategy evidence",
+                evidence.created_at,
+                evidence.detected_at,
+                evidence.confirmed_at,
+                evidence.available_at,
+            )
 
-        for liq in struct.liquidity:
-            t = liq.get("detected_at") or liq.get("time") or liq.get("timestamp")
-            if t is not None:
-                parsed_t = cls._parse_time(t)
-                if parsed_t > as_of:
-                    raise ValueError(f"No-lookahead violation: liquidity detected_at ({parsed_t}) > as_of ({as_of})")
-
-        for zone in struct.zones:
-            t = zone.get("created_at") or zone.get("time") or zone.get("timestamp")
-            if t is not None:
-                parsed_t = cls._parse_time(t)
-                if parsed_t > as_of:
-                    raise ValueError(f"No-lookahead violation: zone created_at ({parsed_t}) > as_of ({as_of})")
-
-        # 4. Strategy candidate timestamps
-        strat = ai_input.strategy_context
-        if strat.detected_at > as_of:
-            raise ValueError(f"No-lookahead violation: candidate detected_at ({strat.detected_at}) > as_of ({as_of})")
-        if strat.confirmed_at is not None and strat.confirmed_at > as_of:
-            raise ValueError(f"No-lookahead violation: candidate confirmed_at ({strat.confirmed_at}) > as_of ({as_of})")
-
-        for strat_ev in strat.evidence:
-            t = strat_ev.get("time") or strat_ev.get("confirmed_at") or strat_ev.get("detected_at")
-            if t is not None:
-                parsed_t = cls._parse_time(t)
-                if parsed_t > as_of:
-                    raise ValueError(f"No-lookahead violation: strategy evidence time ({parsed_t}) > as_of ({as_of})")
+        plan = ai_input.trade_plan_context
+        if plan.availability != "AVAILABLE" or plan.as_of is None or plan.expires_at is None:
+            raise ValueError("Authoritative TradePlan unavailable")
+        reject_future("trade plan", plan.as_of, plan.created_at)
+        if plan.expires_at <= as_of:
+            raise ValueError("TradePlan has expired")
+        for evidence in plan.evidence:
+            reject_future(
+                "trade plan evidence",
+                evidence.created_at,
+                evidence.detected_at,
+                evidence.confirmed_at,
+                evidence.available_at,
+            )
 
     async def analyze(
         self,
@@ -326,7 +335,7 @@ class AIOrchestrator:
         # ---------------------------------------------------------
         # PRE-FLIGHT GATE 3: STALE / UNAVAILABLE QUOTE
         # ---------------------------------------------------------
-        if ai_input.quote_context.is_stale:
+        if ai_input.quote_context.availability == "STALE" or ai_input.quote_context.is_stale:
             logger.info("AI Analysis blocked: Market quote is STALE")
             fp = fingerprint({"symbol": ai_input.symbol, "as_of": as_of.isoformat(), "gate": "STALE_QUOTE"})
             return AIAnalysisResult(
@@ -397,6 +406,22 @@ class AIOrchestrator:
         # ---------------------------------------------------------
         async def _run_agent_with_hard_timeout(agent: BaseAnalyticalAgent) -> AgentAnalysisResult:
             timeout = effective_config.timeout_seconds
+            if agent.agent_id == "macro_news" and ai_input.news_context.availability != "AVAILABLE":
+                return AgentAnalysisResult(
+                    agent_id=agent.agent_id,
+                    agent_version="ai-1.0.0",
+                    status="UNAVAILABLE",
+                    directional_bias="NO_BIAS",
+                    evidence_strength="INSUFFICIENT",
+                    summary_th="ไม่มีบริบทข่าวที่มีแหล่งที่มาและเวลาอ้างอิงที่ตรวจสอบได้",
+                    warnings_th=("AUTHORITATIVE_NEWS_UNAVAILABLE",),
+                    missing_context_th=(ai_input.news_context.unavailable_reason or "News authority unavailable",),
+                    provider_provenance=effective_config.provider,
+                    prompt_version=agent.prompt_id,
+                    generated_at=dt.datetime.now(dt.UTC),
+                    as_of=as_of,
+                    token_usage=None,
+                )
             try:
                 return await asyncio.wait_for(
                     agent.execute(ai_input, self.provider, effective_config, timeout_seconds=timeout),

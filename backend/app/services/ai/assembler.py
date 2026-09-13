@@ -9,17 +9,15 @@ Enforces user/account authorization and point-in-time consistency.
 """
 
 import datetime as dt
-import json
 import logging
 import uuid
 from decimal import Decimal
 from typing import Any
 
 from fastapi import Request
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.models import Role, User
 from app.models.account import Account
@@ -32,7 +30,9 @@ from app.models.strategy import StrategyEvaluationRecord, TradeCandidateRecord
 from app.services.ai.domain import (
     VERSION,
     AIAnalysisInput,
+    AIDealingRangeEvidence,
     AIKillSwitchContext,
+    AILiquidityEvidence,
     AIMarketQuoteContext,
     AIMarketStructureContext,
     AINewsContext,
@@ -40,10 +40,17 @@ from app.services.ai.domain import (
     AIProvenance,
     AIRiskDecisionContext,
     AIStrategyContext,
+    AIStrategyEvidence,
+    AIStructureEvent,
+    AISwingEvidence,
     AITradePlanContext,
+    AIZoneEvidence,
     compute_semantic_input_fingerprint,
 )
+from app.services.analysis.domain import AnalysisSnapshot
+from app.services.news.domain import NewsStrategyContext
 from app.services.risk.kill_switch import kill_switch_manager
+from app.services.strategy.domain import SetupCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +71,32 @@ def _to_utc_datetime(val: Any) -> dt.datetime | None:
         except Exception:
             return None
     return None
+
+
+def _provider_source(provider: Any, quote: Any) -> str | None:
+    """Extract source from the real quote/provider contracts without assuming a dict."""
+    for value in (quote, provider):
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            candidates = (value.get("source"), value.get("provider_id"), value.get("name"))
+        else:
+            candidates = (
+                getattr(value, "source", None),
+                getattr(value, "provider_id", None),
+                getattr(value, "name", None),
+            )
+        source = next((str(item).strip() for item in candidates if item is not None and str(item).strip()), None)
+        if source:
+            return source
+    return None
+
+
+def _required_datetime(value: Any, field: str) -> dt.datetime:
+    parsed = _to_utc_datetime(value)
+    if parsed is None:
+        raise ValueError(f"{field} must be a valid timezone-aware timestamp")
+    return parsed
 
 
 class AIAnalysisInputAssembler:
@@ -88,11 +121,10 @@ class AIAnalysisInputAssembler:
             NotFoundError: Account or candidate does not exist.
             ValidationError: Input fails domain constraints (e.g. profile mismatch).
         """
-        settings = get_settings()
-        if settings.trading_mode == "PAPER" or as_of is None:
-            now = dt.datetime.now(dt.UTC)
-        else:
-            now = _to_utc_datetime(as_of) or dt.datetime.now(dt.UTC)
+        if as_of is not None:
+            raise ValidationError("AI analysis is current-only; historical as_of is not supported in Phase 6.1")
+        requested_at = dt.datetime.now(dt.UTC)
+        analysis_as_of = requested_at
 
         # -------------------------------------------------------------
         # 1. ACCOUNT AUTHORIZATION & LOOKUP
@@ -125,109 +157,120 @@ class AIAnalysisInputAssembler:
                 f"Candidate profile mismatch: candidate belongs to '{resolved_profile_id}', requested '{profile_id}'"
             )
 
-        cand_payload = dict(cand_record.payload)
-        symbol = str(cand_payload.get("symbol") or "XAUUSD")
-
         # Retrieve evaluation context
         eval_record = await session.get(StrategyEvaluationRecord, cand_record.evaluation_id)
         eval_payload = dict(eval_record.payload) if eval_record is not None else {}
         eval_context = eval_payload.get("context") or {}
+        cand_payload = dict(cand_record.payload)
+        symbol_value = cand_payload.get("symbol") or (eval_record.symbol if eval_record is not None else None)
+        if not symbol_value:
+            raise ValidationError("Candidate symbol authority is unavailable")
+        symbol = str(symbol_value)
 
         # -------------------------------------------------------------
         # 3. MARKET STRUCTURE CONTEXT
         # -------------------------------------------------------------
         frames = eval_context.get("frames") or []
-        primary_frame = frames[0] if frames else {}
-        analysis_json_str = primary_frame.get("analysis_json")
-        analysis_data: dict[str, Any] = {}
-        if analysis_json_str:
-            try:
-                analysis_data = (
-                    json.loads(analysis_json_str) if isinstance(analysis_json_str, str) else analysis_json_str
-                )
-            except Exception as exc:
-                logger.debug("Failed to parse analysis_json: %s", exc)
-
-        regime = analysis_data.get("regime") or eval_context.get("regime") or "UNKNOWN"
-        raw_sessions = analysis_data.get("current_sessions") or eval_context.get("current_sessions")
-        if raw_sessions is None:
-            cs = eval_context.get("current_session")
-            raw_sessions = [cs] if cs else []
-        elif isinstance(raw_sessions, str):
-            raw_sessions = [raw_sessions]
-
-        struct_as_of = (
-            _to_utc_datetime(analysis_data.get("as_of"))
-            or _to_utc_datetime(eval_context.get("as_of"))
-            or _to_utc_datetime(cand_record.as_of)
-            or now
-        )
-
-        structure_context = AIMarketStructureContext(
-            symbol=symbol,
-            timeframe=str(primary_frame.get("timeframe") or "M15"),
-            as_of=struct_as_of,
-            internal_state=str(analysis_data.get("internal_state") or "UNKNOWN"),
-            external_state=str(analysis_data.get("external_state") or "UNKNOWN"),
-            regime=str(regime),
-            current_sessions=tuple(str(s) for s in raw_sessions),
-            swings=tuple(analysis_data.get("swings") or ()),
-            events=tuple(analysis_data.get("events") or ()),
-            liquidity=tuple(analysis_data.get("liquidity") or ()),
-            zones=tuple(analysis_data.get("zones") or ()),
-            dealing_range=analysis_data.get("dealing_range"),
-        )
+        primary_frame = frames[0] if frames and isinstance(frames[0], dict) else {}
+        try:
+            analysis_json = primary_frame.get("analysis_json")
+            if not analysis_json:
+                raise ValueError("Phase 3 analysis snapshot is absent")
+            analysis = (
+                AnalysisSnapshot.model_validate_json(analysis_json)
+                if isinstance(analysis_json, str)
+                else AnalysisSnapshot.model_validate(analysis_json)
+            )
+            structure_context = AIMarketStructureContext(
+                availability="AVAILABLE",
+                symbol=analysis.symbol,
+                timeframe=analysis.timeframe.value,
+                as_of=_required_datetime(analysis.as_of, "structure.as_of"),
+                source=analysis.source,
+                context_id=analysis.input_id,
+                algorithm_version=analysis.algorithm_version,
+                internal_state=analysis.internal_state,
+                external_state=analysis.external_state,
+                regime=analysis.regime,
+                current_sessions=tuple(analysis.current_sessions),
+                swings=tuple(AISwingEvidence.model_validate(item.model_dump()) for item in analysis.swings),
+                events=tuple(AIStructureEvent.model_validate(item.model_dump()) for item in analysis.events),
+                liquidity=tuple(AILiquidityEvidence.model_validate(item.model_dump()) for item in analysis.liquidity),
+                zones=tuple(AIZoneEvidence.model_validate(item.model_dump()) for item in analysis.zones),
+                dealing_range=(
+                    AIDealingRangeEvidence.model_validate(analysis.dealing_range.model_dump())
+                    if analysis.dealing_range is not None
+                    else None
+                ),
+            )
+            if structure_context.symbol != symbol:
+                raise ValueError("Structure symbol does not match candidate")
+        except Exception as exc:
+            logger.info("Authoritative structure unavailable: %s", exc)
+            structure_context = AIMarketStructureContext(
+                availability="UNAVAILABLE",
+                symbol=symbol,
+                unavailable_reason=str(exc),
+            )
 
         # -------------------------------------------------------------
         # 4. NEWS CONTEXT
         # -------------------------------------------------------------
-        news_json_str = eval_context.get("news_json")
-        news_data: dict[str, Any] = {}
-        if news_json_str:
-            try:
-                news_data = json.loads(news_json_str) if isinstance(news_json_str, str) else news_json_str
-            except Exception as exc:
-                logger.debug("Failed to parse news_json: %s", exc)
-
-        cand_news_prov = cand_payload.get("news_provenance") or {}
-        raw_events = news_data.get("events") or cand_news_prov.get("event_vintages") or ()
-        news_events: list[AINewsEventContext] = []
-        for ev in raw_events:
-            ev_dict = ev if isinstance(ev, dict) else (ev.model_dump() if hasattr(ev, "model_dump") else {})
-            sched_at = _to_utc_datetime(ev_dict.get("scheduled_at")) or now
-            avail_at = _to_utc_datetime(ev_dict.get("available_at")) or sched_at
-            news_events.append(
-                AINewsEventContext(
-                    id=str(ev_dict.get("id") or uuid.uuid4().hex[:16]),
-                    title=str(ev_dict.get("title") or ev_dict.get("name") or ""),
-                    currency=str(ev_dict.get("currency") or "USD"),
-                    impact=str(ev_dict.get("impact") or "MEDIUM"),
-                    scheduled_at=sched_at,
-                    available_at=avail_at,
-                    actual=str(ev_dict.get("actual")) if ev_dict.get("actual") is not None else None,
-                    forecast=str(ev_dict.get("forecast")) if ev_dict.get("forecast") is not None else None,
-                    previous=str(ev_dict.get("previous")) if ev_dict.get("previous") is not None else None,
-                    revision_version=ev_dict.get("revision_version"),
-                )
+        try:
+            news_json = eval_context.get("news_json")
+            if not news_json:
+                raise ValueError("News context is absent")
+            authoritative_news = (
+                NewsStrategyContext.model_validate_json(news_json)
+                if isinstance(news_json, str)
+                else NewsStrategyContext.model_validate(news_json)
             )
-
-        news_context = AINewsContext(
-            news_state=str(news_data.get("news_state") or "CALM"),
-            in_blackout=bool(news_data.get("in_blackout", False)),
-            in_pre_news_window=bool(news_data.get("in_pre_news_window", False)),
-            in_post_news_window=bool(news_data.get("in_post_news_window", False)),
-            as_of=_to_utc_datetime(news_data.get("as_of")) or now,
-            events=tuple(news_events),
-            event_ids=tuple(e.id for e in news_events),
-            description_th=str(news_data.get("description_th") or ""),
-            source=str(cand_news_prov.get("source") or news_data.get("source") or "forex_factory"),
-            revision_version=news_data.get("revision_version"),
-        )
+            if authoritative_news.calendar_state == "CALENDAR_UNAVAILABLE":
+                raise ValueError("News calendar is unavailable")
+            news_events: list[AINewsEventContext] = []
+            for event in authoritative_news.events:
+                news_events.append(
+                    AINewsEventContext(
+                        id=event.id,
+                        title=event.event_name,
+                        currency=event.currency,
+                        impact=event.impact,
+                        scheduled_at=event.scheduled_at,
+                        available_at=event.available_at,
+                        updated_at=event.updated_at,
+                        released_at=event.released_at,
+                        actual=str(event.actual) if event.actual is not None else None,
+                        forecast=str(event.forecast) if event.forecast is not None else None,
+                        previous=str(event.previous) if event.previous is not None else None,
+                        revision_version=event.revision_version,
+                    )
+                )
+            revision = max((event.revision_version or 0 for event in news_events), default=0) or None
+            news_context = AINewsContext(
+                availability="AVAILABLE",
+                news_state=authoritative_news.news_regime,
+                in_blackout=authoritative_news.trade_policy_state == "RESTRICTED",
+                in_pre_news_window=authoritative_news.view == "pre",
+                in_post_news_window=authoritative_news.view == "post",
+                as_of=authoritative_news.as_of,
+                events=tuple(news_events),
+                event_ids=tuple(event.id for event in news_events),
+                source=authoritative_news.source,
+                revision_version=revision,
+                context_fingerprint=authoritative_news.fingerprint,
+            )
+        except Exception as exc:
+            logger.info("Authoritative news unavailable: %s", exc)
+            news_context = AINewsContext(
+                availability="UNAVAILABLE",
+                unavailable_reason=str(exc),
+            )
 
         # -------------------------------------------------------------
         # 5. MARKET QUOTE CONTEXT
         # -------------------------------------------------------------
         quote_obj = None
+        market = None
         if request is not None:
             try:
                 from app.api.market import started
@@ -236,32 +279,45 @@ class AIAnalysisInputAssembler:
                 if market and market.quote:
                     quote_obj = market.quote
             except Exception as exc:
-                logger.debug("Market service quote unavailable: %s", exc)
+                logger.info("Market service quote unavailable: %s", exc)
 
         if quote_obj is not None:
-            q_ts = _to_utc_datetime(quote_obj.timestamp) or now
-            is_stale = (now - q_ts).total_seconds() > 30 or getattr(quote_obj, "is_stale", False)
-            quote_context = AIMarketQuoteContext(
-                symbol=str(quote_obj.symbol),
-                bid=Decimal(str(quote_obj.bid)),
-                ask=Decimal(str(quote_obj.ask)),
-                spread=Decimal(str(quote_obj.spread)),
-                timestamp=q_ts,
-                is_stale=is_stale,
-                source=str(getattr(market, "provider", {}).get("source", "market_service")),
-            )
+            try:
+                q_ts = _required_datetime(getattr(quote_obj, "timestamp", None), "quote.timestamp")
+                bid = Decimal(str(quote_obj.bid))
+                ask = Decimal(str(quote_obj.ask))
+                raw_spread = getattr(quote_obj, "spread", None)
+                spread = ask - bid if raw_spread is None else Decimal(str(raw_spread))
+                quote_source = _provider_source(getattr(market, "provider", None), quote_obj)
+                is_stale = (
+                    (analysis_as_of - q_ts).total_seconds() > 30
+                    or bool(getattr(quote_obj, "is_stale", False))
+                    or str(getattr(quote_obj, "status", "")).upper() in {"STALE", "DISCONNECTED", "ERROR"}
+                )
+                quote_context = AIMarketQuoteContext(
+                    availability="STALE" if is_stale else "AVAILABLE",
+                    symbol=str(quote_obj.symbol),
+                    bid=bid,
+                    ask=ask,
+                    spread=spread,
+                    timestamp=q_ts,
+                    is_stale=is_stale,
+                    source=quote_source or "",
+                )
+                if quote_context.symbol != symbol:
+                    raise ValueError("Quote symbol does not match candidate")
+            except Exception as exc:
+                logger.info("Authoritative market quote invalid: %s", exc)
+                quote_context = AIMarketQuoteContext(
+                    availability="UNAVAILABLE",
+                    symbol=symbol,
+                    unavailable_reason=str(exc),
+                )
         else:
-            safety_ctx = eval_context.get("market_safety") or {}
-            safety_ts = _to_utc_datetime(safety_ctx.get("quote_as_of")) or _to_utc_datetime(cand_record.as_of) or now
-            is_stale = (now - safety_ts).total_seconds() > 30
             quote_context = AIMarketQuoteContext(
+                availability="UNAVAILABLE",
                 symbol=symbol,
-                bid=Decimal("0.0"),
-                ask=Decimal("0.0"),
-                spread=Decimal(str(safety_ctx.get("current_spread") or "0.0")),
-                timestamp=safety_ts,
-                is_stale=is_stale,
-                source="context_snapshot",
+                unavailable_reason="No live quote or complete persisted observed quote is available",
             )
 
         # -------------------------------------------------------------
@@ -293,9 +349,17 @@ class AIAnalysisInputAssembler:
         # -------------------------------------------------------------
         stmt = (
             select(RiskDecisionRecord)
+            .join(
+                AccountSnapshotRecord,
+                RiskDecisionRecord.account_snapshot_id == AccountSnapshotRecord.id,
+            )
             .where(
                 RiskDecisionRecord.candidate_id == candidate_id,
                 RiskDecisionRecord.profile_id == resolved_profile_id,
+                or_(
+                    AccountSnapshotRecord.account_id == canonical_account_id,
+                    AccountSnapshotRecord.account_id == acc_row.name,
+                ),
             )
             .order_by(RiskDecisionRecord.as_of.desc())
             .limit(1)
@@ -314,8 +378,8 @@ class AIAnalysisInputAssembler:
                 approved_risk_amount=Decimal("0.0"),
                 position_size=Decimal("0.0"),
                 policy_version="",
-                as_of=now,
-                expires_at=now,
+                as_of=analysis_as_of,
+                expires_at=analysis_as_of,
                 reservation_id=None,
                 reservation_status="NONE",
                 blocked_reasons_th=("ยังไม่ได้ผ่านการประเมินความเสี่ยงจาก Risk Engine",),
@@ -328,9 +392,9 @@ class AIAnalysisInputAssembler:
                 decision_account_id == canonical_account_id or decision_account_id == acc_row.name
             )
 
-            dec_as_of = _to_utc_datetime(decision_row.as_of) or now
-            dec_expires_at = _to_utc_datetime(decision_row.expires_at) or now
-            is_expired = dec_expires_at <= now
+            dec_as_of = _required_datetime(decision_row.as_of, "risk.as_of")
+            dec_expires_at = _required_datetime(decision_row.expires_at, "risk.expires_at")
+            is_expired = dec_expires_at <= analysis_as_of
 
             if not account_matched:
                 risk_context = AIRiskDecisionContext(
@@ -372,21 +436,43 @@ class AIAnalysisInputAssembler:
                 res_status = "NONE"
                 res_id = None
                 if decision_row.decision in ("APPROVED", "REDUCED"):
-                    res_stmt = (
-                        select(RiskReservationRecord)
-                        .where(
-                            RiskReservationRecord.decision_id == decision_row.id,
-                            RiskReservationRecord.account_id == decision_account_id,
-                            RiskReservationRecord.candidate_id == candidate_id,
-                            RiskReservationRecord.status == "ACTIVE",
-                            RiskReservationRecord.reserved_until > now,
-                        )
-                        .limit(1)
+                    reservation_rows = list(
+                        (
+                            await session.scalars(
+                                select(RiskReservationRecord).where(
+                                    RiskReservationRecord.decision_id == decision_row.id,
+                                )
+                            )
+                        ).all()
                     )
-                    res_row = (await session.scalars(res_stmt)).first()
-                    if res_row is not None:
-                        res_status = "ACTIVE"
-                        res_id = res_row.id
+                    if len(reservation_rows) > 1:
+                        res_status = "MISMATCHED"
+                    elif len(reservation_rows) == 1:
+                        res_row = reservation_rows[0]
+                        res_id = str(res_row.id)
+                        reserved_until = _required_datetime(
+                            res_row.reserved_until,
+                            "reservation.reserved_until",
+                        )
+                        exact_match = (
+                            str(res_row.decision_id) == str(decision_row.id)
+                            and str(res_row.account_id) == canonical_account_id
+                            and str(res_row.candidate_id) == candidate_id
+                            and str(res_row.profile_id) == resolved_profile_id
+                            and str(res_row.symbol) == str(decision_row.symbol) == symbol
+                            and str(res_row.direction) == str(decision_row.direction)
+                            and Decimal(res_row.risk_pct) == Decimal(decision_row.approved_risk_pct)
+                            and Decimal(res_row.risk_amount) == Decimal(decision_row.approved_risk_amount)
+                            and Decimal(res_row.position_size) == Decimal(decision_row.position_size)
+                        )
+                        if not exact_match:
+                            res_status = "MISMATCHED"
+                        elif str(res_row.status).upper() != "ACTIVE":
+                            res_status = "INACTIVE"
+                        elif reserved_until <= analysis_as_of:
+                            res_status = "EXPIRED"
+                        else:
+                            res_status = "ACTIVE"
                     else:
                         res_status = "INACTIVE"
 
@@ -412,64 +498,91 @@ class AIAnalysisInputAssembler:
         # -------------------------------------------------------------
         # 8. STRATEGY CONTEXT & TRADE PLAN CONTEXT
         # -------------------------------------------------------------
-        detected_at_dt = _to_utc_datetime(cand_payload.get("detected_at")) or _to_utc_datetime(cand_record.as_of) or now
-        confirmed_at_dt = _to_utc_datetime(cand_payload.get("confirmed_at"))
+        candidate_domain: SetupCandidate | None = None
+        try:
+            candidate_domain = SetupCandidate.model_validate(cand_payload)
+            if (
+                candidate_domain.id != candidate_id
+                or candidate_domain.profile_id != resolved_profile_id
+                or candidate_domain.strategy_id != str(cand_record.strategy_id)
+                or candidate_domain.symbol != symbol
+            ):
+                raise ValueError("Candidate payload identity does not match its persisted record")
+            strategy_context = AIStrategyContext(
+                availability="AVAILABLE",
+                candidate_id=candidate_domain.id,
+                strategy_id=candidate_domain.strategy_id,
+                strategy_version=candidate_domain.strategy_version,
+                profile_id=candidate_domain.profile_id,
+                symbol=candidate_domain.symbol,
+                direction=candidate_domain.direction,
+                score=candidate_domain.score,
+                detected_at=candidate_domain.detected_at,
+                confirmed_at=candidate_domain.confirmed_at,
+                status=candidate_domain.status,
+                evidence=tuple(
+                    AIStrategyEvidence.model_validate(item.model_dump()) for item in candidate_domain.evidence
+                ),
+            )
+        except Exception as exc:
+            logger.info("Authoritative strategy candidate unavailable: %s", exc)
+            strategy_context = AIStrategyContext(
+                availability="UNAVAILABLE",
+                candidate_id=candidate_id,
+                strategy_id=str(cand_record.strategy_id),
+                profile_id=resolved_profile_id,
+                symbol=symbol,
+                unavailable_reason=str(exc),
+            )
 
-        strategy_context = AIStrategyContext(
-            candidate_id=candidate_id,
-            strategy_id=str(cand_payload.get("strategy_id") or cand_record.strategy_id),
-            strategy_version=str(cand_payload.get("strategy_version") or "1.0.0"),
-            profile_id=resolved_profile_id,
-            symbol=symbol,
-            direction=str(cand_payload.get("direction") or "LONG"),
-            score=int(cand_payload.get("score") or 0),
-            detected_at=detected_at_dt,
-            confirmed_at=confirmed_at_dt,
-            status=str(cand_payload.get("status") or "PENDING"),
-            evidence=tuple(cand_payload.get("evidence") or ()),
-        )
+        try:
+            if candidate_domain is None or candidate_domain.plan is None:
+                raise ValueError("TradePlan is absent")
+            plan = candidate_domain.plan
+            trade_plan_context = AITradePlanContext(
+                availability="AVAILABLE",
+                plan_id=plan.id,
+                entry_lower=plan.entry_lower,
+                entry_upper=plan.entry_upper,
+                stop_loss=plan.stop_loss,
+                take_profit_1=plan.targets[0].price,
+                take_profit_2=plan.targets[1].price,
+                risk_reward_ratio=plan.targets[0].rr,
+                invalidation_th=plan.invalidation_th,
+                as_of=plan.as_of,
+                expires_at=plan.expires_at,
+                evidence=tuple(AIStrategyEvidence.model_validate(item.model_dump()) for item in plan.evidence),
+            )
+        except Exception as exc:
+            logger.info("Authoritative TradePlan unavailable: %s", exc)
+            trade_plan_context = AITradePlanContext(
+                availability="UNAVAILABLE",
+                unavailable_reason=str(exc),
+            )
 
-        trade_plan_dict = cand_payload.get("plan") or {}
-        plan_id = str(trade_plan_dict.get("id") or trade_plan_dict.get("plan_id") or f"plan_{candidate_id}")
-
-        tp1 = None
-        tp2 = None
-        rr = None
-        if "targets" in trade_plan_dict and isinstance(trade_plan_dict["targets"], list):
-            targets = trade_plan_dict["targets"]
-            if len(targets) >= 1 and isinstance(targets[0], dict):
-                tp1 = Decimal(str(targets[0].get("price", "0.0")))
-                rr = Decimal(str(targets[0].get("rr", "1.5")))
-            if len(targets) >= 2 and isinstance(targets[1], dict):
-                tp2 = Decimal(str(targets[1].get("price", "0.0")))
-        else:
-            if trade_plan_dict.get("take_profit_1") is not None:
-                tp1 = Decimal(str(trade_plan_dict["take_profit_1"]))
-            if trade_plan_dict.get("take_profit_2") is not None:
-                tp2 = Decimal(str(trade_plan_dict["take_profit_2"]))
-            if trade_plan_dict.get("risk_reward_ratio") is not None:
-                rr = Decimal(str(trade_plan_dict["risk_reward_ratio"]))
-
-        trade_plan_context = AITradePlanContext(
-            plan_id=plan_id,
-            entry_lower=Decimal(str(trade_plan_dict.get("entry_lower", "0.0"))),
-            entry_upper=Decimal(str(trade_plan_dict.get("entry_upper", "0.0"))),
-            stop_loss=Decimal(str(trade_plan_dict.get("stop_loss", "0.0"))),
-            take_profit_1=tp1,
-            take_profit_2=tp2,
-            risk_reward_ratio=rr,
-            invalidation_th=str(trade_plan_dict.get("invalidation_th", "")),
-            expires_at=_to_utc_datetime(trade_plan_dict.get("expires_at")),
-        )
+        if (
+            risk_context.decision in ("APPROVED", "REDUCED")
+            and (
+                strategy_context.availability != "AVAILABLE"
+                or trade_plan_context.availability != "AVAILABLE"
+                or (decision_row is not None and str(decision_row.plan_id) != trade_plan_context.plan_id)
+                or (decision_row is not None and str(decision_row.strategy_id) != strategy_context.strategy_id)
+                or (decision_row is not None and str(decision_row.direction) != strategy_context.direction)
+                or (decision_row is not None and decision_row.entry_lower != trade_plan_context.entry_lower)
+                or (decision_row is not None and decision_row.entry_upper != trade_plan_context.entry_upper)
+                or (decision_row is not None and decision_row.stop_loss != trade_plan_context.stop_loss)
+            )
+        ):
+            risk_context = risk_context.model_copy(update={"reservation_status": "MISMATCHED"})
 
         # -------------------------------------------------------------
         # 9. PROVENANCE TRACKING
         # -------------------------------------------------------------
         provenance = AIProvenance(
-            market_source=str(eval_record.source if eval_record is not None else "simulated"),
+            market_source=quote_context.source,
             market_context_id=str(eval_context.get("market_context_id", "")),
-            structure_context_id=str(eval_context.get("id", "")),
-            news_provider=str(news_context.source or "forex_factory"),
+            structure_context_id=structure_context.context_id,
+            news_provider=news_context.source,
             news_revision=str(news_context.revision_version or ""),
             strategy_candidate_id=candidate_id,
             strategy_evaluation_id=str(cand_record.evaluation_id),
@@ -477,7 +590,7 @@ class AIAnalysisInputAssembler:
             risk_decision_id=str(risk_context.decision_id),
             risk_reservation_id=str(risk_context.reservation_id or ""),
             kill_switch_record_id=str(kill_switch_context.record_id),
-            kill_switch_as_of=now,
+            kill_switch_as_of=kill_switch_context.cleared_at or kill_switch_context.activated_at,
         )
 
         # -------------------------------------------------------------
@@ -487,7 +600,7 @@ class AIAnalysisInputAssembler:
             symbol=symbol,
             account_id=canonical_account_id,
             profile_id=resolved_profile_id,
-            as_of=now,
+            as_of=analysis_as_of,
             quote_context=quote_context,
             structure_context=structure_context,
             news_context=news_context,
@@ -504,8 +617,8 @@ class AIAnalysisInputAssembler:
         return AIAnalysisInput(
             analysis_id=f"ai_req_{uuid.uuid4().hex[:24]}",
             trace_id=f"tr_{uuid.uuid4().hex[:16]}",
-            analysis_requested_at=now,
-            as_of=now,
+            analysis_requested_at=requested_at,
+            as_of=analysis_as_of,
             symbol=symbol,
             account_id=canonical_account_id,
             profile_id=resolved_profile_id,
@@ -517,6 +630,6 @@ class AIAnalysisInputAssembler:
             risk_context=risk_context,
             kill_switch_context=kill_switch_context,
             provenance=provenance,
-            input_versions={"ai_version": VERSION},
+            input_versions=(("ai_version", VERSION),),
             input_fingerprint=semantic_fp,
         )

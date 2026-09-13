@@ -21,8 +21,8 @@ from app.services.ai.domain import (
     MetaStatus,
     fingerprint,
 )
-from app.services.ai.prompts import get_prompt, wrap_untrusted_data
-from app.services.ai.provider import AIProvider, ModelConfig
+from app.services.ai.prompts import build_structured_payload, get_prompt
+from app.services.ai.provider import AIProvider, ModelConfig, analyze_with_controls
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +77,24 @@ class BaseAnalyticalAgent:
         """Execute agent analysis with strict error isolation and schema validation."""
         now_utc = dt.datetime.now(dt.UTC)
         context = self.extract_context(ai_input)
-        wrapped_payload = wrap_untrusted_data(context)
+        trusted_context = {
+            "agent_id": self.agent_id,
+            "symbol": ai_input.symbol,
+            "as_of": ai_input.as_of.isoformat(),
+            "strategy_candidate": ai_input.strategy_context.model_dump(mode="json", exclude={"evidence"}),
+            "risk_decision": ai_input.risk_context.model_dump(mode="json"),
+            "kill_switch": ai_input.kill_switch_context.model_dump(mode="json"),
+            "provenance": ai_input.provenance.model_dump(mode="json"),
+        }
+        structured_payload = build_structured_payload(trusted_context, context)
         system_prompt = get_prompt(self.prompt_id)
 
         try:
-            res = await provider.analyze(
+            res = await analyze_with_controls(
+                provider,
                 agent_id=self.agent_id,
                 system_prompt=system_prompt,
-                user_payload=wrapped_payload,
+                user_payload=structured_payload,
                 model_config=config,
                 timeout_seconds=timeout_seconds,
             )
@@ -152,10 +162,14 @@ class SMCICTAnalyst(BaseAnalyticalAgent):
             "internal_state": ai_input.structure_context.internal_state,
             "external_state": ai_input.structure_context.external_state,
             "swings_count": len(ai_input.structure_context.swings),
-            "events": list(ai_input.structure_context.events[:10]),
-            "liquidity": list(ai_input.structure_context.liquidity[:10]),
-            "zones": list(ai_input.structure_context.zones[:10]),
-            "dealing_range": ai_input.structure_context.dealing_range,
+            "events": [item.model_dump(mode="json") for item in ai_input.structure_context.events[:10]],
+            "liquidity": [item.model_dump(mode="json") for item in ai_input.structure_context.liquidity[:10]],
+            "zones": [item.model_dump(mode="json") for item in ai_input.structure_context.zones[:10]],
+            "dealing_range": (
+                ai_input.structure_context.dealing_range.model_dump(mode="json")
+                if ai_input.structure_context.dealing_range is not None
+                else None
+            ),
         }
 
 
@@ -289,15 +303,27 @@ class MetaController:
             },
         }
 
-        wrapped_payload = wrap_untrusted_data(meta_context)
+        structured_payload = build_structured_payload(
+            {
+                "agent_id": self.agent_id,
+                "symbol": ai_input.symbol,
+                "as_of": ai_input.as_of.isoformat(),
+                "strategy_candidate": ai_input.strategy_context.model_dump(mode="json", exclude={"evidence"}),
+                "risk_decision": ai_input.risk_context.model_dump(mode="json"),
+                "kill_switch": ai_input.kill_switch_context.model_dump(mode="json"),
+                "provenance": ai_input.provenance.model_dump(mode="json"),
+            },
+            meta_context,
+        )
         system_prompt = get_prompt(self.prompt_id)
 
         meta_failed = False
         try:
-            res = await provider.analyze(
+            res = await analyze_with_controls(
+                provider,
                 agent_id=self.agent_id,
                 system_prompt=system_prompt,
-                user_payload=wrapped_payload,
+                user_payload=structured_payload,
                 model_config=config,
                 timeout_seconds=timeout_seconds,
             )
