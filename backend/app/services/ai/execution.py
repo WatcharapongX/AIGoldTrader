@@ -21,6 +21,13 @@ _TERMINATE_GRACE_SECONDS = 0.03
 _KILL_GRACE_SECONDS = 0.03
 PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS = _TERMINATE_GRACE_SECONDS + _KILL_GRACE_SECONDS
 PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS = 0.05
+# Windows is not a real-time operating system; Python asyncio cannot guarantee an absolute
+# fixed wall-clock response ceiling under OS scheduling latency.
+# The hard safety invariant is:
+# 1) When execution deadline expires, provider worker is forcibly terminated (terminate + kill).
+# 2) Before execute() returns, no worker process remains alive (zero orphan processes).
+# Tests should use TEST_WATCHDOG_TIMEOUT_SECONDS to detect hangs or process leaks.
+TEST_WATCHDOG_TIMEOUT_SECONDS = 1.5
 _ACTIVE_PROCESSES: set[BaseProcess] = set()
 
 
@@ -136,17 +143,33 @@ async def _worker_execute(provider: Any, request: dict[str, Any], pipe: Connecti
 def _provider_worker_entry(target: Any, request: dict[str, Any], pipe: Connection) -> None:
     """Spawn-safe module-level worker entry point; never starts another process.
 
-    If target is a ProviderDescriptor, construct provider adapter worker-side (P3-066).
+    If target is a descriptor or plain wire DTO, reconstruct and defensively revalidate
+    descriptor worker-side before creating provider (P1-201 / P1-202).
     """
+    from pydantic import BaseModel
+
     from app.services.ai.adapters import ProviderFactory
     from app.services.ai.provider import ProviderDescriptor
 
     provider: Any = None
     try:
-        if isinstance(target, ProviderDescriptor):
-            provider = ProviderFactory.create_provider(target)
+        descriptor_data: dict[str, Any] | None = None
+        if isinstance(target, dict) and target.get("kind") == "descriptor":
+            descriptor_data = target.get("payload")
+        elif isinstance(target, ProviderDescriptor):
+            descriptor_data = target.model_dump(mode="json")
+        elif isinstance(target, BaseModel):
+            descriptor_data = target.model_dump(mode="json")
+        elif isinstance(target, dict) and "instance" not in target:
+            descriptor_data = target
+
+        if descriptor_data is not None:
+            # Revalidate plain wire data through ProviderDescriptor.model_validate
+            descriptor = ProviderDescriptor.model_validate(descriptor_data)
+            provider = ProviderFactory.create_provider(descriptor)
         else:
-            provider = target
+            provider = target.get("instance") if isinstance(target, dict) else target
+
         result = asyncio.run(_worker_execute(provider, request, pipe))
         pipe.send(("result", result, _provider_state(provider)))
     except BaseException as exc:
@@ -290,10 +313,24 @@ class ProviderExecutor:
         seen_attempts: set[int] = set()
         message: tuple[Any, ...] | None = None
 
+        from pydantic import BaseModel
+
+        from app.services.ai.provider import ProviderDescriptor
+
+        wire_target: dict[str, Any]
+        if isinstance(provider, (ProviderDescriptor, BaseModel)):
+            wire_target = {"kind": "descriptor", "payload": provider.model_dump(mode="json")}
+        elif isinstance(provider, dict):
+            wire_target = {"kind": "descriptor", "payload": dict(provider)}
+        else:
+            wire_target = {"kind": "provider", "instance": provider}
+
         try:
             context = mp.get_context("spawn")
             recv_pipe, send_pipe = context.Pipe(duplex=False)
-            process = context.Process(target=_provider_worker_entry, args=(provider, request, send_pipe), daemon=True)
+            process = context.Process(
+                target=_provider_worker_entry, args=(wire_target, request, send_pipe), daemon=True
+            )
             if loop.time() >= deadline:
                 raise ProviderTimeoutError(f"Provider execution timeout during process setup for {agent_id}")
             process.start()

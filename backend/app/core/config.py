@@ -120,7 +120,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Invalid configuration: ai_provider_mode='external' cannot use ai_provider_type='fixture'"
             )
+        if self.ai_provider_mode == "external" and self.ai_provider_api_key:
+            from app.services.ai.provider import validate_provider_base_url
+
+            validate_provider_base_url(self.ai_provider_base_url, active_secret=self.ai_provider_api_key)
         return self
+
+    @field_validator("ai_provider_base_url")
+    @classmethod
+    def _validate_ai_provider_base_url(cls, v: str) -> str:
+        from app.services.ai.provider import validate_provider_base_url
+
+        return validate_provider_base_url(v)
 
     @field_validator("trading_mode")
     @classmethod

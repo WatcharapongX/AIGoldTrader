@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from app.core.config import Settings, configure_ai_provider_runtime, get_settings
 from app.core.masking import mask_secret_text
@@ -62,6 +63,7 @@ from app.services.ai.provider import (
     ProviderBudgetExceeded,
     ProviderCapacityExhausted,
     ProviderDescriptor,
+    ProviderInternalError,
     ProviderNetworkError,
     ProviderRateLimitError,
     ProviderRequestError,
@@ -254,7 +256,7 @@ def test_provider_descriptor_enforces_complete_type_profile_matrix(provider_type
         "config_profile": config_profile,
     }
     if provider_type == "openai_compatible":
-        kwargs.update(base_url="https://provider.example/v1", model_bindings=TEST_MODEL_MAPPING)
+        kwargs.update(model_bindings=TEST_MODEL_MAPPING)
     if valid:
         ProviderDescriptor(**kwargs)
     else:
@@ -270,17 +272,34 @@ def test_provider_descriptor_enforces_complete_type_profile_matrix(provider_type
         "https://example.com/v1?api_key=SECRET",
         "https://example.com/v1#secret",
         " https://example.com/v1",
+        "https://example.com/v1 ",
+        "https://example.com/a b",
+        "https://example.com/%20",
+        "https://example.com/a%20b",
+        "https://example.com/%09",
+        "https://example.com/%0a",
+        "https://example.com/%0d",
         "https://example.com/v1%0a",
+        "https://example.com/%2520",
         "http://provider.example/v1",
     ],
 )
 def test_external_descriptor_rejects_credential_bearing_or_unsafe_urls(base_url):
+    from app.services.ai.provider import validate_provider_base_url
+
+    with pytest.raises(ValueError):
+        validate_provider_base_url(base_url)
+
+    with pytest.raises(ValueError):
+        Settings(ai_provider_base_url=base_url)
+
+    # ProviderDescriptor itself must reject base_url as forbidden extra input
     with pytest.raises(ValueError):
         ProviderDescriptor(
             provider_id="safe_provider",
             provider_type="openai_compatible",
             config_profile="primary",
-            base_url=base_url,
+            base_url=base_url,  # type: ignore[call-arg]
             model_bindings=TEST_MODEL_MAPPING,
         )
 
@@ -291,14 +310,12 @@ def test_external_descriptor_requires_bounded_explicit_immutable_model_bindings(
             provider_id="external",
             provider_type="openai_compatible",
             config_profile="primary",
-            base_url="https://provider.example/v1",
         )
     with pytest.raises(ValueError):
         ProviderDescriptor(
             provider_id="external",
             provider_type="openai_compatible",
             config_profile="primary",
-            base_url="https://provider.example/v1",
             model_bindings={f"model-{i}": "vendor-model" for i in range(17)},
         )
     for bindings in (
@@ -312,7 +329,6 @@ def test_external_descriptor_requires_bounded_explicit_immutable_model_bindings(
                 provider_id="external",
                 provider_type="openai_compatible",
                 config_profile="primary",
-                base_url="https://provider.example/v1",
                 model_bindings=bindings,
             )
 
@@ -320,7 +336,6 @@ def test_external_descriptor_requires_bounded_explicit_immutable_model_bindings(
         provider_id="external",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url="https://provider.example/v1",
         model_bindings=TEST_MODEL_MAPPING,
     )
     assert descriptor.model_mapping == TEST_MODEL_MAPPING
@@ -400,13 +415,14 @@ async def test_spawned_rate_limit_retries_match_configured_count(
     httpd = http.server.HTTPServer(("127.0.0.1", 0), RateLimitServer)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     monkeypatch.setenv("AI_PROVIDER_API_KEY", "rate-limit-test-key")
+    monkeypatch.setenv("AI_PROVIDER_BASE_URL", f"http://127.0.0.1:{httpd.server_address[1]}")
     settings = get_settings()
     monkeypatch.setattr(settings, "ai_provider_api_key", "rate-limit-test-key")
+    monkeypatch.setattr(settings, "ai_provider_base_url", f"http://127.0.0.1:{httpd.server_address[1]}")
     descriptor = ProviderDescriptor(
         provider_id="rate_limit_provider",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url=f"http://127.0.0.1:{httpd.server_address[1]}",
         model_bindings=TEST_MODEL_MAPPING,
     )
     try:
@@ -448,6 +464,9 @@ async def test_network_error_defensively_redacts_unsafe_direct_adapter_url():
     assert secret not in str(caught.value)
     assert "user" not in str(caught.value)
     assert "api_key" not in str(caught.value)
+    # Section 19: No host or URL logged in network error
+    assert "provider.example" not in str(caught.value)
+    assert "Provider network error: provider_id=" in str(caught.value)
 
 
 def test_provider_descriptor_serialization_and_picklability():
@@ -455,7 +474,6 @@ def test_provider_descriptor_serialization_and_picklability():
         provider_id="ext_openai",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url="https://api.openai.com/v1",
         model_bindings={"fast-advisory": "gpt-4o-mini"},
     )
     # JSON serialization
@@ -482,7 +500,6 @@ def test_provider_descriptor_rejects_openai_with_fixture_profile():
         ProviderDescriptor(
             provider_type="openai_compatible",
             config_profile="fixture",
-            base_url="https://provider.example/v1",
             model_bindings=TEST_MODEL_MAPPING,
         )
 
@@ -523,7 +540,6 @@ def test_factory_missing_secret_raises(monkeypatch: pytest.MonkeyPatch):
         provider_id="custom_ext",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url="https://provider.example/v1",
         model_bindings=TEST_MODEL_MAPPING,
     )
     with pytest.raises(ProviderAuthError, match="Configured external provider credential is unavailable"):
@@ -532,14 +548,15 @@ def test_factory_missing_secret_raises(monkeypatch: pytest.MonkeyPatch):
 
 def test_factory_creates_openai_compatible(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AI_PROVIDER_API_KEY", "test-key-abc-123")
+    monkeypatch.setenv("AI_PROVIDER_BASE_URL", "https://api.test.com/v1")
     settings = get_settings()
     monkeypatch.setattr(settings, "ai_provider_api_key", "test-key-abc-123")
+    monkeypatch.setattr(settings, "ai_provider_base_url", "https://api.test.com/v1")
 
     descriptor = ProviderDescriptor(
         provider_id="test_openai",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url="https://api.test.com/v1",
         model_bindings={"fast-advisory": "test-fast-model"},
     )
     provider = ProviderFactory.create_provider(descriptor)
@@ -947,14 +964,15 @@ async def test_worker_side_provider_construction_across_spawn(monkeypatch: pytes
 
     base_url = f"http://127.0.0.1:{port}"
     monkeypatch.setenv("AI_PROVIDER_API_KEY", "spawn-key-12345")
+    monkeypatch.setenv("AI_PROVIDER_BASE_URL", base_url)
     settings = get_settings()
     monkeypatch.setattr(settings, "ai_provider_api_key", "spawn-key-12345")
+    monkeypatch.setattr(settings, "ai_provider_base_url", base_url)
 
     descriptor = ProviderDescriptor(
         provider_id="spawn_test_provider",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url=base_url,
         model_bindings={"fast-advisory": "gpt-4o-mini"},
     )
 
@@ -1197,14 +1215,15 @@ async def test_orchestrator_auth_failure_degrades_gracefully(monkeypatch: pytest
     server_thread.start()
 
     monkeypatch.setenv("AI_PROVIDER_API_KEY", "bad-key")
+    monkeypatch.setenv("AI_PROVIDER_BASE_URL", f"http://127.0.0.1:{httpd.server_address[1]}")
     settings = get_settings()
     monkeypatch.setattr(settings, "ai_provider_api_key", "bad-key")
+    monkeypatch.setattr(settings, "ai_provider_base_url", f"http://127.0.0.1:{httpd.server_address[1]}")
 
     descriptor = ProviderDescriptor(
         provider_id="fail_auth_provider",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url=f"http://127.0.0.1:{httpd.server_address[1]}",
         model_bindings=TEST_MODEL_MAPPING,
     )
     ai_input = make_test_ai_input()
@@ -1289,14 +1308,15 @@ async def test_mock_server_spawn_full_orchestration_all_agents(monkeypatch: pyte
 
     base_url = f"http://127.0.0.1:{port}"
     monkeypatch.setenv("AI_PROVIDER_API_KEY", "all-agents-key")
+    monkeypatch.setenv("AI_PROVIDER_BASE_URL", base_url)
     settings = get_settings()
     monkeypatch.setattr(settings, "ai_provider_api_key", "all-agents-key")
+    monkeypatch.setattr(settings, "ai_provider_base_url", base_url)
 
     descriptor = ProviderDescriptor(
         provider_id="mock_all_agents",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url=base_url,
         model_bindings={"fast-advisory": "test-model-fast-123"},
     )
 
@@ -1351,7 +1371,6 @@ async def test_live_external_llm_smoke():
         provider_id="live_test",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url=settings.ai_provider_base_url,
         model_bindings=settings.ai_model_mapping,
     )
     config = ModelConfig(timeout_seconds=15.0)
@@ -1364,3 +1383,167 @@ async def test_live_external_llm_smoke():
     )
     assert res.total_tokens > 0
     assert "status" in res.raw_payload
+
+
+# ============================================================================
+# 10. PHASE 6.2 ROUND 3 CORRECTIVE TESTS: TRUST BOUNDARY, ENDPOINT & DEADLINES
+# ============================================================================
+
+
+def test_model_construct_fixture_primary_rejected_at_factory_and_worker():
+    """P1-201: model_construct bypass must fail revalidation in child worker and factory."""
+    forged = ProviderDescriptor.model_construct(
+        provider_id="forged_fixture",
+        provider_type="fixture",
+        config_profile="primary",
+        model_bindings=(),
+        request_schema_version="v1",
+        response_schema_version="v1",
+        capabilities=("structured_json",),
+        enabled=True,
+    )
+    with pytest.raises(Exception) as exc_info:
+        ProviderFactory.create_provider(forged)
+    assert "fixture provider must use fixture config profile" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_model_construct_forged_descriptor_rejected_across_spawn_boundary():
+    """P1-201: Forged descriptor sent across spawn boundary fails revalidation, zero calls made."""
+    forged = ProviderDescriptor.model_construct(
+        provider_id="forged_fixture_spawn",
+        provider_type="fixture",
+        config_profile="primary",
+        model_bindings=(),
+        request_schema_version="v1",
+        response_schema_version="v1",
+        capabilities=("structured_json",),
+        enabled=True,
+    )
+    with pytest.raises((ProviderInternalError, Exception)) as exc:
+        await analyze_with_controls(
+            forged,
+            agent_id="test_agent",
+            system_prompt="system",
+            user_payload="{}",
+            model_config=ModelConfig(),
+        )
+    assert "fixture provider must use fixture config profile" in str(exc.value)
+    assert active_provider_process_count() == 0
+
+
+def test_model_construct_external_fixture_rejected():
+    """P1-201: model_construct external with fixture profile fails revalidation."""
+    from app.services.ai.provider import ModelBinding
+
+    forged = ProviderDescriptor.model_construct(
+        provider_id="forged_ext",
+        provider_type="openai_compatible",
+        config_profile="fixture",
+        model_bindings=(ModelBinding(alias="fast-advisory", model="gpt-4o-mini"),),
+        request_schema_version="v1",
+        response_schema_version="v1",
+        capabilities=("structured_json",),
+        enabled=True,
+    )
+    with pytest.raises(Exception) as exc:
+        ProviderFactory.create_provider(forged)
+    assert "openai_compatible provider must use primary config profile" in str(exc.value)
+
+
+def test_model_construct_invalid_bindings_rejected():
+    """P1-201: model_construct invalid bindings fail defensive revalidation."""
+    from app.services.ai.provider import ModelBinding
+
+    # Empty bindings
+    forged_empty = ProviderDescriptor.model_construct(
+        provider_id="forged_empty",
+        provider_type="openai_compatible",
+        config_profile="primary",
+        model_bindings=(),
+    )
+    with pytest.raises(ValidationError):
+        ProviderFactory.create_provider(forged_empty)
+
+    # >16 bindings
+    forged_17 = ProviderDescriptor.model_construct(
+        provider_id="forged_17",
+        provider_type="openai_compatible",
+        config_profile="primary",
+        model_bindings=tuple(ModelBinding(alias=f"m{i}", model="gpt-4o") for i in range(17)),
+    )
+    with pytest.raises(ValidationError):
+        ProviderFactory.create_provider(forged_17)
+
+
+def test_descriptor_wire_dto_ipc_has_zero_urls_and_zero_secrets():
+    """P1-202: Serialized descriptor / wire DTO must contain ZERO URLs and ZERO secrets."""
+    secret = "SUPER_SECRET_AI_KEY_998877"
+    url = "https://api.openai.com/v1/some_endpoint"
+    descriptor = ProviderDescriptor(
+        provider_id="ipc_test_provider",
+        provider_type="openai_compatible",
+        config_profile="primary",
+        model_bindings={"fast-advisory": "gpt-4o-mini"},
+    )
+    dumped = descriptor.model_dump(mode="json")
+    assert "base_url" not in dumped
+    pickled = pickle.dumps(dumped)
+    assert secret.encode() not in pickled
+    assert url.encode() not in pickled
+    assert b"http" not in pickled
+
+
+def test_worker_active_secret_in_endpoint_rejected():
+    """P1-202: Active API credential in URL path or hostname raises error and halts execution."""
+    from app.services.ai.provider import validate_provider_base_url
+
+    secret = "sk-live-secret-test-key-554433"
+    with pytest.raises(ValueError, match="contains active API credential"):
+        validate_provider_base_url(f"https://api.openai.com/v1/{secret}", active_secret=secret)
+
+    with pytest.raises(ValueError, match="contains active API credential"):
+        validate_provider_base_url(f"https://{secret}.openai.com/v1", active_secret=secret)
+
+
+@pytest.mark.parametrize(
+    "ws_url",
+    [
+        "https://example.com/a b",
+        "https://example.com/%20",
+        "https://example.com/a%20b",
+        "https://example.com/%09",
+        "https://example.com/%0a",
+        "https://example.com/%0d",
+        "https://example.com/\u2003",
+        "https://example.com/%2520",
+    ],
+)
+def test_url_whitespace_matrix_all_rejected(ws_url):
+    """New P2: All whitespace variants (ASCII, Unicode, percent-encoded, double-encoded) are rejected."""
+    from app.services.ai.provider import validate_provider_base_url
+
+    with pytest.raises(ValueError):
+        validate_provider_base_url(ws_url)
+
+
+@pytest.mark.asyncio
+async def test_deadline_terminates_resistant_worker_with_truthful_watchdog():
+    """P2-217: Enforced execution deadline terminates resistant child; verified with TEST_WATCHDOG."""
+    provider = CancellationResistantFixtureProvider()
+    config = ModelConfig(timeout_seconds=0.25, max_retries=0)
+    t0 = asyncio.get_running_loop().time()
+    with pytest.raises(ProviderTimeoutError):
+        await analyze_with_controls(
+            provider,
+            agent_id="resistant_worker_test",
+            system_prompt="system",
+            user_payload="{}",
+            model_config=config,
+            timeout_seconds=0.25,
+        )
+    elapsed = asyncio.get_running_loop().time() - t0
+    # Generous TEST_WATCHDOG (1.5s) to detect process hangs/leaks without claiming a non-real-time 0.360s ceiling
+    TEST_WATCHDOG = 1.5
+    assert elapsed < TEST_WATCHDOG, f"Watchdog exceeded: elapsed {elapsed:.3f}s >= {TEST_WATCHDOG}s"
+    assert active_provider_process_count() == 0

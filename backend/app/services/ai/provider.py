@@ -120,10 +120,70 @@ class ModelBinding(BaseModel):
         return value
 
 
+def validate_provider_base_url(value: str, active_secret: str | None = None) -> str:
+    """Validate external provider base_url strictly.
+
+    Rejects:
+    - Whitespace: leading, trailing, internal ASCII space, tabs, newlines, Unicode whitespace.
+    - Percent-encoded whitespace: %20, %09, %0a, %0A, %0d, %0D, and recursive/double-decoded whitespace.
+    - Control characters (ord < 32 or ord == 127).
+    - Userinfo (username, password).
+    - Query parameters or fragments.
+    - Non-localhost plain HTTP (allowed only for localhost, 127.0.0.1, ::1).
+    - Active API secret in URL path or hostname (if active_secret provided).
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Provider base_url must be a non-empty string")
+
+    # 1. Reject leading/trailing whitespace
+    if value != value.strip():
+        raise ValueError("Provider base_url must not contain leading or trailing whitespace")
+
+    # 2. Reject internal ASCII or Unicode whitespace
+    if any(char.isspace() for char in value):
+        raise ValueError("Provider base_url must not contain whitespace")
+
+    # 3. Reject percent-encoded whitespace and control characters (check recursive decoding)
+    current = value
+    for _ in range(3):
+        decoded = unquote(current)
+        if any(char.isspace() for char in decoded):
+            raise ValueError("Provider base_url must not contain percent-encoded whitespace")
+        if any(ord(char) < 32 or ord(char) == 127 for char in decoded):
+            raise ValueError("Provider base_url must not contain control characters")
+        if decoded == current:
+            break
+        current = decoded
+
+    # 4. URL structure validation via urlsplit
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Provider base_url must be an absolute HTTP(S) URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Provider base_url must not contain userinfo")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Provider base_url must not contain a query or fragment")
+    if parsed.scheme == "http" and parsed.hostname.casefold() not in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("Plain HTTP provider base_url is allowed only for localhost integration")
+    try:
+        _ = parsed.port
+    except ValueError:
+        raise ValueError("Provider base_url contains an invalid port") from None
+
+    # 5. Active secret in endpoint check
+    if active_secret and active_secret.strip():
+        secret_clean = active_secret.strip()
+        if secret_clean in value or secret_clean in current:
+            raise ValueError("Provider base_url contains active API credential")
+
+    return value.rstrip("/")
+
+
 class ProviderDescriptor(BaseModel):
     """Strict, immutable, serializable descriptor for AI providers.
 
-    Contains configuration identity and references only; NEVER raw secrets or live client objects.
+    Contains configuration identity and references only; NEVER raw secrets, arbitrary URLs,
+    or live client objects.
     Survives Windows spawn multiprocessing boundary and JSON serialization.
     """
 
@@ -134,7 +194,6 @@ class ProviderDescriptor(BaseModel):
     )
     provider_type: Literal["fixture", "openai_compatible"] = "fixture"
     config_profile: Literal["primary", "fixture"] = "fixture"
-    base_url: str | None = Field(default=None, max_length=512)
     model_bindings: tuple[ModelBinding, ...] = Field(default_factory=tuple, max_length=16)
     request_schema_version: str = Field(
         default="v1", min_length=1, max_length=16, pattern=r"^[a-z0-9][a-z0-9_.-]*$"
@@ -147,6 +206,8 @@ class ProviderDescriptor(BaseModel):
     ] = Field(default=("structured_json", "system_prompt"), max_length=16)
     enabled: bool = True
     live_external_only: bool = False
+
+    validate_base_url = staticmethod(validate_provider_base_url)
 
     @field_validator("model_bindings", mode="before")
     @classmethod
@@ -169,43 +230,16 @@ class ProviderDescriptor(BaseModel):
             raise ValueError("Provider capabilities must not contain credential material")
         return values
 
-    @field_validator("base_url")
-    @classmethod
-    def validate_base_url(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        decoded = unquote(value)
-        if value != value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in decoded):
-            raise ValueError("Provider base_url must not contain whitespace or control characters")
-        parsed = urlsplit(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("Provider base_url must be an absolute HTTP(S) URL")
-        if parsed.username is not None or parsed.password is not None:
-            raise ValueError("Provider base_url must not contain userinfo")
-        if parsed.query or parsed.fragment:
-            raise ValueError("Provider base_url must not contain a query or fragment")
-        if parsed.scheme == "http" and parsed.hostname.casefold() not in {"localhost", "127.0.0.1", "::1"}:
-            raise ValueError("Plain HTTP provider base_url is allowed only for localhost integration")
-        try:
-            _ = parsed.port
-        except ValueError:
-            raise ValueError("Provider base_url contains an invalid port") from None
-        return value.rstrip("/")
-
     @model_validator(mode="after")
     def validate_descriptor_invariants(self):
         if self.provider_type == "fixture":
             if self.config_profile != "fixture":
                 raise ValueError("fixture provider must use fixture config profile")
-            if self.base_url is not None:
-                raise ValueError("fixture provider must not define an external base_url")
             if self.model_bindings:
                 raise ValueError("fixture provider must not define external model bindings")
         else:
             if self.config_profile != "primary":
                 raise ValueError("openai_compatible provider must use primary config profile")
-            if self.base_url is None:
-                raise ValueError("openai_compatible provider requires an explicit base_url")
             if not self.model_bindings:
                 raise ValueError("openai_compatible provider requires explicit non-empty model bindings")
             aliases = [binding.alias for binding in self.model_bindings]

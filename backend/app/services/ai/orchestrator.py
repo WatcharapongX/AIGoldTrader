@@ -66,7 +66,6 @@ class AIOrchestrator:
                     provider_id="configured_external",
                     provider_type="openai_compatible",
                     config_profile="primary",
-                    base_url=getattr(settings, "ai_provider_base_url", "https://api.openai.com/v1"),
                     model_bindings=tuple(
                         ModelBinding(alias=alias, model=model)
                         for alias, model in getattr(settings, "ai_model_mapping", {}).items()

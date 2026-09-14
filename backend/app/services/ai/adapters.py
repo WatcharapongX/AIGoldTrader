@@ -31,17 +31,27 @@ from app.services.ai.provider import (
     ProviderResult,
     ProviderSchemaError,
     ProviderTimeoutError,
-    sanitize_provider_url_for_logging,
 )
 
 logger = logging.getLogger(__name__)
 
 class ProviderConfigResolver:
-    """Worker-side resolution of secrets from Settings or environment.
+    """Worker-side resolution of secrets and endpoints from Settings or environment.
 
-    Resolves secrets exclusively inside the child worker process based on symbolic config profiles.
-    Never exposes raw secrets across IPC pipes or in ProviderDescriptors.
+    Resolves secrets and network base URLs exclusively inside the child worker process
+    based on symbolic config profiles. Never exposes raw secrets or arbitrary endpoint
+    URLs across IPC pipes or in ProviderDescriptors.
     """
+
+    _custom_endpoints: dict[str, str] = {}
+
+    @classmethod
+    def register_test_endpoint(cls, config_profile: str, base_url: str) -> None:
+        cls._custom_endpoints[config_profile] = base_url
+
+    @classmethod
+    def clear_test_endpoints(cls) -> None:
+        cls._custom_endpoints.clear()
 
     @classmethod
     def resolve_secret(cls, config_profile: str) -> str:
@@ -60,7 +70,41 @@ class ProviderConfigResolver:
             if not api_key:
                 raise ProviderAuthError("Configured external provider credential is unavailable")
             return api_key
-        raise ProviderAuthError("Configured external provider credential is unavailable")
+        raise ProviderAuthError(f"Unsupported config profile for secret: '{config_profile}'")
+
+    @classmethod
+    def resolve_base_url(cls, config_profile: str) -> str:
+        if config_profile == "fixture":
+            return ""
+        if config_profile == "primary":
+            if "primary" in cls._custom_endpoints:
+                return cls._custom_endpoints["primary"]
+            from app.core.config import get_settings
+
+            try:
+                settings = get_settings()
+                base_url = settings.ai_provider_base_url.strip()
+            except Exception:
+                base_url = ""
+            if not base_url:
+                base_url = os.environ.get("AI_PROVIDER_BASE_URL", "").strip()
+            if not base_url:
+                base_url = "https://api.openai.com/v1"
+            return base_url
+        raise ProviderAuthError(f"Unsupported config profile for base_url: '{config_profile}'")
+
+    @classmethod
+    def resolve_external_config(cls, config_profile: str) -> tuple[str, str]:
+        """Resolve and validate both secret and network endpoint together worker-side."""
+        from app.services.ai.provider import validate_provider_base_url
+
+        api_key = cls.resolve_secret(config_profile)
+        raw_base_url = cls.resolve_base_url(config_profile)
+        try:
+            validated_url = validate_provider_base_url(raw_base_url, active_secret=api_key)
+        except ValueError as exc:
+            raise ProviderAuthError(f"Invalid external provider base_url configuration: {exc}") from exc
+        return api_key, validated_url
 
 
 class OpenAIChatCompletionsProvider(AIProvider):
@@ -145,9 +189,9 @@ class OpenAIChatCompletionsProvider(AIProvider):
             msg = mask_secret_text(f"Provider request timed out after {timeout}s: {exc}", [self.api_key])
             raise ProviderTimeoutError(msg) from exc
         except (httpx.ConnectError, httpx.NetworkError, httpx.ProtocolError) as exc:
-            safe_url = sanitize_provider_url_for_logging(self.base_url)
             msg = mask_secret_text(
-                f"Provider network error connecting to {safe_url}: {type(exc).__name__}", [self.api_key]
+                f"Provider network error: provider_id={self.provider_id}, error_type={type(exc).__name__}",
+                [self.api_key],
             )
             raise ProviderNetworkError(msg) from exc
         except ProviderBudgetExceeded:
@@ -303,6 +347,16 @@ class ProviderFactory:
     @classmethod
     def create_provider(cls, descriptor: ProviderDescriptor) -> AIProvider:
         """Construct provider adapter from descriptor inside the worker process."""
+        from pydantic import BaseModel
+
+        # Defensive revalidation from plain dictionary to prevent model_construct bypass
+        if isinstance(descriptor, BaseModel):
+            descriptor = ProviderDescriptor.model_validate(descriptor.model_dump(mode="json"))
+        elif isinstance(descriptor, dict):
+            descriptor = ProviderDescriptor.model_validate(descriptor)
+        else:
+            raise ProviderInternalError(f"Invalid descriptor type: {type(descriptor)}")
+
         if not descriptor.enabled:
             raise ProviderAuthError(f"AI Provider '{descriptor.provider_id}' is disabled")
 
@@ -310,9 +364,7 @@ class ProviderFactory:
             return FixtureAIProvider(provider_id=descriptor.provider_id)
 
         if descriptor.provider_type == "openai_compatible":
-            api_key = ProviderConfigResolver.resolve_secret(descriptor.config_profile)
-            assert descriptor.base_url is not None
-            base_url = descriptor.base_url
+            api_key, base_url = ProviderConfigResolver.resolve_external_config(descriptor.config_profile)
             mapping = descriptor.model_mapping
 
             transport = cls._custom_transports.get(descriptor.provider_id)
