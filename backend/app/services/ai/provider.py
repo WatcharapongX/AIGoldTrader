@@ -19,6 +19,7 @@ from app.services.ai.domain import (
 logger = logging.getLogger(__name__)
 MAX_INPUT_BYTES_PER_AGENT = 20_000
 MAX_PROVIDER_OUTPUT_BYTES = 10_000
+MAX_PROVIDER_HTTP_RESPONSE_BYTES = 50_000
 
 
 class AIProviderError(Exception):
@@ -78,27 +79,21 @@ class ProviderDescriptor(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    provider_id: str = "default_provider"
+    provider_id: str = Field(default="default_provider", min_length=1, max_length=64)
     provider_type: Literal["fixture", "openai_compatible"] = "fixture"
-    model_alias: str = "fast-advisory"
-    credential_ref: str | None = None
-    base_url_ref: str | None = None
-    organization_ref: str | None = None
-    request_schema_version: str = "v1"
-    response_schema_version: str = "v1"
+    config_profile: Literal["primary", "fixture"] = "fixture"
+    base_url: str | None = Field(default=None, max_length=512)
+    model_bindings: dict[str, str] = Field(default_factory=dict)
+    request_schema_version: str = Field(default="v1", max_length=16)
+    response_schema_version: str = Field(default="v1", max_length=16)
     capabilities: tuple[str, ...] = ("structured_json", "system_prompt")
     enabled: bool = True
     live_external_only: bool = False
 
     @model_validator(mode="after")
-    def validate_no_raw_secrets(self):
-        if self.credential_ref:
-            ref_lower = self.credential_ref.lower().strip()
-            if any(ref_lower.startswith(prefix) for prefix in ("sk-", "aiza", "bearer ")):
-                raise ValueError(
-                    "credential_ref must be an environment variable name or secret identifier, "
-                    "not a raw secret or API key"
-                )
+    def validate_descriptor_invariants(self):
+        if self.provider_type == "openai_compatible" and self.config_profile == "fixture":
+            raise ValueError("openai_compatible provider cannot use fixture config profile")
         return self
 
 
@@ -125,6 +120,8 @@ class ProviderResult(BaseModel):
     completion_tokens: int = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
     duration_ms: float = 0.0
+    provider_id: str = "fixture"
+    provider_type: str = "fixture"
     model_used: str = "fixture-v1"
 
     @model_validator(mode="after")
@@ -247,6 +244,8 @@ class FixtureAIProvider(AIProvider):
                 completion_tokens=20,
                 total_tokens=120,
                 duration_ms=(time.perf_counter() - t0) * 1000,
+                provider_id="fixture",
+                provider_type="fixture",
                 model_used=model_config.model_alias,
             )
 
@@ -325,5 +324,7 @@ class FixtureAIProvider(AIProvider):
             completion_tokens=150,
             total_tokens=400,
             duration_ms=(time.perf_counter() - t0) * 1000,
+            provider_id="fixture",
+            provider_type="fixture",
             model_used=model_config.model_alias,
         )

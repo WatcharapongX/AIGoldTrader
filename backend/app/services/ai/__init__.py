@@ -1,6 +1,11 @@
 """Phase 6.1 AI Foundation package."""
 
-from app.services.ai.adapters import OpenAICompatibleProvider, ProviderFactory
+from app.services.ai.adapters import (
+    OpenAIChatCompletionsProvider,
+    OpenAICompatibleProvider,
+    ProviderConfigResolver,
+    ProviderFactory,
+)
 from app.services.ai.agents import (
     BaseAnalyticalAgent,
     MacroNewsAnalyst,
@@ -106,12 +111,14 @@ __all__ = [
     "MetaController",
     "MetaStatus",
     "ModelConfig",
+    "OpenAIChatCompletionsProvider",
     "OpenAICompatibleProvider",
     "OutputBudgetExceeded",
     "PROMPT_REGISTRY",
     "ProviderAuthError",
     "ProviderBudgetExceeded",
     "ProviderCapacityExhausted",
+    "ProviderConfigResolver",
     "ProviderDescriptor",
     "ProviderFactory",
     "ProviderInternalError",

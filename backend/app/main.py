@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from app.api import api_router
 from app.api.health import router as health_router
 from app.api.market import ws_router
-from app.core.config import get_settings
+from app.core.config import configure_ai_provider_runtime, get_settings
 from app.core.correlation import CorrelationMiddleware, get_correlation_id
 from app.core.errors import AppError
 from app.core.logging import safe_exception, setup_logging
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.validate_runtime_secrets()
+    configure_ai_provider_runtime(settings)
     setup_logging(settings.log_level, settings.log_format)
     # Guard: ห้าม runtime config ที่ฝืน Guardrails (INV-08)
     if settings.trading_mode == "LIVE" and not settings.live_auto_trading:

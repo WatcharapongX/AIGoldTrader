@@ -6,6 +6,7 @@ state never cross. Worker constructs its own provider adapter worker-side.
 """
 
 import asyncio
+import contextlib
 import datetime as dt
 import multiprocessing as mp
 import time
@@ -66,6 +67,10 @@ class GlobalProviderLimiter:
         if self._semaphore is not None:
             self._semaphore.release()
 
+    @property
+    def available_slots(self) -> int:
+        return self._get_semaphore()._value
+
 
 def _provider_state(provider: Any) -> dict[str, int | bool]:
     state: dict[str, int | bool] = {}
@@ -80,9 +85,11 @@ async def _worker_execute(provider: Any, request: dict[str, Any], pipe: Connecti
     from app.services.ai.provider import (
         ModelConfig,
         ProviderAuthError,
+        ProviderBudgetExceeded,
         ProviderNetworkError,
         ProviderRateLimitError,
         ProviderRequestError,
+        ProviderSchemaError,
         ProviderTimeoutError,
     )
 
@@ -110,7 +117,7 @@ async def _worker_execute(provider: Any, request: dict[str, Any], pipe: Connecti
             return result.model_dump(mode="json")
         except asyncio.CancelledError:
             raise
-        except (ProviderAuthError, ProviderRequestError):
+        except (ProviderAuthError, ProviderRequestError, ProviderSchemaError, ProviderBudgetExceeded):
             # Non-transient errors: do not retry
             raise
         except (TimeoutError, RuntimeError, ProviderNetworkError, ProviderRateLimitError) as exc:
@@ -204,6 +211,18 @@ class ProviderExecutor:
     def configure_concurrency(self, max_concurrent: int, queue_timeout_seconds: float) -> None:
         self.limiter.configure(max_concurrent, queue_timeout_seconds)
 
+    @property
+    def max_concurrent(self) -> int:
+        return self.limiter.max_concurrent
+
+    @property
+    def queue_timeout_seconds(self) -> float:
+        return self.limiter.queue_timeout_seconds
+
+    @property
+    def available_slots(self) -> int:
+        return self.limiter.available_slots
+
     async def execute(
         self,
         provider: Any,
@@ -220,7 +239,9 @@ class ProviderExecutor:
             InputBudgetExceeded,
             OutputBudgetExceeded,
             ProviderAuthError,
+            ProviderBudgetExceeded,
             ProviderCapacityExhausted,
+            ProviderInternalError,
             ProviderNetworkError,
             ProviderRateLimitError,
             ProviderRequestError,
@@ -246,15 +267,19 @@ class ProviderExecutor:
 
         # 1. Acquire bounded global concurrency slot BEFORE worker creation
         await self.limiter.acquire()
+        acquired = True
 
-        context = mp.get_context("spawn")
-        recv_pipe, send_pipe = context.Pipe(duplex=False)
-        process = context.Process(target=_provider_worker_entry, args=(provider, request, send_pipe), daemon=True)
+        recv_pipe: Any = None
+        send_pipe: Any = None
+        process: BaseProcess | None = None
         seen_attempts: set[int] = set()
-        deadline = asyncio.get_running_loop().time() + timeout
         message: tuple[Any, ...] | None = None
 
         try:
+            context = mp.get_context("spawn")
+            recv_pipe, send_pipe = context.Pipe(duplex=False)
+            process = context.Process(target=_provider_worker_entry, args=(provider, request, send_pipe), daemon=True)
+            deadline = asyncio.get_running_loop().time() + timeout
             process.start()
             _ACTIVE_PROCESSES.add(process)
             attempts = getattr(provider, "attempts", None)
@@ -264,39 +289,56 @@ class ProviderExecutor:
                 except (AttributeError, ValueError):
                     pass
             send_pipe.close()
+            send_pipe = None
+
+            assert recv_pipe is not None
             while True:
-                while recv_pipe.poll():
-                    candidate = recv_pipe.recv()
-                    if candidate[0] == "attempt":
-                        _record_attempt(provider, request, int(candidate[1]), seen_attempts)
-                    else:
-                        message = candidate
-                        break
-                if message is not None:
-                    break
-                if asyncio.get_running_loop().time() >= deadline:
-                    _terminate_worker(process)
-                    if hasattr(provider, "cancelled"):
-                        try:
-                            provider.cancelled = True
-                        except (AttributeError, ValueError):
-                            pass
-                    raise ProviderTimeoutError(f"Provider hard timeout: deadline exhausted for {agent_id}")
-                if not process.is_alive():
+                try:
                     while recv_pipe.poll():
                         candidate = recv_pipe.recv()
                         if candidate[0] == "attempt":
                             _record_attempt(provider, request, int(candidate[1]), seen_attempts)
                         else:
                             message = candidate
+                            break
+                except (EOFError, BrokenPipeError, OSError) as exc:
+                    raise ProviderInternalError(
+                        f"Provider worker process terminated unexpectedly for {agent_id}"
+                    ) from exc
+
+                if message is not None:
+                    break
+                if asyncio.get_running_loop().time() >= deadline:
+                    if process is not None and process.is_alive():
+                        _terminate_worker(process)
+                    if hasattr(provider, "cancelled"):
+                        try:
+                            provider.cancelled = True
+                        except (AttributeError, ValueError):
+                            pass
+                    raise ProviderTimeoutError(f"Provider hard timeout: deadline exhausted for {agent_id}")
+                if process is not None and not process.is_alive():
+                    try:
+                        while recv_pipe.poll():
+                            candidate = recv_pipe.recv()
+                            if candidate[0] == "attempt":
+                                _record_attempt(provider, request, int(candidate[1]), seen_attempts)
+                            else:
+                                message = candidate
+                    except (EOFError, BrokenPipeError, OSError):
+                        pass
                     if message is None:
-                        raise RuntimeError(f"Provider worker exited without a result for {agent_id}")
+                        raise ProviderInternalError(f"Provider worker exited without a result for {agent_id}")
                     break
                 await asyncio.sleep(_POLL_SECONDS)
 
-            process.join(_TERMINATE_GRACE_SECONDS)
-            if process.is_alive():
-                _terminate_worker(process)
+            if process is not None:
+                process.join(_TERMINATE_GRACE_SECONDS)
+                if process.is_alive():
+                    _terminate_worker(process)
+
+            if message is None:
+                raise ProviderInternalError(f"Provider worker returned empty result for {agent_id}")
 
             if message[0] == "error":
                 _merge_observed_state(provider, message[3])
@@ -319,6 +361,10 @@ class ProviderExecutor:
                     raise OutputBudgetExceeded(error_message)
                 if error_name == "InputBudgetExceeded":
                     raise InputBudgetExceeded(error_message)
+                if error_name == "ProviderBudgetExceeded":
+                    raise ProviderBudgetExceeded(error_message)
+                if error_name == "ProviderInternalError":
+                    raise ProviderInternalError(error_message)
                 if error_name == "RuntimeError":
                     raise RuntimeError(error_message)
                 raise ValueError(error_message)
@@ -364,18 +410,25 @@ class ProviderExecutor:
                 )
             return result
         except asyncio.CancelledError:
-            _terminate_worker(process)
+            if process is not None and process.is_alive():
+                _terminate_worker(process)
             raise
         finally:
-            if process.is_alive():
-                _terminate_worker(process)
-            _ACTIVE_PROCESSES.discard(process)
-            recv_pipe.close()
-            send_pipe.close()
-            if process.pid is not None and not process.is_alive():
-                process.close()
-            # 2. Release global concurrency slot
-            self.limiter.release()
+            if process is not None:
+                if process.is_alive():
+                    _terminate_worker(process)
+                _ACTIVE_PROCESSES.discard(process)
+                if process.pid is not None and not process.is_alive():
+                    with contextlib.suppress(Exception):
+                        process.close()
+            if send_pipe is not None:
+                with contextlib.suppress(Exception):
+                    send_pipe.close()
+            if recv_pipe is not None:
+                with contextlib.suppress(Exception):
+                    recv_pipe.close()
+            if acquired:
+                self.limiter.release()
 
 
 provider_executor = ProviderExecutor()

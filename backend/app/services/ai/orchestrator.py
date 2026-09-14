@@ -54,24 +54,32 @@ class AIOrchestrator:
         elif provider is not None:
             target_provider = provider
         else:
-            if getattr(settings, "ai_provider_mode", "fixture") == "external":
+            mode = getattr(settings, "ai_provider_mode", "fixture")
+            p_type = getattr(settings, "ai_provider_type", "fixture")
+            if mode == "external":
+                if p_type == "fixture":
+                    raise ValueError(
+                        "Invalid configuration: ai_provider_mode='external' cannot use ai_provider_type='fixture'"
+                    )
                 target_provider = ProviderDescriptor(
                     provider_id="configured_external",
-                    provider_type=getattr(settings, "ai_provider_type", "openai_compatible"),
-                    credential_ref="AI_PROVIDER_API_KEY",
-                    base_url_ref="AI_PROVIDER_BASE_URL",
+                    provider_type="openai_compatible",
+                    config_profile="primary",
+                    base_url=getattr(settings, "ai_provider_base_url", "https://api.openai.com/v1"),
+                    model_bindings=dict(getattr(settings, "ai_model_mapping", {})),
                 )
             else:
                 target_provider = ProviderDescriptor(
                     provider_id="default_fixture",
                     provider_type="fixture",
+                    config_profile="fixture",
                 )
         self.provider: AIProvider | ProviderDescriptor = target_provider
 
         prov_name = (
-            self.provider.provider_type
+            self.provider.provider_id
             if isinstance(self.provider, ProviderDescriptor)
-            else getattr(self.provider, "provider", "fixture")
+            else getattr(self.provider, "provider_id", getattr(self.provider, "provider", "fixture"))
         )
         self.default_config = default_config or ModelConfig(provider=prov_name)
         self.agents = get_all_analytical_agents()
@@ -180,6 +188,11 @@ class AIOrchestrator:
         effective_config = config or self.default_config
         now_utc = dt.datetime.now(dt.UTC)
         as_of = ai_input.as_of
+        actual_provenance = (
+            self.provider.provider_id
+            if isinstance(self.provider, ProviderDescriptor)
+            else getattr(self.provider, "provider_id", getattr(self.provider, "provider", "fixture"))
+        )
 
         # ---------------------------------------------------------
         # PRE-FLIGHT GATE 1: KILL SWITCH
@@ -207,7 +220,7 @@ class AIOrchestrator:
                 risk_decision_id=ai_input.risk_context.decision_id,
                 risk_decision_status=ai_input.risk_context.decision,
                 kill_switch_state="ACTIVE",
-                provider_provenance=effective_config.provider,
+                provider_provenance=actual_provenance,
                 prompt_versions={},
                 generated_at=now_utc,
                 input_fingerprint=ai_input.input_fingerprint,
@@ -237,7 +250,7 @@ class AIOrchestrator:
                 risk_decision_id=ai_input.risk_context.decision_id,
                 risk_decision_status=ai_input.risk_context.decision,
                 kill_switch_state=ks_state,
-                provider_provenance=effective_config.provider,
+                provider_provenance=actual_provenance,
                 prompt_versions={},
                 generated_at=now_utc,
                 input_fingerprint=ai_input.input_fingerprint,
@@ -272,7 +285,7 @@ class AIOrchestrator:
                 risk_decision_id=ai_input.risk_context.decision_id,
                 risk_decision_status="BLOCKED",
                 kill_switch_state=ks_state,
-                provider_provenance=effective_config.provider,
+                provider_provenance=actual_provenance,
                 prompt_versions={},
                 generated_at=now_utc,
                 input_fingerprint=ai_input.input_fingerprint,
@@ -302,7 +315,7 @@ class AIOrchestrator:
                 risk_decision_id=ai_input.risk_context.decision_id,
                 risk_decision_status=risk_dec,
                 kill_switch_state=ks_state,
-                provider_provenance=effective_config.provider,
+                provider_provenance=actual_provenance,
                 prompt_versions={},
                 generated_at=now_utc,
                 input_fingerprint=ai_input.input_fingerprint,
@@ -332,7 +345,7 @@ class AIOrchestrator:
                 risk_decision_id=ai_input.risk_context.decision_id,
                 risk_decision_status=risk_dec,
                 kill_switch_state=ks_state,
-                provider_provenance=effective_config.provider,
+                provider_provenance=actual_provenance,
                 prompt_versions={},
                 generated_at=now_utc,
                 input_fingerprint=ai_input.input_fingerprint,
@@ -364,7 +377,7 @@ class AIOrchestrator:
                 risk_decision_id=ai_input.risk_context.decision_id,
                 risk_decision_status=risk_dec,
                 kill_switch_state=ks_state,
-                provider_provenance=effective_config.provider,
+                provider_provenance=actual_provenance,
                 prompt_versions={},
                 generated_at=now_utc,
                 input_fingerprint=ai_input.input_fingerprint,
@@ -397,7 +410,7 @@ class AIOrchestrator:
                 risk_decision_id=ai_input.risk_context.decision_id,
                 risk_decision_status=risk_dec,
                 kill_switch_state=ks_state,
-                provider_provenance=effective_config.provider,
+                provider_provenance=actual_provenance,
                 prompt_versions={},
                 generated_at=now_utc,
                 input_fingerprint=ai_input.input_fingerprint,
@@ -432,7 +445,7 @@ class AIOrchestrator:
                 risk_decision_id=ai_input.risk_context.decision_id,
                 risk_decision_status=risk_dec,
                 kill_switch_state=ks_state,
-                provider_provenance=effective_config.provider,
+                provider_provenance=actual_provenance,
                 prompt_versions={},
                 generated_at=now_utc,
                 input_fingerprint=ai_input.input_fingerprint,
@@ -456,7 +469,7 @@ class AIOrchestrator:
                     summary_th="ไม่มีบริบทข่าวที่มีแหล่งที่มาและเวลาอ้างอิงที่ตรวจสอบได้",
                     warnings_th=("AUTHORITATIVE_NEWS_UNAVAILABLE",),
                     missing_context_th=(ai_input.news_context.unavailable_reason or "News authority unavailable",),
-                    provider_provenance=effective_config.provider,
+                    provider_provenance=actual_provenance,
                     prompt_version=agent.prompt_id,
                     generated_at=dt.datetime.now(dt.UTC),
                     as_of=as_of,
@@ -475,7 +488,7 @@ class AIOrchestrator:
                     summary_th=f"การวิเคราะห์ของ {agent.agent_id} เกินกำหนดเวลา timeout ({timeout}s)",
                     warnings_th=(f"Hard timeout after {timeout}s",),
                     missing_context_th=(f"Agent timeout after {timeout}s",),
-                    provider_provenance=effective_config.provider,
+                    provider_provenance=actual_provenance,
                     prompt_version=agent.prompt_id,
                     generated_at=dt.datetime.now(dt.UTC),
                     as_of=as_of,
@@ -492,7 +505,7 @@ class AIOrchestrator:
                     summary_th="ระบบ AI ไม่สามารถประมวลผลได้เนื่องจากคิว Provider เต็ม (Capacity Exhausted)",
                     warnings_th=("PROVIDER_CAPACITY_EXHAUSTED", str(exc)),
                     missing_context_th=(str(exc),),
-                    provider_provenance=effective_config.provider,
+                    provider_provenance=actual_provenance,
                     prompt_version=agent.prompt_id,
                     generated_at=dt.datetime.now(dt.UTC),
                     as_of=as_of,
@@ -509,7 +522,7 @@ class AIOrchestrator:
                     summary_th="ระบบ AI ไม่สามารถประมวลผลได้เนื่องจากปัญหาการยืนยันตัวตน Provider (Auth Error)",
                     warnings_th=("PROVIDER_AUTH_ERROR", str(exc)),
                     missing_context_th=(str(exc),),
-                    provider_provenance=effective_config.provider,
+                    provider_provenance=actual_provenance,
                     prompt_version=agent.prompt_id,
                     generated_at=dt.datetime.now(dt.UTC),
                     as_of=as_of,
@@ -526,7 +539,7 @@ class AIOrchestrator:
                     summary_th=f"การวิเคราะห์ของ {agent.agent_id} เกิดข้อผิดพลาด: {exc}",
                     warnings_th=(str(exc),),
                     missing_context_th=(str(exc),),
-                    provider_provenance=effective_config.provider,
+                    provider_provenance=actual_provenance,
                     prompt_version=agent.prompt_id,
                     generated_at=dt.datetime.now(dt.UTC),
                     as_of=as_of,
@@ -570,7 +583,7 @@ class AIOrchestrator:
                 risk_decision_id=ai_input.risk_context.decision_id,
                 risk_decision_status=ai_input.risk_context.decision,
                 kill_switch_state=ks_state,
-                provider_provenance=effective_config.provider,
+                provider_provenance=actual_provenance,
                 prompt_versions={},
                 generated_at=now_utc,
                 input_fingerprint=ai_input.input_fingerprint,

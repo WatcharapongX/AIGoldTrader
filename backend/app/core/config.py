@@ -116,6 +116,10 @@ class Settings(BaseSettings):
                 raise ValueError("Unrestricted proxy trust is forbidden")
         except ValueError:
             raise ValueError("TRUSTED_PROXY_CIDRS must contain bounded IP networks") from None
+        if self.ai_provider_mode == "external" and self.ai_provider_type == "fixture":
+            raise ValueError(
+                "Invalid configuration: ai_provider_mode='external' cannot use ai_provider_type='fixture'"
+            )
         return self
 
     @field_validator("trading_mode")
@@ -176,3 +180,13 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def configure_ai_provider_runtime(settings: Settings) -> None:
+    """Wire application Settings to runtime AI Provider executor and limits."""
+    from app.services.ai.execution import provider_executor
+
+    provider_executor.configure_concurrency(
+        max_concurrent=settings.ai_max_concurrent_provider_calls,
+        queue_timeout_seconds=settings.ai_provider_queue_timeout_seconds,
+    )

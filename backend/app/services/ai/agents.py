@@ -91,8 +91,13 @@ class BaseAnalyticalAgent:
             "kill_switch": ai_input.kill_switch_context.model_dump(mode="json"),
             "provenance": ai_input.provenance.model_dump(mode="json"),
         }
-        structured_payload = build_structured_payload(trusted_context, context)
         system_prompt = get_prompt(self.prompt_id)
+        structured_payload = build_structured_payload(trusted_context, context)
+        actual_prov = (
+            provider.provider_id
+            if isinstance(provider, ProviderDescriptor)
+            else getattr(provider, "provider_id", getattr(provider, "provider", "fixture"))
+        )
 
         try:
             res = await analyze_with_controls(
@@ -108,7 +113,7 @@ class BaseAnalyticalAgent:
             # Enforce server-side authoritative fields that cannot be forged by model
             raw["agent_id"] = self.agent_id
             raw["agent_version"] = "ai-1.0.0"
-            raw["provider_provenance"] = config.provider
+            raw["provider_provenance"] = getattr(res, "provider_id", actual_prov)
             raw["prompt_version"] = self.prompt_id
             raw["generated_at"] = now_utc.isoformat()
             raw["as_of"] = ai_input.as_of.isoformat()
@@ -134,7 +139,7 @@ class BaseAnalyticalAgent:
                 conflicting_factors_th=(),
                 warnings_th=(str(exc),),
                 missing_context_th=(f"Agent failure: {exc}",),
-                provider_provenance=config.provider,
+                provider_provenance=actual_prov,
                 prompt_version=self.prompt_id,
                 generated_at=now_utc,
                 as_of=ai_input.as_of,
@@ -385,6 +390,11 @@ class MetaController:
         }
         analysis_fp = fingerprint(semantic_data)
 
+        actual_prov = (
+            provider.provider_id
+            if isinstance(provider, ProviderDescriptor)
+            else getattr(provider, "provider_id", getattr(provider, "provider", "fixture"))
+        )
         return AIAnalysisResult(
             analysis_id=ai_input.analysis_id or f"ai_{analysis_fp[:32]}",
             symbol=ai_input.symbol,
@@ -404,7 +414,7 @@ class MetaController:
             risk_decision_id=ai_input.risk_context.decision_id,
             risk_decision_status=ai_input.risk_context.decision,
             kill_switch_state=ai_input.kill_switch_context.state,
-            provider_provenance=config.provider,
+            provider_provenance=actual_prov,
             prompt_versions=prompt_versions,
             generated_at=now_utc,
             input_fingerprint=ai_input.input_fingerprint,

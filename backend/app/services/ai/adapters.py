@@ -1,6 +1,6 @@
 """Real LLM Provider adapters and worker-side ProviderFactory.
 
-Implements production-ready external model adapters (e.g. OpenAI-compatible Chat Completions)
+Implements production-ready external model adapters (OpenAI-compatible Chat Completions subset)
 constructed strictly worker-side to satisfy Windows multiprocessing picklability (P3-066).
 Zero credentials or vendor clients ever cross the parent-child spawn boundary.
 """
@@ -15,12 +15,14 @@ import httpx
 
 from app.core.masking import mask_secret_text
 from app.services.ai.provider import (
+    MAX_PROVIDER_HTTP_RESPONSE_BYTES,
     MAX_PROVIDER_OUTPUT_BYTES,
     AIProvider,
     FixtureAIProvider,
     ModelConfig,
     OutputBudgetExceeded,
     ProviderAuthError,
+    ProviderBudgetExceeded,
     ProviderDescriptor,
     ProviderInternalError,
     ProviderNetworkError,
@@ -40,11 +42,40 @@ DEFAULT_MODEL_MAPPING: dict[str, str] = {
 }
 
 
-class OpenAICompatibleProvider(AIProvider):
-    """External LLM adapter using the standard OpenAI-compatible Chat Completions API.
+class ProviderConfigResolver:
+    """Worker-side resolution of secrets from Settings or environment.
 
-    Constructed worker-side; supports OpenAI, Gemini OpenAI-compatibility endpoint,
-    DeepSeek, Groq, Ollama, vLLM, and any compliant REST server.
+    Resolves secrets exclusively inside the child worker process based on symbolic config profiles.
+    Never exposes raw secrets across IPC pipes or in ProviderDescriptors.
+    """
+
+    @classmethod
+    def resolve_secret(cls, config_profile: str) -> str:
+        if config_profile == "fixture":
+            return ""
+        if config_profile == "primary":
+            from app.core.config import get_settings
+
+            try:
+                settings = get_settings()
+                api_key = settings.ai_provider_api_key.strip()
+            except Exception:
+                api_key = ""
+            if not api_key:
+                api_key = os.environ.get("AI_PROVIDER_API_KEY", "").strip()
+            if not api_key:
+                raise ProviderAuthError("Configured external provider credential is unavailable")
+            return api_key
+        raise ProviderAuthError("Configured external provider credential is unavailable")
+
+
+class OpenAIChatCompletionsProvider(AIProvider):
+    """External LLM adapter using the standard OpenAI-compatible Chat Completions subset.
+
+    Requires:
+    - Chat Completions endpoint (POST /chat/completions)
+    - JSON response format support
+    - Valid usage telemetry object
     """
 
     def __init__(
@@ -53,11 +84,13 @@ class OpenAICompatibleProvider(AIProvider):
         base_url: str = "https://api.openai.com/v1",
         model_mapping: dict[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        provider_id: str = "configured_external",
     ):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model_mapping = dict(model_mapping or DEFAULT_MODEL_MAPPING)
         self.transport = transport
+        self.provider_id = provider_id
 
     async def analyze(
         self,
@@ -93,66 +126,94 @@ class OpenAICompatibleProvider(AIProvider):
         }
 
         t0 = time.perf_counter()
+        response_status: int = 0
+        chunks: list[bytes] = []
+        total_http_bytes: int = 0
+
         try:
             async with httpx.AsyncClient(
                 transport=self.transport,
                 timeout=httpx.Timeout(timeout),
             ) as client:
-                response = await client.post(url, headers=headers, json=body)
+                async with client.stream("POST", url, headers=headers, json=body) as response:
+                    response_status = response.status_code
+                    async for chunk in response.aiter_bytes():
+                        total_http_bytes += len(chunk)
+                        if total_http_bytes > MAX_PROVIDER_HTTP_RESPONSE_BYTES:
+                            raise ProviderBudgetExceeded(
+                                f"Provider HTTP response entity exceeded limit: "
+                                f"{total_http_bytes} > {MAX_PROVIDER_HTTP_RESPONSE_BYTES}"
+                            )
+                        chunks.append(chunk)
         except httpx.TimeoutException as exc:
             msg = mask_secret_text(f"Provider request timed out after {timeout}s: {exc}", [self.api_key])
             raise ProviderTimeoutError(msg) from exc
         except (httpx.ConnectError, httpx.NetworkError, httpx.ProtocolError) as exc:
             msg = mask_secret_text(f"Provider network error connecting to {self.base_url}: {exc}", [self.api_key])
             raise ProviderNetworkError(msg) from exc
+        except ProviderBudgetExceeded:
+            raise
         except Exception as exc:
             msg = mask_secret_text(f"Provider HTTP request failed: {exc}", [self.api_key])
             raise ProviderNetworkError(msg) from exc
 
         duration_ms = (time.perf_counter() - t0) * 1000
+        raw_body = b"".join(chunks)
+        body_text = raw_body.decode("utf-8", errors="replace")
 
         # Handle HTTP status codes
-        if response.status_code in (401, 403):
+        if response_status in (401, 403):
             msg = mask_secret_text(
-                f"Provider authentication failure (HTTP {response.status_code}): {response.text[:200]}",
+                f"Provider authentication failure (HTTP {response_status}): {body_text[:200]}",
                 [self.api_key],
             )
             raise ProviderAuthError(msg)
 
-        if response.status_code == 429:
+        if response_status == 429:
             msg = mask_secret_text(
-                f"Provider rate limit exceeded (HTTP 429): {response.text[:200]}",
+                f"Provider rate limit exceeded (HTTP 429): {body_text[:200]}",
                 [self.api_key],
             )
             raise ProviderRateLimitError(msg)
 
-        if 400 <= response.status_code < 500:
+        if 400 <= response_status < 500:
             msg = mask_secret_text(
-                f"Provider rejected request with HTTP {response.status_code}: {response.text[:200]}",
+                f"Provider rejected request with HTTP {response_status}: {body_text[:200]}",
                 [self.api_key],
             )
             raise ProviderRequestError(msg)
 
-        if response.status_code >= 500:
+        if response_status >= 500:
             msg = mask_secret_text(
-                f"Provider internal server error (HTTP {response.status_code}): {response.text[:200]}",
+                f"Provider internal server error (HTTP {response_status}): {body_text[:200]}",
                 [self.api_key],
             )
             raise ProviderNetworkError(msg)
 
         # Parse valid 200 response
         try:
-            resp_json = response.json()
+            resp_json = json.loads(body_text)
         except json.JSONDecodeError as exc:
             raise ProviderSchemaError(f"Provider returned malformed JSON: {exc}") from exc
 
+        if not isinstance(resp_json, dict):
+            raise ProviderSchemaError("Provider response is not a JSON object")
+
         choices = resp_json.get("choices")
-        if not choices or not isinstance(choices, list):
-            raise ProviderSchemaError("Provider response missing 'choices' array")
+        if not isinstance(choices, list) or len(choices) == 0:
+            raise ProviderSchemaError("Provider response missing or empty 'choices' list")
 
         first_choice = choices[0]
-        message = first_choice.get("message") or {}
-        content = message.get("content") or ""
+        if not isinstance(first_choice, dict):
+            raise ProviderSchemaError("Provider response choice item is not an object")
+
+        message = first_choice.get("message")
+        if not isinstance(message, dict):
+            raise ProviderSchemaError("Provider response missing 'message' object")
+
+        content = message.get("content")
+        if not isinstance(content, str):
+            raise ProviderSchemaError("Provider response missing 'content' string")
 
         # Enforce output byte limit before JSON parsing
         content_bytes = len(content.encode("utf-8"))
@@ -169,16 +230,42 @@ class OpenAICompatibleProvider(AIProvider):
         except json.JSONDecodeError as exc:
             raise ProviderSchemaError(f"Provider content failed JSON parsing: {exc}") from exc
 
-        # Extract and validate token usage
-        usage = resp_json.get("usage") or {}
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-        total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+        raw_payload_bytes = len(
+            json.dumps(raw_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode(
+                "utf-8"
+            )
+        )
+        if raw_payload_bytes > MAX_PROVIDER_OUTPUT_BYTES:
+            raise OutputBudgetExceeded(
+                f"Provider structured payload exceeded output budget: "
+                f"{raw_payload_bytes} > {MAX_PROVIDER_OUTPUT_BYTES}"
+            )
 
-        # Invariant: non-negative and arithmetic consistency
-        prompt_tokens = max(int(prompt_tokens), 0)
-        completion_tokens = max(int(completion_tokens), 0)
-        total_tokens = prompt_tokens + completion_tokens
+        # Extract and validate token usage strictly
+        usage = resp_json.get("usage")
+        if not isinstance(usage, dict):
+            raise ProviderSchemaError("Provider response missing required 'usage' object")
+
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            if field not in usage:
+                raise ProviderSchemaError(f"Provider usage object missing required field '{field}'")
+            val = usage[field]
+            if type(val) is not int:
+                raise ProviderSchemaError(
+                    f"Provider usage field '{field}' must be integer, got {type(val).__name__}"
+                )
+            if val < 0:
+                raise ProviderSchemaError(f"Provider usage field '{field}' must be non-negative, got {val}")
+
+        prompt_tokens = usage["prompt_tokens"]
+        completion_tokens = usage["completion_tokens"]
+        total_tokens = usage["total_tokens"]
+
+        if total_tokens != prompt_tokens + completion_tokens:
+            raise ProviderSchemaError(
+                f"Vendor token usage inconsistent: total_tokens ({total_tokens}) != "
+                f"prompt_tokens ({prompt_tokens}) + completion_tokens ({completion_tokens})"
+            )
 
         return ProviderResult(
             content=content,
@@ -187,8 +274,13 @@ class OpenAICompatibleProvider(AIProvider):
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             duration_ms=duration_ms,
+            provider_id=self.provider_id,
+            provider_type="openai_compatible",
             model_used=vendor_model,
         )
+
+
+OpenAICompatibleProvider = OpenAIChatCompletionsProvider
 
 
 class ProviderFactory:
@@ -219,31 +311,17 @@ class ProviderFactory:
             return FixtureAIProvider()
 
         if descriptor.provider_type == "openai_compatible":
-            # Resolve secret reference
-            cred_ref = descriptor.credential_ref or "AI_PROVIDER_API_KEY"
-            api_key = os.environ.get(cred_ref, "").strip()
-            if not api_key:
-                raise ProviderAuthError(
-                    f"AI Provider credential '{cred_ref}' is missing or empty in environment"
-                )
-
-            # Resolve base URL reference
-            base_url_ref = descriptor.base_url_ref or "AI_PROVIDER_BASE_URL"
-            base_url = os.environ.get(base_url_ref, "https://api.openai.com/v1").strip()
-
-            # Resolve model mapping
-            mapping = dict(DEFAULT_MODEL_MAPPING)
-            for alias in ("fast-advisory", "reasoning-advisory", "deep-analysis"):
-                env_key = f"AI_MODEL_{alias.upper().replace('-', '_')}"
-                if os.environ.get(env_key):
-                    mapping[alias] = os.environ[env_key]
+            api_key = ProviderConfigResolver.resolve_secret(descriptor.config_profile)
+            base_url = descriptor.base_url or "https://api.openai.com/v1"
+            mapping = dict(descriptor.model_bindings or DEFAULT_MODEL_MAPPING)
 
             transport = cls._custom_transports.get(descriptor.provider_id)
-            return OpenAICompatibleProvider(
+            return OpenAIChatCompletionsProvider(
                 api_key=api_key,
                 base_url=base_url,
                 model_mapping=mapping,
                 transport=transport,
+                provider_id=descriptor.provider_id,
             )
 
         raise ProviderInternalError(f"Unsupported provider_type: '{descriptor.provider_type}'")
