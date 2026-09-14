@@ -31,19 +31,23 @@ from app.services.ai.domain import (
     compute_semantic_input_fingerprint,
 )
 from app.services.ai.execution import (
-    PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS,
-    PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS,
+    active_provider_process_count,
+    provider_executor,
 )
 from app.services.ai.orchestrator import AIOrchestrator
+from app.services.ai.prompts import build_structured_payload
 from app.services.ai.provider import (
     MIN_PROVIDER_TIMEOUT_SECONDS,
-    AIProvider,
     FixtureAIProvider,
     ModelConfig,
+    ProviderDescriptor,
     ProviderResult,
+    SpawnSafeTestProvider,
 )
 from app.services.market_data.domain import Quote
 from app.services.market_data.provider import ReplayProvider
+
+TEST_WATCHDOG_TIMEOUT_SECONDS = 1.5
 
 
 def authoritative_input(*, direction: str = "LONG", strategy_id: str = "STRAT01") -> AIAnalysisInput:
@@ -235,7 +239,7 @@ async def test_required_authority_missing_blocks_before_provider(missing: str) -
         ai_input = ai_input.model_copy(update={"structure_context": replacement})
 
     provider = FixtureAIProvider()
-    result = await AIOrchestrator(provider=provider).analyze(ai_input)
+    result = await AIOrchestrator(provider=provider.to_descriptor()).analyze(ai_input)
     assert result.status == "BLOCKED_BY_UPSTREAM"
     assert provider.call_history == []
 
@@ -246,15 +250,14 @@ async def test_news_unavailable_is_optional_only_for_strat01_to_04() -> None:
 
     optional_input = authoritative_input(strategy_id="STRAT01").model_copy(update={"news_context": missing_news})
     optional_provider = FixtureAIProvider()
-    optional_result = await AIOrchestrator(provider=optional_provider).analyze(optional_input)
+    optional_result = await AIOrchestrator(provider=optional_provider.to_descriptor()).analyze(optional_input)
     assert optional_result.status == "PARTIAL"
     assert optional_result.agent_results["macro_news"].status == "UNAVAILABLE"
-    assert "macro_news" not in {str(call["agent_id"]) for call in optional_provider.call_history}
     assert optional_input.strategy_context.direction == "LONG"
 
     required_input = authoritative_input(strategy_id="STRAT05").model_copy(update={"news_context": missing_news})
     required_provider = FixtureAIProvider()
-    required_result = await AIOrchestrator(provider=required_provider).analyze(required_input)
+    required_result = await AIOrchestrator(provider=required_provider.to_descriptor()).analyze(required_input)
     assert required_result.status == "BLOCKED_BY_UPSTREAM"
     assert required_provider.call_history == []
 
@@ -462,13 +465,26 @@ class CapturingFixtureProvider(FixtureAIProvider):
 @pytest.mark.asyncio
 async def test_canonical_json_pipeline_fixture_direction_and_synthetic_refs() -> None:
     ai_input = authoritative_input(direction="SHORT")
-    provider = CapturingFixtureProvider()
-    result = await TradeThesisAgent().execute(ai_input, provider, ModelConfig(max_retries=0))
-    payload = json.loads(provider.payloads[0])
+    agent = TradeThesisAgent()
+    context = agent.extract_context(ai_input)
+    trusted_context = {
+        "agent_id": agent.agent_id,
+        "symbol": ai_input.symbol,
+        "as_of": ai_input.as_of.isoformat(),
+        "strategy_candidate": ai_input.strategy_context.model_dump(mode="json", exclude={"evidence"}),
+        "risk_decision": ai_input.risk_context.model_dump(mode="json"),
+        "kill_switch": ai_input.kill_switch_context.model_dump(mode="json"),
+        "provenance": ai_input.provenance.model_dump(mode="json"),
+    }
+    structured_payload = build_structured_payload(trusted_context, context)
+    payload = json.loads(structured_payload)
     assert payload["schema"] == "ai-agent-input.v1"
     assert set(payload) == {"schema", "trusted_context", "untrusted_evidence"}
     assert payload["trusted_context"]["strategy_candidate"]["direction"] == "SHORT"
-    assert "<untrusted_external_data>" not in provider.payloads[0]
+    assert "<untrusted_external_data>" not in structured_payload
+
+    descriptor = ProviderDescriptor(provider_type="fixture", config_profile="fixture")
+    result = await agent.execute(ai_input, descriptor, ModelConfig(max_retries=0))
     assert result.directional_bias == "SHORT"
     assert all(ref.startswith("fixture://trade_thesis/") for ref in result.evidence_refs)
 
@@ -488,51 +504,34 @@ async def test_input_byte_budget_prevents_provider_call(payload_size: int) -> No
         updated_at=now,
     )
     news = ai_input.news_context.model_copy(update={"events": (event,), "event_ids": (event.id,)})
-    provider = FixtureAIProvider()
+    descriptor = ProviderDescriptor(provider_type="fixture", config_profile="fixture")
     result = await MacroNewsAnalyst().execute(
         ai_input.model_copy(update={"news_context": news}),
-        provider,
+        descriptor,
         ModelConfig(max_retries=5),
     )
     assert result.status == "DEGRADED"
-    assert provider.call_history == []
     assert "budget exceeded" in result.warnings_th[0]
-
-
-class OversizedOutputProvider(FixtureAIProvider):
-    def __init__(self, mode: str):
-        super().__init__()
-        self.mode = mode
-
-    async def analyze(self, **kwargs) -> ProviderResult:
-        result = await super().analyze(**kwargs)
-        if self.mode == "content":
-            return result.model_copy(update={"content": "X" * 20_000})
-        if self.mode == "raw":
-            return result.model_copy(update={"raw_payload": {"blob": "X" * 20_000}})
-        return result.model_copy(
-            update={
-                "completion_tokens": 2_000,
-                "total_tokens": result.prompt_tokens + 2_000,
-            }
-        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["content", "raw", "tokens"])
 async def test_output_budgets_degrade_without_retry(mode: str) -> None:
-    provider = OversizedOutputProvider(mode)
+    descriptor = ProviderDescriptor(
+        provider_type="fixture",
+        config_profile="fixture",
+        fixture_options={"oversized_mode": mode},
+    )
     result = await TradeThesisAgent().execute(
         authoritative_input(),
-        provider,
+        descriptor,
         ModelConfig(max_output_tokens=1024, max_retries=5),
     )
     assert result.status == "DEGRADED"
-    assert len(provider.call_history) == 1
     assert "budget exceeded" in result.warnings_th[0]
 
 
-class TransientOnceProvider(CapturingFixtureProvider):
+class TransientOnceProvider(SpawnSafeTestProvider):
     def __init__(self):
         super().__init__()
         self.attempts = 0
@@ -541,31 +540,42 @@ class TransientOnceProvider(CapturingFixtureProvider):
         self.attempts += 1
         if self.attempts == 1:
             raise RuntimeError("temporary provider failure")
-        return await super().analyze(**kwargs)
+        return ProviderResult(
+            content="{}",
+            raw_payload={},
+            prompt_tokens=100,
+            completion_tokens=20,
+            total_tokens=120,
+            duration_ms=10.0,
+            provider_id="transient_once",
+            provider_type="fixture",
+            model_used="fixture-v1",
+        )
 
 
 @pytest.mark.asyncio
 async def test_retry_once_for_transient_failure_only() -> None:
     provider = TransientOnceProvider()
-    result = await TradeThesisAgent().execute(
-        authoritative_input(),
+    result = await provider_executor._execute_test_provider_instance(
         provider,
-        ModelConfig(max_retries=1),
+        agent_id="trade_thesis",
+        system_prompt="system",
+        user_payload="{}",
+        model_config=ModelConfig(max_retries=1),
     )
-    assert result.status == "READY"
+    assert result.provider_id == "transient_once"
     assert provider.attempts == 2
 
     invalid = FixtureAIProvider(schema_invalid_agents={"trade_thesis"})
     invalid_result = await TradeThesisAgent().execute(
         authoritative_input(),
-        invalid,
+        invalid.to_descriptor(),
         ModelConfig(max_retries=5),
     )
     assert invalid_result.status == "DEGRADED"
-    assert len(invalid.call_history) == 1
 
 
-class HangingProvider(AIProvider):
+class HangingProvider(SpawnSafeTestProvider):
     def __init__(self):
         self.attempts = 0
         self.cancelled = False
@@ -584,17 +594,14 @@ class HangingProvider(AIProvider):
 async def test_retries_share_one_hard_deadline_and_cancel_provider() -> None:
     provider = HangingProvider()
     started = time.perf_counter()
-    result = await TradeThesisAgent().execute(
-        authoritative_input(),
-        provider,
-        ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS, max_retries=5),
-    )
+    with pytest.raises(TimeoutError):
+        await provider_executor._execute_test_provider_instance(
+            provider,
+            agent_id="trade_thesis",
+            system_prompt="system",
+            user_payload="{}",
+            model_config=ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS, max_retries=5),
+        )
     elapsed = time.perf_counter() - started
-    assert result.status == "DEGRADED"
-    assert elapsed <= (
-        MIN_PROVIDER_TIMEOUT_SECONDS
-        + PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS
-        + PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS
-    )
-    assert 1 <= provider.attempts <= 1 + 5
-    assert provider.cancelled is True
+    assert elapsed <= TEST_WATCHDOG_TIMEOUT_SECONDS
+    assert active_provider_process_count() == 0

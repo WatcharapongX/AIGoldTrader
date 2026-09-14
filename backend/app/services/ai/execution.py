@@ -17,8 +17,8 @@ from typing import Any
 from app.core.masking import mask_secret_text
 
 _POLL_SECONDS = 0.005
-_TERMINATE_GRACE_SECONDS = 0.03
-_KILL_GRACE_SECONDS = 0.03
+_TERMINATE_GRACE_SECONDS = 0.05
+_KILL_GRACE_SECONDS = 0.25
 PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS = _TERMINATE_GRACE_SECONDS + _KILL_GRACE_SECONDS
 PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS = 0.05
 # Windows is not a real-time operating system; Python asyncio cannot guarantee an absolute
@@ -143,32 +143,36 @@ async def _worker_execute(provider: Any, request: dict[str, Any], pipe: Connecti
 def _provider_worker_entry(target: Any, request: dict[str, Any], pipe: Connection) -> None:
     """Spawn-safe module-level worker entry point; never starts another process.
 
-    If target is a descriptor or plain wire DTO, reconstruct and defensively revalidate
+    If target is a descriptor wire DTO, reconstruct and defensively revalidate
     descriptor worker-side before creating provider (P1-201 / P1-202).
+    If target is a test_provider, strictly verify it is a SpawnSafeTestProvider and
+    reject any real external providers or secrets.
     """
-    from pydantic import BaseModel
-
-    from app.services.ai.adapters import ProviderFactory
-    from app.services.ai.provider import ProviderDescriptor
+    from app.services.ai.adapters import OpenAIChatCompletionsProvider, ProviderFactory
+    from app.services.ai.provider import (
+        ProviderDescriptor,
+        ProviderRequestError,
+        SpawnSafeTestProvider,
+    )
 
     provider: Any = None
     try:
-        descriptor_data: dict[str, Any] | None = None
         if isinstance(target, dict) and target.get("kind") == "descriptor":
             descriptor_data = target.get("payload")
-        elif isinstance(target, ProviderDescriptor):
-            descriptor_data = target.model_dump(mode="json")
-        elif isinstance(target, BaseModel):
-            descriptor_data = target.model_dump(mode="json")
-        elif isinstance(target, dict) and "instance" not in target:
-            descriptor_data = target
-
-        if descriptor_data is not None:
-            # Revalidate plain wire data through ProviderDescriptor.model_validate
             descriptor = ProviderDescriptor.model_validate(descriptor_data)
             provider = ProviderFactory.create_provider(descriptor)
+        elif isinstance(target, dict) and target.get("kind") == "test_provider":
+            test_inst = target.get("instance")
+            if (
+                not isinstance(test_inst, SpawnSafeTestProvider)
+                or isinstance(test_inst, OpenAIChatCompletionsProvider)
+                or getattr(test_inst, "api_key", None) is not None
+                or getattr(test_inst, "base_url", None) is not None
+            ):
+                raise ProviderRequestError("Unsafe provider rejected worker-side")
+            provider = test_inst
         else:
-            provider = target.get("instance") if isinstance(target, dict) else target
+            raise ProviderRequestError(f"Worker entry rejected invalid target kind: {type(target)}")
 
         result = asyncio.run(_worker_execute(provider, request, pipe))
         pipe.send(("result", result, _provider_state(provider)))
@@ -183,12 +187,18 @@ def _provider_worker_entry(target: Any, request: dict[str, Any], pipe: Connectio
 
 
 def _terminate_worker(process: BaseProcess) -> None:
+    from app.services.ai.provider import ProviderWorkerTerminationError
+
     if process.is_alive():
         process.terminate()
         process.join(_TERMINATE_GRACE_SECONDS)
     if process.is_alive():
         process.kill()
         process.join(_KILL_GRACE_SECONDS)
+    if process.is_alive():
+        raise ProviderWorkerTerminationError(
+            f"Provider worker process {process.pid} could not be terminated after SIGTERM and SIGKILL"
+        )
 
 
 def _merge_observed_state(provider: Any, state: dict[str, int | bool]) -> None:
@@ -264,6 +274,74 @@ class ProviderExecutor:
         model_config: Any,
         timeout_seconds: float | None = None,
     ) -> Any:
+        from app.services.ai.provider import ProviderDescriptor, ProviderRequestError
+
+        if not isinstance(provider, ProviderDescriptor):
+            raise ProviderRequestError(
+                f"ProviderExecutor.execute requires ProviderDescriptor; "
+                f"live {type(provider).__name__} instances are prohibited in production execution"
+            )
+
+        wire_target = {"kind": "descriptor", "payload": provider.model_dump(mode="json")}
+        return await self._execute_internal(
+            target=wire_target,
+            provider_for_state=provider,
+            agent_id=agent_id,
+            system_prompt=system_prompt,
+            user_payload=user_payload,
+            model_config=model_config,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def _execute_test_provider_instance(
+        self,
+        provider: Any,
+        *,
+        agent_id: str,
+        system_prompt: str,
+        user_payload: str,
+        model_config: Any,
+        timeout_seconds: float | None = None,
+    ) -> Any:
+        """Internal test-only execution method for deterministic SpawnSafeTestProvider instances."""
+        from app.services.ai.adapters import OpenAIChatCompletionsProvider
+        from app.services.ai.provider import ProviderRequestError, SpawnSafeTestProvider
+
+        if (
+            isinstance(provider, OpenAIChatCompletionsProvider)
+            or getattr(provider, "api_key", None) is not None
+            or getattr(provider, "base_url", None) is not None
+        ):
+            raise ProviderRequestError(
+                f"External provider {type(provider).__name__} is strictly forbidden from test instance execution"
+            )
+        if not isinstance(provider, SpawnSafeTestProvider):
+            raise ProviderRequestError(
+                f"_execute_test_provider_instance requires SpawnSafeTestProvider; received {type(provider).__name__}"
+            )
+
+        wire_target = {"kind": "test_provider", "instance": provider}
+        return await self._execute_internal(
+            target=wire_target,
+            provider_for_state=provider,
+            agent_id=agent_id,
+            system_prompt=system_prompt,
+            user_payload=user_payload,
+            model_config=model_config,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def _execute_internal(
+        self,
+        target: dict[str, Any],
+        provider_for_state: Any,
+        *,
+        agent_id: str,
+        system_prompt: str,
+        user_payload: str,
+        model_config: Any,
+        timeout_seconds: float | None = None,
+    ) -> Any:
         from app.services.ai.provider import (
             MAX_INPUT_BYTES_PER_AGENT,
             MAX_PROVIDER_OUTPUT_BYTES,
@@ -280,6 +358,7 @@ class ProviderExecutor:
             ProviderResult,
             ProviderSchemaError,
             ProviderTimeoutError,
+            ProviderWorkerTerminationError,
         )
 
         input_bytes = len(system_prompt.encode("utf-8")) + len(user_payload.encode("utf-8"))
@@ -312,33 +391,22 @@ class ProviderExecutor:
         process: BaseProcess | None = None
         seen_attempts: set[int] = set()
         message: tuple[Any, ...] | None = None
-
-        from pydantic import BaseModel
-
-        from app.services.ai.provider import ProviderDescriptor
-
-        wire_target: dict[str, Any]
-        if isinstance(provider, (ProviderDescriptor, BaseModel)):
-            wire_target = {"kind": "descriptor", "payload": provider.model_dump(mode="json")}
-        elif isinstance(provider, dict):
-            wire_target = {"kind": "descriptor", "payload": dict(provider)}
-        else:
-            wire_target = {"kind": "provider", "instance": provider}
+        termination_failure: ProviderWorkerTerminationError | None = None
 
         try:
             context = mp.get_context("spawn")
             recv_pipe, send_pipe = context.Pipe(duplex=False)
             process = context.Process(
-                target=_provider_worker_entry, args=(wire_target, request, send_pipe), daemon=True
+                target=_provider_worker_entry, args=(target, request, send_pipe), daemon=True
             )
             if loop.time() >= deadline:
                 raise ProviderTimeoutError(f"Provider execution timeout during process setup for {agent_id}")
             process.start()
             _ACTIVE_PROCESSES.add(process)
-            attempts = getattr(provider, "attempts", None)
+            attempts = getattr(provider_for_state, "attempts", None)
             if isinstance(attempts, int):
                 try:
-                    provider.attempts = max(attempts, 1)
+                    provider_for_state.attempts = max(attempts, 1)
                 except (AttributeError, ValueError):
                     pass
             send_pipe.close()
@@ -350,7 +418,7 @@ class ProviderExecutor:
                     while recv_pipe.poll():
                         candidate = recv_pipe.recv()
                         if candidate[0] == "attempt":
-                            _record_attempt(provider, request, int(candidate[1]), seen_attempts)
+                            _record_attempt(provider_for_state, request, int(candidate[1]), seen_attempts)
                         else:
                             message = candidate
                             break
@@ -363,10 +431,14 @@ class ProviderExecutor:
                     break
                 if loop.time() >= deadline:
                     if process is not None and process.is_alive():
-                        _terminate_worker(process)
-                    if hasattr(provider, "cancelled"):
                         try:
-                            provider.cancelled = True
+                            _terminate_worker(process)
+                        except ProviderWorkerTerminationError as exc:
+                            termination_failure = exc
+                            raise
+                    if hasattr(provider_for_state, "cancelled"):
+                        try:
+                            provider_for_state.cancelled = True
                         except (AttributeError, ValueError):
                             pass
                     raise ProviderTimeoutError(f"Provider hard timeout: deadline exhausted for {agent_id}")
@@ -375,7 +447,7 @@ class ProviderExecutor:
                         while recv_pipe.poll():
                             candidate = recv_pipe.recv()
                             if candidate[0] == "attempt":
-                                _record_attempt(provider, request, int(candidate[1]), seen_attempts)
+                                _record_attempt(provider_for_state, request, int(candidate[1]), seen_attempts)
                             else:
                                 message = candidate
                     except (EOFError, BrokenPipeError, OSError):
@@ -388,13 +460,17 @@ class ProviderExecutor:
             if process is not None:
                 process.join(_TERMINATE_GRACE_SECONDS)
                 if process.is_alive():
-                    _terminate_worker(process)
+                    try:
+                        _terminate_worker(process)
+                    except ProviderWorkerTerminationError as exc:
+                        termination_failure = exc
+                        raise
 
             if message is None:
                 raise ProviderInternalError(f"Provider worker returned empty result for {agent_id}")
 
             if message[0] == "error":
-                _merge_observed_state(provider, message[3])
+                _merge_observed_state(provider_for_state, message[3])
                 error_name, error_message = str(message[1]), str(message[2])
                 if error_name in {"TimeoutError", "CancelledError", "ProviderTimeoutError"}:
                     raise ProviderTimeoutError(error_message)
@@ -423,7 +499,7 @@ class ProviderExecutor:
                 raise ValueError(error_message)
 
             result = ProviderResult.model_validate(message[1])
-            _merge_observed_state(provider, message[2])
+            _merge_observed_state(provider_for_state, message[2])
             content_bytes = len(result.content.encode("utf-8"))
             import json
 
@@ -464,16 +540,31 @@ class ProviderExecutor:
             return result
         except asyncio.CancelledError:
             if process is not None and process.is_alive():
-                _terminate_worker(process)
+                try:
+                    _terminate_worker(process)
+                except ProviderWorkerTerminationError as exc:
+                    termination_failure = exc
             raise
         finally:
             if process is not None:
+                try:
+                    if process.is_alive():
+                        _terminate_worker(process)
+                except ProviderWorkerTerminationError as exc:
+                    termination_failure = exc
+
                 if process.is_alive():
-                    _terminate_worker(process)
-                _ACTIVE_PROCESSES.discard(process)
-                if process.pid is not None and not process.is_alive():
-                    with contextlib.suppress(Exception):
-                        process.close()
+                    # DO NOT discard live process from tracking
+                    if termination_failure is None:
+                        termination_failure = ProviderWorkerTerminationError(
+                            f"Provider worker process {process.pid} is still alive after cleanup"
+                        )
+                else:
+                    _ACTIVE_PROCESSES.discard(process)
+                    if process.pid is not None:
+                        with contextlib.suppress(Exception):
+                            process.close()
+
             if send_pipe is not None:
                 with contextlib.suppress(Exception):
                     send_pipe.close()
@@ -482,6 +573,9 @@ class ProviderExecutor:
                     recv_pipe.close()
             if acquired:
                 self.limiter.release()
+
+            if termination_failure is not None:
+                raise termination_failure
 
 
 provider_executor = ProviderExecutor()

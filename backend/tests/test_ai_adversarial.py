@@ -206,7 +206,7 @@ async def test_01_kill_switch_active_blocks_with_zero_calls(base_ai_input):
         update={"kill_switch_context": base_ai_input.kill_switch_context.model_copy(update={"state": "ACTIVE"})}
     )
     provider = FixtureAIProvider()
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(ks_input)
     assert res.status == "BLOCKED_BY_KILL_SWITCH"
@@ -227,7 +227,7 @@ async def test_02_risk_decision_blocked_blocks_with_zero_calls(base_ai_input):
         }
     )
     provider = FixtureAIProvider()
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(risk_input)
     assert res.status == "BLOCKED_BY_RISK"
@@ -241,7 +241,7 @@ async def test_02_risk_decision_blocked_blocks_with_zero_calls(base_ai_input):
 @pytest.mark.asyncio
 async def test_03_risk_approved_valid_data_executes_all_agents(base_ai_input):
     provider = FixtureAIProvider()
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.status == "READY"
@@ -257,7 +257,7 @@ async def test_04_market_stale_returns_stale_status(base_ai_input):
         update={"quote_context": base_ai_input.quote_context.model_copy(update={"is_stale": True})}
     )
     provider = FixtureAIProvider()
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(stale_input)
     assert res.status == "STALE"
@@ -269,7 +269,7 @@ async def test_04_market_stale_returns_stale_status(base_ai_input):
 @pytest.mark.asyncio
 async def test_05_one_agent_fails_results_in_partial_status(base_ai_input):
     provider = FixtureAIProvider(fail_agents={"market_context"})
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.status == "PARTIAL"
@@ -282,7 +282,7 @@ async def test_05_one_agent_fails_results_in_partial_status(base_ai_input):
 @pytest.mark.asyncio
 async def test_06_three_agents_fail_results_in_degraded_status(base_ai_input):
     provider = FixtureAIProvider(fail_agents={"market_context", "smc_ict", "macro_news"})
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.status == "DEGRADED"
@@ -293,7 +293,7 @@ async def test_06_three_agents_fail_results_in_degraded_status(base_ai_input):
 @pytest.mark.asyncio
 async def test_07_all_agents_fail_results_in_unavailable_status(base_ai_input):
     provider = FixtureAIProvider(fail_agents=set(ANALYTICAL_AGENT_IDS))
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.status == "UNAVAILABLE"
@@ -304,7 +304,7 @@ async def test_07_all_agents_fail_results_in_unavailable_status(base_ai_input):
 @pytest.mark.asyncio
 async def test_08_meta_controller_fails_handled_safely(base_ai_input):
     provider = FixtureAIProvider(fail_agents={"meta_controller"})
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.status in ("DEGRADED", "UNAVAILABLE"), "Meta failure must NEVER return READY"
@@ -315,7 +315,7 @@ async def test_08_meta_controller_fails_handled_safely(base_ai_input):
 @pytest.mark.asyncio
 async def test_09_malformed_provider_json_degrades_agent(base_ai_input):
     provider = FixtureAIProvider(malformed_json_agents={"strategy_critic"})
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.agent_results["strategy_critic"].status == "DEGRADED"
@@ -325,7 +325,7 @@ async def test_09_malformed_provider_json_degrades_agent(base_ai_input):
 @pytest.mark.asyncio
 async def test_10_schema_invalid_provider_output_degrades_agent(base_ai_input):
     provider = FixtureAIProvider(schema_invalid_agents={"risk_interpreter"})
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.agent_results["risk_interpreter"].status == "DEGRADED"
@@ -499,7 +499,7 @@ async def test_19_agent_disagreement_results_in_conflicting_agreement(base_ai_in
         "trade_thesis": "SHORT",
     }
     provider = FixtureAIProvider(agent_biases=biases)
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.agent_agreement == "CONFLICTING"
@@ -509,7 +509,7 @@ async def test_19_agent_disagreement_results_in_conflicting_agreement(base_ai_in
 @pytest.mark.asyncio
 async def test_20_deterministic_fingerprint_repeat(base_ai_input):
     provider = FixtureAIProvider()
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res1 = await orchestrator.analyze(base_ai_input)
     res2 = await orchestrator.analyze(base_ai_input)
@@ -522,7 +522,7 @@ async def test_20_deterministic_fingerprint_repeat(base_ai_input):
 async def test_21_provider_timeout_handled_safely(base_ai_input):
     provider = FixtureAIProvider(timeout_agents={"trade_thesis"})
     config = ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS)
-    orchestrator = AIOrchestrator(provider=provider, default_config=config)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor(), default_config=config)
 
     res = await orchestrator.analyze(base_ai_input, config=config)
     assert res.agent_results["trade_thesis"].status == "DEGRADED"
@@ -533,7 +533,7 @@ async def test_21_provider_timeout_handled_safely(base_ai_input):
 @pytest.mark.asyncio
 async def test_22_token_budget_exceeded_handled_safely(base_ai_input):
     provider = FixtureAIProvider(token_budget_exceeded_agents={"smc_ict"})
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.agent_results["smc_ict"].status == "DEGRADED"
@@ -573,7 +573,8 @@ async def test_23_ai_service_down_does_not_affect_risk_decision(base_ai_input):
         execution_blocked="NO_EXECUTION_ANALYSIS_ONLY",
     )
 
-    broken_orchestrator = AIOrchestrator(provider=FixtureAIProvider(fail_agents=set(ANALYTICAL_AGENT_IDS)))
+    desc = FixtureAIProvider(fail_agents=set(ANALYTICAL_AGENT_IDS)).to_descriptor()
+    broken_orchestrator = AIOrchestrator(provider=desc)
     res = await broken_orchestrator.analyze(base_ai_input)
     assert res.status == "UNAVAILABLE"
 
@@ -588,7 +589,7 @@ async def test_24_upstream_strategy_and_tradeplan_immutable(base_ai_input):
     before_strat = base_ai_input.strategy_context.model_dump()
     before_plan = base_ai_input.trade_plan_context.model_dump()
 
-    orchestrator = AIOrchestrator(provider=FixtureAIProvider())
+    orchestrator = AIOrchestrator(provider=FixtureAIProvider().to_descriptor())
     res = await orchestrator.analyze(base_ai_input)
 
     assert res.status == "READY"
@@ -600,7 +601,7 @@ async def test_24_upstream_strategy_and_tradeplan_immutable(base_ai_input):
 @pytest.mark.asyncio
 async def test_25_adversarial_injection_hook_fails_validation(base_ai_input):
     provider = FixtureAIProvider(injection_agents={"trade_thesis"})
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.agent_results["trade_thesis"].status == "DEGRADED"
@@ -613,7 +614,7 @@ async def test_26_kill_switch_unknown_blocks_with_blocked_by_upstream(base_ai_in
         update={"kill_switch_context": base_ai_input.kill_switch_context.model_copy(update={"state": "UNKNOWN"})}
     )
     provider = FixtureAIProvider()
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(ks_input)
     assert res.status == "BLOCKED_BY_UPSTREAM"
@@ -627,7 +628,7 @@ async def test_27_risk_decision_reservation_inactive_blocks(base_ai_input):
         update={"risk_context": base_ai_input.risk_context.model_copy(update={"reservation_status": "INACTIVE"})}
     )
     provider = FixtureAIProvider()
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(risk_input)
     assert res.status == "BLOCKED_BY_UPSTREAM"
@@ -641,7 +642,7 @@ async def test_28_risk_decision_not_evaluated_blocks(base_ai_input):
         update={"risk_context": base_ai_input.risk_context.model_copy(update={"decision": "RISK_NOT_EVALUATED"})}
     )
     provider = FixtureAIProvider()
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(risk_input)
     assert res.status == "BLOCKED_BY_RISK"
@@ -653,7 +654,7 @@ async def test_28_risk_decision_not_evaluated_blocks(base_ai_input):
 async def test_29_hanging_provider_hard_timeout_and_cancellation(base_ai_input):
     provider = FixtureAIProvider(hanging_agents={"macro_news"})
     config = ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS)
-    orchestrator = AIOrchestrator(provider=provider, default_config=config)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor(), default_config=config)
 
     res = await orchestrator.analyze(base_ai_input, config=config)
     assert res.agent_results["macro_news"].status == "DEGRADED"
@@ -664,7 +665,7 @@ async def test_29_hanging_provider_hard_timeout_and_cancellation(base_ai_input):
 @pytest.mark.asyncio
 async def test_30_meta_failure_never_returns_ready(base_ai_input):
     provider = FixtureAIProvider(fail_agents={"meta_controller"})
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.status != "READY"

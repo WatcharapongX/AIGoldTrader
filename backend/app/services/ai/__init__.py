@@ -72,6 +72,8 @@ from app.services.ai.provider import (
     ProviderResult,
     ProviderSchemaError,
     ProviderTimeoutError,
+    ProviderWorkerTerminationError,
+    SpawnSafeTestProvider,
     analyze_with_controls,
 )
 
@@ -132,8 +134,10 @@ __all__ = [
     "ProviderResult",
     "ProviderSchemaError",
     "ProviderTimeoutError",
+    "ProviderWorkerTerminationError",
     "RiskInterpreter",
     "SMCICTAnalyst",
+    "SpawnSafeTestProvider",
     "StrategyCritic",
     "TokenUsage",
     "TradeThesisAgent",

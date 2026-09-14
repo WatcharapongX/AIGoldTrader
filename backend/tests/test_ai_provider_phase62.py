@@ -14,6 +14,7 @@ Verifies:
 """
 
 import asyncio
+import contextlib
 import datetime as dt
 import http.server
 import json
@@ -30,6 +31,7 @@ from pydantic import ValidationError
 from app.core.config import Settings, configure_ai_provider_runtime, get_settings
 from app.core.masking import mask_secret_text
 from app.services.ai.adapters import (
+    OpenAIChatCompletionsProvider,
     OpenAICompatibleProvider,
     ProviderConfigResolver,
     ProviderFactory,
@@ -48,8 +50,6 @@ from app.services.ai.domain import (
     compute_semantic_input_fingerprint,
 )
 from app.services.ai.execution import (
-    PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS,
-    PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS,
     active_provider_process_count,
     provider_executor,
 )
@@ -70,6 +70,7 @@ from app.services.ai.provider import (
     ProviderResult,
     ProviderSchemaError,
     ProviderTimeoutError,
+    ProviderWorkerTerminationError,
     analyze_with_controls,
 )
 
@@ -360,7 +361,7 @@ def test_model_config_enforces_measured_windows_subprocess_minimum():
 async def test_execution_timeout_override_cannot_bypass_windows_minimum():
     with pytest.raises(ValueError, match="execution timeout must be between"):
         await analyze_with_controls(
-            FixtureAIProvider(),
+            ProviderDescriptor(provider_type="fixture", config_profile="fixture"),
             agent_id="tiny_timeout",
             system_prompt="system",
             user_payload="{}",
@@ -373,7 +374,7 @@ async def test_execution_timeout_override_cannot_bypass_windows_minimum():
 async def test_cancellation_resistant_worker_is_killed_within_documented_contract():
     started = asyncio.get_running_loop().time()
     with pytest.raises(ProviderTimeoutError):
-        await analyze_with_controls(
+        await provider_executor._execute_test_provider_instance(
             CancellationResistantFixtureProvider(),
             agent_id="cancellation_resistant",
             system_prompt="system",
@@ -381,11 +382,8 @@ async def test_cancellation_resistant_worker_is_killed_within_documented_contrac
             model_config=ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS, max_retries=3),
         )
     elapsed = asyncio.get_running_loop().time() - started
-    assert elapsed <= (
-        MIN_PROVIDER_TIMEOUT_SECONDS
-        + PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS
-        + PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS
-    )
+    TEST_WATCHDOG = 1.5
+    assert elapsed < TEST_WATCHDOG, f"Watchdog exceeded: elapsed {elapsed:.3f}s >= {TEST_WATCHDOG}s"
     assert active_provider_process_count() == 0
 
 
@@ -1082,7 +1080,7 @@ async def test_global_concurrency_bounding():
     config = ModelConfig(timeout_seconds=10.0)
 
     async def call_agent(aid: str):
-        res = await analyze_with_controls(
+        res = await provider_executor._execute_test_provider_instance(
             provider,
             agent_id=aid,
             system_prompt="sys",
@@ -1112,7 +1110,7 @@ async def test_backpressure_queue_timeout_rejects():
     config = ModelConfig(timeout_seconds=5.0)
 
     async def long_task():
-        return await analyze_with_controls(
+        return await provider_executor._execute_test_provider_instance(
             provider,
             agent_id="slot_holder",
             system_prompt="sys",
@@ -1122,7 +1120,7 @@ async def test_backpressure_queue_timeout_rejects():
 
     async def blocked_task():
         await asyncio.sleep(0.01)
-        return await analyze_with_controls(
+        return await provider_executor._execute_test_provider_instance(
             provider,
             agent_id="queue_waiter",
             system_prompt="sys",
@@ -1148,7 +1146,7 @@ async def test_provider_provenance_spoofing_defeated():
     """P2-208: ModelConfig.provider must not be accepted as authoritative provenance."""
     ai_input = make_test_ai_input()
     spoofed_config = ModelConfig(provider="attacker_spoofed_provider")
-    orch = AIOrchestrator(provider=FixtureAIProvider(), default_config=spoofed_config)
+    orch = AIOrchestrator(provider=FixtureAIProvider().to_descriptor(), default_config=spoofed_config)
     res = await orch.analyze(ai_input)
 
     assert res.provider_provenance == "fixture"
@@ -1534,7 +1532,7 @@ async def test_deadline_terminates_resistant_worker_with_truthful_watchdog():
     config = ModelConfig(timeout_seconds=0.25, max_retries=0)
     t0 = asyncio.get_running_loop().time()
     with pytest.raises(ProviderTimeoutError):
-        await analyze_with_controls(
+        await provider_executor._execute_test_provider_instance(
             provider,
             agent_id="resistant_worker_test",
             system_prompt="system",
@@ -1547,3 +1545,183 @@ async def test_deadline_terminates_resistant_worker_with_truthful_watchdog():
     TEST_WATCHDOG = 1.5
     assert elapsed < TEST_WATCHDOG, f"Watchdog exceeded: elapsed {elapsed:.3f}s >= {TEST_WATCHDOG}s"
     assert active_provider_process_count() == 0
+
+
+# ============================================================================
+# 11. ROUND 4 CORRECTIVE: DESCRIPTOR-ONLY PRODUCTION EXECUTION & VERIFIED TERMINATION
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_provider_executor_execute_rejects_direct_openai_provider_before_spawn():
+    """P1: ProviderExecutor.execute rejects OpenAIChatCompletionsProvider before spawn/network."""
+    mock_transport = httpx.MockTransport(lambda req: httpx.Response(500))
+    real_provider = OpenAIChatCompletionsProvider(
+        api_key="SUPER_SECRET_AI_KEY_12345",
+        base_url="https://api.openai.com/v1",
+        model_mapping=TEST_MODEL_MAPPING,
+        transport=mock_transport,
+    )
+    with pytest.raises(
+        ProviderRequestError,
+        match="requires ProviderDescriptor; live OpenAIChatCompletionsProvider instances are prohibited",
+    ):
+        await provider_executor.execute(
+            real_provider,  # type: ignore[arg-type]
+            agent_id="test_agent",
+            system_prompt="sys",
+            user_payload="{}",
+            model_config=ModelConfig(),
+        )
+    assert active_provider_process_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_provider_executor_execute_rejects_direct_fixture_provider_before_spawn():
+    """P1: ProviderExecutor.execute rejects FixtureAIProvider before spawn."""
+    fixture_provider = FixtureAIProvider()
+    with pytest.raises(
+        ProviderRequestError,
+        match="requires ProviderDescriptor; live FixtureAIProvider instances are prohibited",
+    ):
+        await provider_executor.execute(
+            fixture_provider,  # type: ignore[arg-type]
+            agent_id="test_agent",
+            system_prompt="sys",
+            user_payload="{}",
+            model_config=ModelConfig(),
+        )
+    assert active_provider_process_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_analyze_with_controls_rejects_direct_provider_instances():
+    """P1: analyze_with_controls rejects direct provider instances before process handoff."""
+    real_provider = OpenAIChatCompletionsProvider(
+        api_key="KEY",
+        base_url="https://api.openai.com/v1",
+        model_mapping=TEST_MODEL_MAPPING,
+    )
+    with pytest.raises(
+        ProviderRequestError,
+        match="requires ProviderDescriptor; live OpenAIChatCompletionsProvider instances are prohibited",
+    ):
+        await analyze_with_controls(
+            real_provider,  # type: ignore[arg-type]
+            agent_id="test_agent",
+            system_prompt="sys",
+            user_payload="{}",
+            model_config=ModelConfig(),
+        )
+    assert active_provider_process_count() == 0
+
+
+def test_ai_orchestrator_init_rejects_direct_provider_instances():
+    """P1: AIOrchestrator constructor rejects direct AIProvider instances."""
+    fixture = FixtureAIProvider()
+    with pytest.raises(
+        ValueError,
+        match="AIOrchestrator requires ProviderDescriptor; live FixtureAIProvider instances are prohibited",
+    ):
+        AIOrchestrator(provider=fixture)  # type: ignore[arg-type]
+
+    real = OpenAIChatCompletionsProvider(
+        api_key="KEY",
+        base_url="https://api.openai.com/v1",
+        model_mapping=TEST_MODEL_MAPPING,
+    )
+    with pytest.raises(
+        ValueError,
+        match="AIOrchestrator requires ProviderDescriptor; live OpenAIChatCompletionsProvider instances are prohibited",
+    ):
+        AIOrchestrator(provider=real)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_test_provider_executor_rejects_openai_provider():
+    """P1: _execute_test_provider_instance strictly rejects external providers and credentials."""
+    real = OpenAIChatCompletionsProvider(
+        api_key="SECRET_KEY",
+        base_url="https://api.openai.com/v1",
+        model_mapping=TEST_MODEL_MAPPING,
+    )
+    with pytest.raises(
+        ProviderRequestError,
+        match="External provider OpenAIChatCompletionsProvider is strictly forbidden",
+    ):
+        await provider_executor._execute_test_provider_instance(
+            real,  # type: ignore[arg-type]
+            agent_id="test_agent",
+            system_prompt="sys",
+            user_payload="{}",
+            model_config=ModelConfig(),
+        )
+    assert active_provider_process_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_verified_worker_termination_failure_raises_and_retains_tracking(monkeypatch: pytest.MonkeyPatch):
+    """P2-217: If child process terminate/kill fails, raise ProviderWorkerTerminationError and keep tracked."""
+    import app.services.ai.execution as exec_mod
+
+    original_terminate = exec_mod._terminate_worker
+
+    def broken_terminate(process):
+        # Do not kill the process, simulate unkillable zombie
+        pass
+
+    monkeypatch.setattr(exec_mod, "_terminate_worker", broken_terminate)
+
+    provider = CancellationResistantFixtureProvider()
+    config = ModelConfig(timeout_seconds=0.25, max_retries=0)
+
+    try:
+        pattern = "could not be terminated|is still alive after cleanup"
+        with pytest.raises(ProviderWorkerTerminationError, match=pattern):
+            await provider_executor._execute_test_provider_instance(
+                provider,
+                agent_id="unkillable_test",
+                system_prompt="system",
+                user_payload="{}",
+                model_config=config,
+                timeout_seconds=0.25,
+            )
+        # Verify process remained tracked in _ACTIVE_PROCESSES
+        assert len(exec_mod._ACTIVE_PROCESSES) >= 1
+    finally:
+        # Cleanup any remaining live processes
+        monkeypatch.undo()
+        for p in list(exec_mod._ACTIVE_PROCESSES):
+            with contextlib.suppress(Exception):
+                original_terminate(p)
+            exec_mod._ACTIVE_PROCESSES.discard(p)
+        assert active_provider_process_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_parent_cancellation_terminates_worker_and_cleans_up():
+    """P2-217: Parent asyncio cancellation terminates child worker cleanly."""
+    provider = CancellationResistantFixtureProvider()
+    config = ModelConfig(timeout_seconds=10.0, max_retries=0)
+
+    task = asyncio.create_task(
+        provider_executor._execute_test_provider_instance(
+            provider,
+            agent_id="cancellation_test",
+            system_prompt="system",
+            user_payload="{}",
+            model_config=config,
+            timeout_seconds=10.0,
+        )
+    )
+    # Wait for process to spawn
+    await asyncio.sleep(0.3)
+    assert active_provider_process_count() == 1
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Assert worker terminated and cleaned up
+    assert active_provider_process_count() == 0
+

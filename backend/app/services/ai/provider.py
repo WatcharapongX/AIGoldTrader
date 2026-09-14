@@ -89,6 +89,10 @@ class ProviderInternalError(AIProviderError):
     """Unhandled internal provider or worker error."""
 
 
+class ProviderWorkerTerminationError(ProviderInternalError):
+    """Worker process termination failure (process remained alive after SIGTERM/SIGKILL)."""
+
+
 class InputBudgetExceeded(ProviderBudgetExceeded, ValueError):
     """Serialized provider input exceeds the safe local boundary."""
 
@@ -206,6 +210,7 @@ class ProviderDescriptor(BaseModel):
     ] = Field(default=("structured_json", "system_prompt"), max_length=16)
     enabled: bool = True
     live_external_only: bool = False
+    fixture_options: dict[str, Any] = Field(default_factory=dict)
 
     validate_base_url = staticmethod(validate_provider_base_url)
 
@@ -242,6 +247,8 @@ class ProviderDescriptor(BaseModel):
                 raise ValueError("openai_compatible provider must use primary config profile")
             if not self.model_bindings:
                 raise ValueError("openai_compatible provider requires explicit non-empty model bindings")
+            if self.fixture_options:
+                raise ValueError("openai_compatible provider must not define fixture_options")
             aliases = [binding.alias for binding in self.model_bindings]
             if len(set(aliases)) != len(aliases):
                 raise ValueError("Provider model binding aliases must be unique")
@@ -329,8 +336,19 @@ class AIProvider(abc.ABC):
         pass
 
 
+class SpawnSafeTestProvider(AIProvider):
+    """Marker base class for deterministic in-memory test doubles only.
+
+    Only deterministic, non-network fixture providers used in testing may inherit
+    from this class. OpenAIChatCompletionsProvider and real/external providers MUST NOT
+    inherit from this class.
+    """
+
+    pass
+
+
 async def analyze_with_controls(
-    provider: AIProvider | ProviderDescriptor,
+    provider: ProviderDescriptor,
     *,
     agent_id: str,
     system_prompt: str,
@@ -339,6 +357,11 @@ async def analyze_with_controls(
     timeout_seconds: float | None = None,
 ) -> ProviderResult:
     """Execute through the killable provider boundary with one overall deadline."""
+    if not isinstance(provider, ProviderDescriptor):
+        raise ProviderRequestError(
+            f"analyze_with_controls requires ProviderDescriptor; "
+            f"live {type(provider).__name__} instances are prohibited"
+        )
     from app.services.ai.execution import provider_executor
 
     return await provider_executor.execute(
@@ -351,7 +374,7 @@ async def analyze_with_controls(
     )
 
 
-class FixtureAIProvider(AIProvider):
+class FixtureAIProvider(SpawnSafeTestProvider):
     """Deterministic, reproducible fixture provider for testing multi-agent orchestration.
 
     Zero external network calls; zero vendor API dependencies.
@@ -371,6 +394,8 @@ class FixtureAIProvider(AIProvider):
         token_budget_exceeded_agents: set[str] | None = None,
         agent_biases: dict[str, str] | None = None,
         agent_strengths: dict[str, str] | None = None,
+        token_mode: str | None = None,
+        oversized_mode: str | None = None,
     ):
         if not _SAFE_PROVIDER_ID.fullmatch(provider_id):
             raise ValueError("Fixture provider_id must be a safe bounded identifier")
@@ -384,7 +409,41 @@ class FixtureAIProvider(AIProvider):
         self.token_budget_exceeded_agents = set(token_budget_exceeded_agents or ())
         self.agent_biases = dict(agent_biases or {})
         self.agent_strengths = dict(agent_strengths or {})
+        self.token_mode = token_mode
+        self.oversized_mode = oversized_mode
         self.call_history: list[dict[str, object]] = []
+
+    def to_descriptor(self) -> ProviderDescriptor:
+        """Create a pure, validated ProviderDescriptor representing this fixture configuration."""
+        opts: dict[str, Any] = {}
+        if self.fail_agents:
+            opts["fail_agents"] = sorted(self.fail_agents)
+        if self.malformed_json_agents:
+            opts["malformed_json_agents"] = sorted(self.malformed_json_agents)
+        if self.schema_invalid_agents:
+            opts["schema_invalid_agents"] = sorted(self.schema_invalid_agents)
+        if self.injection_agents:
+            opts["injection_agents"] = sorted(self.injection_agents)
+        if self.timeout_agents:
+            opts["timeout_agents"] = sorted(self.timeout_agents)
+        if self.hanging_agents:
+            opts["hanging_agents"] = sorted(self.hanging_agents)
+        if self.token_budget_exceeded_agents:
+            opts["token_budget_exceeded_agents"] = sorted(self.token_budget_exceeded_agents)
+        if self.agent_biases:
+            opts["agent_biases"] = dict(self.agent_biases)
+        if self.agent_strengths:
+            opts["agent_strengths"] = dict(self.agent_strengths)
+        if self.token_mode:
+            opts["token_mode"] = self.token_mode
+        if self.oversized_mode:
+            opts["oversized_mode"] = self.oversized_mode
+        return ProviderDescriptor(
+            provider_id=self.provider_id,
+            provider_type="fixture",
+            config_profile="fixture",
+            fixture_options=opts,
+        )
 
     async def analyze(
         self,
@@ -502,12 +561,30 @@ class FixtureAIProvider(AIProvider):
             payload["execute"] = True
 
         json_content = json.dumps(payload, ensure_ascii=False)
+        prompt_tokens = 250
+        completion_tokens = 150
+        total_tokens = 400
+        if self.token_mode == "huge":
+            prompt_tokens = 10**12
+            completion_tokens = 1
+            total_tokens = 10**12 + 1
+        elif self.token_mode == "inconsistent":
+            prompt_tokens = 100
+            completion_tokens = 20
+            total_tokens = 999
+        if self.oversized_mode == "content":
+            json_content = "X" * 20_000
+        elif self.oversized_mode == "raw":
+            payload = {"blob": "X" * 20_000}
+        elif self.oversized_mode == "tokens":
+            completion_tokens = 2_000
+            total_tokens = prompt_tokens + 2_000
         return ProviderResult(
             content=json_content,
             raw_payload=payload,
-            prompt_tokens=250,
-            completion_tokens=150,
-            total_tokens=400,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
             duration_ms=(time.perf_counter() - t0) * 1000,
             provider_id=self.provider_id,
             provider_type="fixture",

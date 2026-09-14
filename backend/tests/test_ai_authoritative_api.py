@@ -333,7 +333,7 @@ class RecordingOrchestrator:
     def __init__(self):
         self.inputs = []
         self.provider = FixtureAIProvider()
-        self.actual = AIOrchestrator(provider=self.provider)
+        self.actual = AIOrchestrator()
 
     async def analyze(self, ai_input):
         self.inputs.append(ai_input)
@@ -509,7 +509,7 @@ async def test_account_bound_query_selects_older_correct_decision_before_limit(
     assert assembled_b.risk_context.decision_id == decision_b.id
     assert assembled_b.risk_context.approved_risk_amount == Decimal("50.00")
     no_market_provider = FixtureAIProvider()
-    no_market_result = await AIOrchestrator(provider=no_market_provider).analyze(assembled_a)
+    no_market_result = await AIOrchestrator(provider=no_market_provider.to_descriptor()).analyze(assembled_a)
     assert assembled_a.quote_context.availability == "UNAVAILABLE"
     assert no_market_result.status == "BLOCKED_BY_UPSTREAM"
     assert no_market_provider.call_history == []
@@ -555,7 +555,7 @@ async def test_every_reservation_semantic_mismatch_blocks_provider(
         current_user=admin_user,
     )
     provider = FixtureAIProvider()
-    result = await AIOrchestrator(provider=provider).analyze(assembled)
+    result = await AIOrchestrator(provider=provider.to_descriptor()).analyze(assembled)
     assert assembled.risk_context.reservation_status == "MISMATCHED"
     assert result.status == "BLOCKED_BY_UPSTREAM"
     assert provider.call_history == []

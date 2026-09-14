@@ -24,9 +24,9 @@ from app.services.ai.domain import (
 )
 from app.services.ai.prompts import build_structured_payload, get_prompt
 from app.services.ai.provider import (
-    AIProvider,
     ModelConfig,
     ProviderDescriptor,
+    ProviderRequestError,
     analyze_with_controls,
 )
 
@@ -88,11 +88,16 @@ class BaseAnalyticalAgent:
     async def execute(
         self,
         ai_input: AIAnalysisInput,
-        provider: AIProvider | ProviderDescriptor,
+        provider: ProviderDescriptor,
         config: ModelConfig,
         timeout_seconds: float | None = None,
     ) -> AgentAnalysisResult:
         """Execute agent analysis with strict error isolation and schema validation."""
+        if not isinstance(provider, ProviderDescriptor):
+            raise ProviderRequestError(
+                f"BaseAnalyticalAgent.execute requires ProviderDescriptor; "
+                f"live {type(provider).__name__} instances are prohibited"
+            )
         now_utc = dt.datetime.now(dt.UTC)
         context = self.extract_context(ai_input)
         trusted_context = {
@@ -106,11 +111,7 @@ class BaseAnalyticalAgent:
         }
         system_prompt = get_prompt(self.prompt_id)
         structured_payload = build_structured_payload(trusted_context, context)
-        actual_prov = (
-            provider.provider_id
-            if isinstance(provider, ProviderDescriptor)
-            else getattr(provider, "provider_id", getattr(provider, "provider", "fixture"))
-        )
+        actual_prov = provider.provider_id
         execution_provenance: AIProviderExecutionProvenance | None = None
 
         try:
@@ -303,10 +304,15 @@ class MetaController:
         self,
         ai_input: AIAnalysisInput,
         agent_results: dict[str, AgentAnalysisResult],
-        provider: AIProvider | ProviderDescriptor,
+        provider: ProviderDescriptor,
         config: ModelConfig,
         timeout_seconds: float | None = None,
     ) -> AIAnalysisResult:
+        if not isinstance(provider, ProviderDescriptor):
+            raise ProviderRequestError(
+                f"MetaController.execute requires ProviderDescriptor; "
+                f"live {type(provider).__name__} instances are prohibited"
+            )
         now_utc = dt.datetime.now(dt.UTC)
 
         # 1. Compute deterministic agreement and check agent statuses

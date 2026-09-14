@@ -161,7 +161,7 @@ def test_ai_account_reservation_and_authoritative_api_postgres(isolated_postgres
                     current_user=admin,
                 )
                 provider = FixtureAIProvider()
-                result = await AIOrchestrator(provider=provider).analyze(mismatched)
+                result = await AIOrchestrator(provider=provider.to_descriptor()).analyze(mismatched)
                 assert mismatched.risk_context.reservation_status == "MISMATCHED"
                 assert result.status == "BLOCKED_BY_UPSTREAM"
                 assert provider.call_history == []

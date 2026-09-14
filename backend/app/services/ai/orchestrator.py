@@ -26,7 +26,6 @@ from app.services.ai.domain import (
     fingerprint,
 )
 from app.services.ai.provider import (
-    AIProvider,
     ModelBinding,
     ModelConfig,
     ProviderAuthError,
@@ -42,17 +41,23 @@ class AIOrchestrator:
 
     def __init__(
         self,
-        provider: AIProvider | ProviderDescriptor | None = None,
+        provider: ProviderDescriptor | None = None,
         default_config: ModelConfig | None = None,
         descriptor: ProviderDescriptor | None = None,
     ):
         from app.core.config import get_settings
 
         settings = get_settings()
-        target_provider: AIProvider | ProviderDescriptor
+        target_provider: ProviderDescriptor
         if descriptor is not None:
+            if not isinstance(descriptor, ProviderDescriptor):
+                d_name = type(descriptor).__name__
+                raise ValueError(f"AIOrchestrator requires ProviderDescriptor; live {d_name} instances are prohibited")
             target_provider = descriptor
         elif provider is not None:
+            if not isinstance(provider, ProviderDescriptor):
+                p_name = type(provider).__name__
+                raise ValueError(f"AIOrchestrator requires ProviderDescriptor; live {p_name} instances are prohibited")
             target_provider = provider
         else:
             mode = getattr(settings, "ai_provider_mode", "fixture")
@@ -77,13 +82,9 @@ class AIOrchestrator:
                     provider_type="fixture",
                     config_profile="fixture",
                 )
-        self.provider: AIProvider | ProviderDescriptor = target_provider
+        self.provider: ProviderDescriptor = target_provider
 
-        prov_name = (
-            self.provider.provider_id
-            if isinstance(self.provider, ProviderDescriptor)
-            else getattr(self.provider, "provider_id", getattr(self.provider, "provider", "fixture"))
-        )
+        prov_name = self.provider.provider_id
         self.default_config = default_config or ModelConfig(provider=prov_name)
         self.agents = get_all_analytical_agents()
         self.meta_controller = MetaController()
@@ -191,11 +192,7 @@ class AIOrchestrator:
         effective_config = config or self.default_config
         now_utc = dt.datetime.now(dt.UTC)
         as_of = ai_input.as_of
-        actual_provenance = (
-            self.provider.provider_id
-            if isinstance(self.provider, ProviderDescriptor)
-            else getattr(self.provider, "provider_id", getattr(self.provider, "provider", "fixture"))
-        )
+        actual_provenance = self.provider.provider_id
 
         # ---------------------------------------------------------
         # PRE-FLIGHT GATE 1: KILL SWITCH

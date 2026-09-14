@@ -378,7 +378,7 @@ async def test_full_orchestrator_happy_path():
     )
 
     provider = FixtureAIProvider()
-    orchestrator = AIOrchestrator(provider=provider)
+    orchestrator = AIOrchestrator(provider=provider.to_descriptor())
     result = await orchestrator.analyze(ai_input)
 
     assert isinstance(result, AIAnalysisResult)

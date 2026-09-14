@@ -361,7 +361,21 @@ class ProviderFactory:
             raise ProviderAuthError(f"AI Provider '{descriptor.provider_id}' is disabled")
 
         if descriptor.provider_type == "fixture":
-            return FixtureAIProvider(provider_id=descriptor.provider_id)
+            opts = getattr(descriptor, "fixture_options", None) or {}
+            return FixtureAIProvider(
+                provider_id=descriptor.provider_id,
+                fail_agents=set(opts.get("fail_agents", ())),
+                malformed_json_agents=set(opts.get("malformed_json_agents", ())),
+                schema_invalid_agents=set(opts.get("schema_invalid_agents", ())),
+                injection_agents=set(opts.get("injection_agents", ())),
+                timeout_agents=set(opts.get("timeout_agents", ())),
+                hanging_agents=set(opts.get("hanging_agents", ())),
+                token_budget_exceeded_agents=set(opts.get("token_budget_exceeded_agents", ())),
+                agent_biases=dict(opts.get("agent_biases", {})),
+                agent_strengths=dict(opts.get("agent_strengths", {})),
+                token_mode=opts.get("token_mode"),
+                oversized_mode=opts.get("oversized_mode"),
+            )
 
         if descriptor.provider_type == "openai_compatible":
             api_key, base_url = ProviderConfigResolver.resolve_external_config(descriptor.config_profile)

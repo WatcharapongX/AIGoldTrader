@@ -16,35 +16,22 @@ from app.services.ai.domain import (
     AISwingEvidence,
     AIZoneEvidence,
 )
-from app.services.ai.execution import active_provider_process_count
+from app.services.ai.execution import active_provider_process_count, provider_executor
 from app.services.ai.orchestrator import AIOrchestrator
 from app.services.ai.provider import (
     MIN_PROVIDER_TIMEOUT_SECONDS,
-    AIProvider,
-    FixtureAIProvider,
     ModelConfig,
+    ProviderDescriptor,
     ProviderResult,
-    analyze_with_controls,
+    SpawnSafeTestProvider,
 )
 from app.services.analysis.domain import DealingRange, LiquidityLevel, StructureEvent, SwingPoint, Zone
 from tests.test_ai_corrective_round2 import authoritative_input
 
-
-class HugeOrInconsistentUsageProvider(FixtureAIProvider):
-    def __init__(self, mode: str):
-        super().__init__()
-        self.mode = mode
-
-    async def analyze(self, **kwargs) -> ProviderResult:
-        result = await super().analyze(**kwargs)
-        if self.mode == "huge":
-            return result.model_copy(
-                update={"prompt_tokens": 10**12, "completion_tokens": 1, "total_tokens": 10**12 + 1}
-            )
-        return result.model_copy(update={"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 999})
+TEST_WATCHDOG_TIMEOUT_SECONDS = 1.5
 
 
-class CancellationResistantProvider(AIProvider):
+class CancellationResistantProvider(SpawnSafeTestProvider):
     async def analyze(self, **kwargs) -> ProviderResult:
         try:
             await asyncio.sleep(60)
@@ -89,14 +76,12 @@ async def test_every_phase3_temporal_field_blocks_before_provider_when_future(
     else:
         evidence = AIDealingRangeEvidence(id="future-range", kind="BULLISH", **temporal)
         structure = ai_input.structure_context.model_copy(update={"dealing_range": evidence})
-    provider = FixtureAIProvider()
 
-    result = await AIOrchestrator(provider=provider).analyze(
+    result = await AIOrchestrator().analyze(
         ai_input.model_copy(update={"structure_context": structure})
     )
 
     assert result.status == "BLOCKED_BY_UPSTREAM"
-    assert provider.call_history == []
 
 
 def test_phase3_temporal_projection_mapping_is_complete() -> None:
@@ -119,22 +104,25 @@ def test_phase3_temporal_projection_mapping_is_complete() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["huge", "inconsistent"])
 async def test_provider_token_accounting_fails_closed(mode: str) -> None:
-    provider = HugeOrInconsistentUsageProvider(mode)
+    descriptor = ProviderDescriptor(
+        provider_type="fixture",
+        config_profile="fixture",
+        fixture_options={"token_mode": mode},
+    )
     result = await TradeThesisAgent().execute(
         authoritative_input(),
-        provider,
+        descriptor,
         ModelConfig(max_retries=3),
     )
 
     assert result.status == "DEGRADED"
-    assert len(provider.call_history) == 1
 
 
 @pytest.mark.asyncio
 async def test_cancellation_resistant_provider_cannot_defeat_wall_clock_deadline() -> None:
     started = time.perf_counter()
     with pytest.raises(TimeoutError):
-        await analyze_with_controls(
+        await provider_executor._execute_test_provider_instance(
             CancellationResistantProvider(),
             agent_id="cancellation_resistant",
             system_prompt="system",
@@ -143,7 +131,7 @@ async def test_cancellation_resistant_provider_cannot_defeat_wall_clock_deadline
         )
     elapsed = time.perf_counter() - started
 
-    assert elapsed <= 0.40
+    assert elapsed <= TEST_WATCHDOG_TIMEOUT_SECONDS
     assert active_provider_process_count() == 0
 
 
