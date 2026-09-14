@@ -8,7 +8,7 @@ import logging
 import re
 import time
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -183,6 +183,103 @@ def validate_provider_base_url(value: str, active_secret: str | None = None) -> 
     return value.rstrip("/")
 
 
+ValidAgentId = Annotated[
+    str,
+    Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_.-]*$"),
+]
+BiasLiteral = Literal["LONG", "SHORT", "NEUTRAL"]
+StrengthLiteral = Literal["STRONG", "MODERATE", "WEAK"]
+TokenModeLiteral = Literal["normal", "huge", "inconsistent"]
+OversizedModeLiteral = Literal["normal", "content", "raw", "tokens"]
+
+
+class FixtureProviderOptions(BaseModel):
+    """Strict, bounded, immutable descriptor options for deterministic fixture execution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    fail_agents: tuple[ValidAgentId, ...] = Field(default=(), max_length=32)
+    malformed_json_agents: tuple[ValidAgentId, ...] = Field(default=(), max_length=32)
+    schema_invalid_agents: tuple[ValidAgentId, ...] = Field(default=(), max_length=32)
+    injection_agents: tuple[ValidAgentId, ...] = Field(default=(), max_length=32)
+    timeout_agents: tuple[ValidAgentId, ...] = Field(default=(), max_length=32)
+    hanging_agents: tuple[ValidAgentId, ...] = Field(default=(), max_length=32)
+    token_budget_exceeded_agents: tuple[ValidAgentId, ...] = Field(default=(), max_length=32)
+    agent_biases: tuple[tuple[ValidAgentId, BiasLiteral], ...] = Field(default=(), max_length=32)
+    agent_strengths: tuple[tuple[ValidAgentId, StrengthLiteral], ...] = Field(default=(), max_length=32)
+    token_mode: TokenModeLiteral | None = None
+    oversized_mode: OversizedModeLiteral | None = None
+
+    @field_validator(
+        "fail_agents",
+        "malformed_json_agents",
+        "schema_invalid_agents",
+        "injection_agents",
+        "timeout_agents",
+        "hanging_agents",
+        "token_budget_exceeded_agents",
+        mode="before",
+    )
+    @classmethod
+    def normalize_agent_lists(cls, value: Any) -> Any:
+        if isinstance(value, (list, set, frozenset)):
+            return tuple(sorted(set(str(v) for v in value)))
+        return value
+
+    @field_validator(
+        "fail_agents",
+        "malformed_json_agents",
+        "schema_invalid_agents",
+        "injection_agents",
+        "timeout_agents",
+        "hanging_agents",
+        "token_budget_exceeded_agents",
+        mode="after",
+    )
+    @classmethod
+    def reject_credentials_in_agent_lists(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        for item in values:
+            if _looks_like_credential(item):
+                raise ValueError("Fixture agent IDs must not contain credential material")
+        return values
+
+    @field_validator("agent_biases", mode="before")
+    @classmethod
+    def normalize_agent_biases(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return tuple(sorted((str(k), str(v)) for k, v in value.items()))
+        if isinstance(value, (list, set)):
+            return tuple(value)
+        return value
+
+    @field_validator("agent_strengths", mode="before")
+    @classmethod
+    def normalize_agent_strengths(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return tuple(sorted((str(k), str(v)) for k, v in value.items()))
+        if isinstance(value, (list, set)):
+            return tuple(value)
+        return value
+
+    @field_validator("agent_biases", "agent_strengths", mode="after")
+    @classmethod
+    def reject_credentials_in_mappings(
+        cls, values: tuple[tuple[str, str], ...]
+    ) -> tuple[tuple[str, str], ...]:
+        for agent_id, _ in values:
+            if _looks_like_credential(agent_id):
+                raise ValueError("Fixture agent IDs must not contain credential material")
+        return values
+
+    @property
+    def biases_dict(self) -> dict[str, str]:
+        return dict(self.agent_biases)
+
+    @property
+    def strengths_dict(self) -> dict[str, str]:
+        return dict(self.agent_strengths)
+
+
 class ProviderDescriptor(BaseModel):
     """Strict, immutable, serializable descriptor for AI providers.
 
@@ -210,7 +307,7 @@ class ProviderDescriptor(BaseModel):
     ] = Field(default=("structured_json", "system_prompt"), max_length=16)
     enabled: bool = True
     live_external_only: bool = False
-    fixture_options: dict[str, Any] = Field(default_factory=dict)
+    fixture_options: FixtureProviderOptions | None = None
 
     validate_base_url = staticmethod(validate_provider_base_url)
 
@@ -247,7 +344,7 @@ class ProviderDescriptor(BaseModel):
                 raise ValueError("openai_compatible provider must use primary config profile")
             if not self.model_bindings:
                 raise ValueError("openai_compatible provider requires explicit non-empty model bindings")
-            if self.fixture_options:
+            if self.fixture_options is not None:
                 raise ValueError("openai_compatible provider must not define fixture_options")
             aliases = [binding.alias for binding in self.model_bindings]
             if len(set(aliases)) != len(aliases):
@@ -415,29 +512,19 @@ class FixtureAIProvider(SpawnSafeTestProvider):
 
     def to_descriptor(self) -> ProviderDescriptor:
         """Create a pure, validated ProviderDescriptor representing this fixture configuration."""
-        opts: dict[str, Any] = {}
-        if self.fail_agents:
-            opts["fail_agents"] = sorted(self.fail_agents)
-        if self.malformed_json_agents:
-            opts["malformed_json_agents"] = sorted(self.malformed_json_agents)
-        if self.schema_invalid_agents:
-            opts["schema_invalid_agents"] = sorted(self.schema_invalid_agents)
-        if self.injection_agents:
-            opts["injection_agents"] = sorted(self.injection_agents)
-        if self.timeout_agents:
-            opts["timeout_agents"] = sorted(self.timeout_agents)
-        if self.hanging_agents:
-            opts["hanging_agents"] = sorted(self.hanging_agents)
-        if self.token_budget_exceeded_agents:
-            opts["token_budget_exceeded_agents"] = sorted(self.token_budget_exceeded_agents)
-        if self.agent_biases:
-            opts["agent_biases"] = dict(self.agent_biases)
-        if self.agent_strengths:
-            opts["agent_strengths"] = dict(self.agent_strengths)
-        if self.token_mode:
-            opts["token_mode"] = self.token_mode
-        if self.oversized_mode:
-            opts["oversized_mode"] = self.oversized_mode
+        opts = FixtureProviderOptions(
+            fail_agents=tuple(sorted(self.fail_agents)),
+            malformed_json_agents=tuple(sorted(self.malformed_json_agents)),
+            schema_invalid_agents=tuple(sorted(self.schema_invalid_agents)),
+            injection_agents=tuple(sorted(self.injection_agents)),
+            timeout_agents=tuple(sorted(self.timeout_agents)),
+            hanging_agents=tuple(sorted(self.hanging_agents)),
+            token_budget_exceeded_agents=tuple(sorted(self.token_budget_exceeded_agents)),
+            agent_biases=cast(Any, tuple(sorted((str(k), str(v)) for k, v in self.agent_biases.items()))),
+            agent_strengths=cast(Any, tuple(sorted((str(k), str(v)) for k, v in self.agent_strengths.items()))),
+            token_mode=self.token_mode,  # type: ignore[arg-type]
+            oversized_mode=self.oversized_mode,  # type: ignore[arg-type]
+        )
         return ProviderDescriptor(
             provider_id=self.provider_id,
             provider_type="fixture",

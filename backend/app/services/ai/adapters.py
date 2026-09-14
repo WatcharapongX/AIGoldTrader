@@ -361,21 +361,23 @@ class ProviderFactory:
             raise ProviderAuthError(f"AI Provider '{descriptor.provider_id}' is disabled")
 
         if descriptor.provider_type == "fixture":
-            opts = getattr(descriptor, "fixture_options", None) or {}
-            return FixtureAIProvider(
-                provider_id=descriptor.provider_id,
-                fail_agents=set(opts.get("fail_agents", ())),
-                malformed_json_agents=set(opts.get("malformed_json_agents", ())),
-                schema_invalid_agents=set(opts.get("schema_invalid_agents", ())),
-                injection_agents=set(opts.get("injection_agents", ())),
-                timeout_agents=set(opts.get("timeout_agents", ())),
-                hanging_agents=set(opts.get("hanging_agents", ())),
-                token_budget_exceeded_agents=set(opts.get("token_budget_exceeded_agents", ())),
-                agent_biases=dict(opts.get("agent_biases", {})),
-                agent_strengths=dict(opts.get("agent_strengths", {})),
-                token_mode=opts.get("token_mode"),
-                oversized_mode=opts.get("oversized_mode"),
-            )
+            opts = descriptor.fixture_options
+            if opts is not None:
+                return FixtureAIProvider(
+                    provider_id=descriptor.provider_id,
+                    fail_agents=set(opts.fail_agents),
+                    malformed_json_agents=set(opts.malformed_json_agents),
+                    schema_invalid_agents=set(opts.schema_invalid_agents),
+                    injection_agents=set(opts.injection_agents),
+                    timeout_agents=set(opts.timeout_agents),
+                    hanging_agents=set(opts.hanging_agents),
+                    token_budget_exceeded_agents=set(opts.token_budget_exceeded_agents),
+                    agent_biases=opts.biases_dict,
+                    agent_strengths=opts.strengths_dict,
+                    token_mode=opts.token_mode,
+                    oversized_mode=opts.oversized_mode,
+                )
+            return FixtureAIProvider(provider_id=descriptor.provider_id)
 
         if descriptor.provider_type == "openai_compatible":
             api_key, base_url = ProviderConfigResolver.resolve_external_config(descriptor.config_profile)

@@ -57,6 +57,7 @@ from app.services.ai.provider import (
     AIProvider,
     AIProviderError,
     FixtureAIProvider,
+    FixtureProviderOptions,
     InputBudgetExceeded,
     ModelBinding,
     ModelConfig,
@@ -79,6 +80,7 @@ from app.services.ai.provider import (
 
 __all__ = [
     "ANALYTICAL_AGENT_IDS",
+    "FixtureProviderOptions",
     "META_CONTROLLER_ID",
     "VERSION",
     "AIAnalysisInput",

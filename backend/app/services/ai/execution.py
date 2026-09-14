@@ -5,6 +5,8 @@ spawn boundary. Database sessions, HTTP requests, vendor SDK clients, and applic
 state never cross. Worker constructs its own provider adapter worker-side.
 """
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import datetime as dt
@@ -12,9 +14,12 @@ import multiprocessing as mp
 import time
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.core.masking import mask_secret_text
+
+if TYPE_CHECKING:
+    from app.services.ai.provider import ProviderDescriptor
 
 _POLL_SECONDS = 0.005
 _TERMINATE_GRACE_SECONDS = 0.05
@@ -29,10 +34,30 @@ PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS = 0.05
 # Tests should use TEST_WATCHDOG_TIMEOUT_SECONDS to detect hangs or process leaks.
 TEST_WATCHDOG_TIMEOUT_SECONDS = 1.5
 _ACTIVE_PROCESSES: set[BaseProcess] = set()
+_SURVIVING_PROCESSES: set[BaseProcess] = set()
+
+
+def reap_surviving_processes(limiter: GlobalProviderLimiter | None = None) -> int:
+    """Reap any surviving processes that have died since termination failure.
+
+    Returns the number of reaped processes whose capacity slots were returned.
+    """
+    reaped = 0
+    for p in list(_SURVIVING_PROCESSES):
+        if not p.is_alive():
+            _SURVIVING_PROCESSES.discard(p)
+            _ACTIVE_PROCESSES.discard(p)
+            with contextlib.suppress(Exception):
+                p.close()
+            if limiter is not None:
+                limiter.release()
+            reaped += 1
+    return reaped
 
 
 def active_provider_process_count() -> int:
     """Return live provider workers owned by this process (test/health visibility)."""
+    reap_surviving_processes()
     return sum(process.is_alive() for process in tuple(_ACTIVE_PROCESSES))
 
 
@@ -140,6 +165,49 @@ async def _worker_execute(provider: Any, request: dict[str, Any], pipe: Connecti
     raise RuntimeError(f"Provider retry loop exhausted for {request['agent_id']}") from last_error
 
 
+def _validate_test_provider_instance(provider: Any) -> None:
+    """Validate that a test provider instance contains no external adapters or sensitive state."""
+    from app.services.ai.adapters import OpenAIChatCompletionsProvider
+    from app.services.ai.provider import ProviderRequestError, SpawnSafeTestProvider, _looks_like_credential
+
+    if isinstance(provider, OpenAIChatCompletionsProvider):
+        raise ProviderRequestError(
+            f"External provider {type(provider).__name__} is strictly forbidden from test instance execution"
+        )
+    if not isinstance(provider, SpawnSafeTestProvider):
+        raise ProviderRequestError(
+            f"_execute_test_provider_instance requires SpawnSafeTestProvider; received {type(provider).__name__}"
+        )
+
+    forbidden_tokens = ("api_key", "secret", "token", "password", "credential", "base_url", "auth")
+    allowed_token_attrs = {
+        "total_tokens",
+        "prompt_tokens",
+        "completion_tokens",
+        "token_mode",
+        "token_budget_exceeded_agents",
+    }
+    for attr in dir(provider):
+        if attr.startswith("__"):
+            continue
+        attr_lower = attr.lower()
+        for forbidden in forbidden_tokens:
+            if forbidden == "token" and attr_lower in allowed_token_attrs:
+                continue
+            if forbidden in attr_lower:
+                raise ProviderRequestError(
+                    f"Test provider instance contains forbidden sensitive attribute: '{attr}'"
+                )
+        try:
+            val = getattr(provider, attr)
+            if isinstance(val, str) and _looks_like_credential(val):
+                raise ProviderRequestError(
+                    f"Test provider instance attribute '{attr}' contains credential material"
+                )
+        except (AttributeError, TypeError):
+            pass
+
+
 def _provider_worker_entry(target: Any, request: dict[str, Any], pipe: Connection) -> None:
     """Spawn-safe module-level worker entry point; never starts another process.
 
@@ -148,11 +216,10 @@ def _provider_worker_entry(target: Any, request: dict[str, Any], pipe: Connectio
     If target is a test_provider, strictly verify it is a SpawnSafeTestProvider and
     reject any real external providers or secrets.
     """
-    from app.services.ai.adapters import OpenAIChatCompletionsProvider, ProviderFactory
+    from app.services.ai.adapters import ProviderFactory
     from app.services.ai.provider import (
         ProviderDescriptor,
         ProviderRequestError,
-        SpawnSafeTestProvider,
     )
 
     provider: Any = None
@@ -163,13 +230,7 @@ def _provider_worker_entry(target: Any, request: dict[str, Any], pipe: Connectio
             provider = ProviderFactory.create_provider(descriptor)
         elif isinstance(target, dict) and target.get("kind") == "test_provider":
             test_inst = target.get("instance")
-            if (
-                not isinstance(test_inst, SpawnSafeTestProvider)
-                or isinstance(test_inst, OpenAIChatCompletionsProvider)
-                or getattr(test_inst, "api_key", None) is not None
-                or getattr(test_inst, "base_url", None) is not None
-            ):
-                raise ProviderRequestError("Unsafe provider rejected worker-side")
+            _validate_test_provider_instance(test_inst)
             provider = test_inst
         else:
             raise ProviderRequestError(f"Worker entry rejected invalid target kind: {type(target)}")
@@ -266,7 +327,7 @@ class ProviderExecutor:
 
     async def execute(
         self,
-        provider: Any,
+        provider: ProviderDescriptor,
         *,
         agent_id: str,
         system_prompt: str,
@@ -304,21 +365,7 @@ class ProviderExecutor:
         timeout_seconds: float | None = None,
     ) -> Any:
         """Internal test-only execution method for deterministic SpawnSafeTestProvider instances."""
-        from app.services.ai.adapters import OpenAIChatCompletionsProvider
-        from app.services.ai.provider import ProviderRequestError, SpawnSafeTestProvider
-
-        if (
-            isinstance(provider, OpenAIChatCompletionsProvider)
-            or getattr(provider, "api_key", None) is not None
-            or getattr(provider, "base_url", None) is not None
-        ):
-            raise ProviderRequestError(
-                f"External provider {type(provider).__name__} is strictly forbidden from test instance execution"
-            )
-        if not isinstance(provider, SpawnSafeTestProvider):
-            raise ProviderRequestError(
-                f"_execute_test_provider_instance requires SpawnSafeTestProvider; received {type(provider).__name__}"
-            )
+        _validate_test_provider_instance(provider)
 
         wire_target = {"kind": "test_provider", "instance": provider}
         return await self._execute_internal(
@@ -380,7 +427,8 @@ class ProviderExecutor:
             "timeout_seconds": timeout,
         }
 
-        # 1. Acquire bounded global concurrency slot BEFORE worker creation
+        # 1. Reap any surviving processes that have died, then acquire concurrency slot
+        reap_surviving_processes(self.limiter)
         await self.limiter.acquire()
         acquired = True
         loop = asyncio.get_running_loop()
@@ -546,6 +594,7 @@ class ProviderExecutor:
                     termination_failure = exc
             raise
         finally:
+            worker_survived = False
             if process is not None:
                 try:
                     if process.is_alive():
@@ -554,13 +603,17 @@ class ProviderExecutor:
                     termination_failure = exc
 
                 if process.is_alive():
-                    # DO NOT discard live process from tracking
+                    # Retain live process in tracking AND retain its capacity slot
+                    worker_survived = True
+                    _ACTIVE_PROCESSES.add(process)
+                    _SURVIVING_PROCESSES.add(process)
                     if termination_failure is None:
                         termination_failure = ProviderWorkerTerminationError(
                             f"Provider worker process {process.pid} is still alive after cleanup"
                         )
                 else:
                     _ACTIVE_PROCESSES.discard(process)
+                    _SURVIVING_PROCESSES.discard(process)
                     if process.pid is not None:
                         with contextlib.suppress(Exception):
                             process.close()
@@ -571,7 +624,9 @@ class ProviderExecutor:
             if recv_pipe is not None:
                 with contextlib.suppress(Exception):
                     recv_pipe.close()
-            if acquired:
+
+            # Release slot ONLY if the worker is confirmed dead
+            if acquired and not worker_survived:
                 self.limiter.release()
 
             if termination_failure is not None:

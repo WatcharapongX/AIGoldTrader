@@ -57,6 +57,7 @@ from app.services.ai.orchestrator import AIOrchestrator
 from app.services.ai.provider import (
     MIN_PROVIDER_TIMEOUT_SECONDS,
     FixtureAIProvider,
+    FixtureProviderOptions,
     ModelConfig,
     OutputBudgetExceeded,
     ProviderAuthError,
@@ -71,6 +72,7 @@ from app.services.ai.provider import (
     ProviderSchemaError,
     ProviderTimeoutError,
     ProviderWorkerTerminationError,
+    SpawnSafeTestProvider,
     analyze_with_controls,
 )
 
@@ -1724,4 +1726,254 @@ async def test_parent_cancellation_terminates_worker_and_cleans_up():
 
     # Assert worker terminated and cleaned up
     assert active_provider_process_count() == 0
+
+
+# ==============================================================================
+# 12. Corrective Round 4.1: Pre-Final Trust-Boundary Hardening
+# ==============================================================================
+
+
+def test_fixture_options_strict_typed_model_extra_forbid():
+    """Section 3-6: FixtureProviderOptions rejects unknown/arbitrary/secret fields."""
+    with pytest.raises(ValidationError, match="extra_forbidden|Extra inputs are not permitted"):
+        FixtureProviderOptions(secret="SUPER_SECRET_AI_KEY_12345")  # type: ignore[call-arg]
+
+    for forbidden_key in ("api_key", "token", "password", "credential", "base_url", "custom_secret"):
+        with pytest.raises(ValidationError, match="extra_forbidden|Extra inputs are not permitted"):
+            FixtureProviderOptions(**{forbidden_key: "leaked_val"})  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError, match="Fixture agent IDs must not contain credential material"):
+        FixtureProviderOptions(fail_agents=["sk-proj-super-secret-key-12345"])
+
+    with pytest.raises(ValidationError, match="Fixture agent IDs must not contain credential material"):
+        FixtureProviderOptions(agent_biases={"sk-bearer-token": "LONG"})
+
+
+def test_fixture_options_nested_immutability():
+    """Section 7: ProviderDescriptor and nested FixtureProviderOptions are strictly immutable."""
+    desc = ProviderDescriptor(
+        provider_id="immutable_test",
+        provider_type="fixture",
+        config_profile="fixture",
+        fixture_options=FixtureProviderOptions(
+            fail_agents=["macro_analyst", "risk_analyst"],
+            agent_biases={"macro_analyst": "LONG"},
+            agent_strengths={"macro_analyst": "STRONG"},
+        ),
+    )
+    assert desc.fixture_options is not None
+
+    # Mutation of descriptor field blocked
+    with pytest.raises(ValidationError, match="frozen"):
+        desc.fixture_options = None  # type: ignore[misc]
+
+    # Reassignment on FixtureProviderOptions blocked
+    with pytest.raises(ValidationError, match="frozen"):
+        desc.fixture_options.fail_agents = ()  # type: ignore[misc]
+
+    # In-place mutations blocked on immutable tuples
+    with pytest.raises(AttributeError):
+        desc.fixture_options.fail_agents.append("new_agent")  # type: ignore[attr-defined]
+
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        desc.fixture_options.fail_agents[0] = "mutated"  # type: ignore[index]
+
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        desc.fixture_options.agent_biases[0] = ("macro_analyst", "SHORT")  # type: ignore[index]
+
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        desc.fixture_options.agent_biases["macro_analyst"] = "SHORT"  # type: ignore[index]
+
+
+def test_fixture_options_size_bounds():
+    """Section 8: FixtureProviderOptions enforces strict schema bounds on payloads."""
+    too_many = [f"agent_{i:03d}" for i in range(35)]
+    with pytest.raises(ValidationError, match="too_long|at most 32 items"):
+        FixtureProviderOptions(fail_agents=too_many)
+
+    long_agent = "a" * 65
+    with pytest.raises(ValidationError, match="too_long|at most 64 characters"):
+        FixtureProviderOptions(fail_agents=[long_agent])
+
+    huge_agent = "a" * 100_000
+    with pytest.raises(ValidationError):
+        FixtureProviderOptions(fail_agents=[huge_agent])
+
+
+def test_fixture_options_deterministic_round_trip():
+    """Section 10: Full round-trip preserves deterministic test behavior."""
+    p1 = FixtureAIProvider(
+        provider_id="round_trip_fixture",
+        fail_agents={"macro_analyst"},
+        malformed_json_agents={"risk_analyst"},
+        agent_biases={"smc_analyst": "LONG"},
+        agent_strengths={"smc_analyst": "STRONG"},
+        token_mode="huge",
+        oversized_mode="content",
+    )
+    desc = p1.to_descriptor()
+    assert isinstance(desc.fixture_options, FixtureProviderOptions)
+
+    dumped = desc.model_dump(mode="json")
+    serialized = json.dumps(dumped)
+    assert "secret" not in serialized
+    assert "api_key" not in serialized
+
+    desc2 = ProviderDescriptor.model_validate(json.loads(serialized))
+    p2 = ProviderFactory.create_provider(desc2)
+    assert isinstance(p2, FixtureAIProvider)
+    assert p2.fail_agents == p1.fail_agents
+    assert p2.malformed_json_agents == p1.malformed_json_agents
+    assert p2.agent_biases == p1.agent_biases
+    assert p2.agent_strengths == p1.agent_strengths
+    assert p2.token_mode == p1.token_mode
+    assert p2.oversized_mode == p1.oversized_mode
+
+
+@pytest.mark.asyncio
+async def test_failed_worker_termination_retains_slot_and_blocks_second_worker(monkeypatch):
+    """Sections 11-17: Surviving worker retains capacity slot; second execution fails closed."""
+    import app.services.ai.execution as exec_mod
+    from app.services.ai.execution import ProviderExecutor
+
+    test_executor = ProviderExecutor(max_concurrent=1, queue_timeout_seconds=0.25)
+
+    original_terminate = exec_mod._terminate_worker
+
+    def mock_unkillable_worker(p):
+        raise ProviderWorkerTerminationError(f"Worker {p.pid} simulated unkillable")
+
+    monkeypatch.setattr(exec_mod, "_terminate_worker", mock_unkillable_worker)
+
+    provider = CancellationResistantFixtureProvider()
+    config = ModelConfig(timeout_seconds=0.25, max_retries=0)
+
+    try:
+        with pytest.raises(ProviderWorkerTerminationError):
+            await test_executor._execute_test_provider_instance(
+                provider,
+                agent_id="surviving_worker_slot_test",
+                system_prompt="system",
+                user_payload="{}",
+                model_config=config,
+                timeout_seconds=0.25,
+            )
+
+        assert len(exec_mod._ACTIVE_PROCESSES) >= 1
+        assert len(exec_mod._SURVIVING_PROCESSES) >= 1
+        assert test_executor.available_slots == 0
+
+        with pytest.raises(ProviderCapacityExhausted, match="Provider capacity exhausted"):
+            await test_executor._execute_test_provider_instance(
+                provider,
+                agent_id="second_call_must_fail",
+                system_prompt="system",
+                user_payload="{}",
+                model_config=config,
+                timeout_seconds=0.25,
+            )
+
+        assert active_provider_process_count() <= 1
+    finally:
+        monkeypatch.undo()
+        for p in list(exec_mod._ACTIVE_PROCESSES):
+            with contextlib.suppress(Exception):
+                original_terminate(p)
+            exec_mod._ACTIVE_PROCESSES.discard(p)
+            exec_mod._SURVIVING_PROCESSES.discard(p)
+        exec_mod.reap_surviving_processes(test_executor.limiter)
+
+
+def test_spawn_safe_test_provider_rejects_sensitive_attributes():
+    """Sections 18-20: Test provider execution strictly rejects sensitive state."""
+    class LeakyTestProviderSecret(SpawnSafeTestProvider):
+        def __init__(self):
+            super().__init__()
+            self.secret = "XYZ_SECRET"
+
+        async def analyze(self, **kwargs):
+            return ProviderResult(
+                content="{}", raw_payload={}, prompt_tokens=1, completion_tokens=1, total_tokens=2, model="test"
+            )
+
+    class LeakyTestProviderToken(SpawnSafeTestProvider):
+        def __init__(self):
+            super().__init__()
+            self.token = "XYZ_TOKEN"
+
+        async def analyze(self, **kwargs):
+            return ProviderResult(
+                content="{}", raw_payload={}, prompt_tokens=1, completion_tokens=1, total_tokens=2, model="test"
+            )
+
+    class LeakyTestProviderPassword(SpawnSafeTestProvider):
+        def __init__(self):
+            super().__init__()
+            self.password = "XYZ_PASS"
+
+        async def analyze(self, **kwargs):
+            return ProviderResult(
+                content="{}", raw_payload={}, prompt_tokens=1, completion_tokens=1, total_tokens=2, model="test"
+            )
+
+    class LeakyTestProviderCredValue(SpawnSafeTestProvider):
+        def __init__(self):
+            super().__init__()
+            self.custom_val = "sk-proj-secret-key-12345"
+
+        async def analyze(self, **kwargs):
+            return ProviderResult(
+                content="{}", raw_payload={}, prompt_tokens=1, completion_tokens=1, total_tokens=2, model="test"
+            )
+
+    from app.services.ai.execution import _validate_test_provider_instance
+
+    with pytest.raises(ProviderRequestError, match="forbidden sensitive attribute: 'secret'"):
+        _validate_test_provider_instance(LeakyTestProviderSecret())
+
+    with pytest.raises(ProviderRequestError, match="forbidden sensitive attribute: 'token'"):
+        _validate_test_provider_instance(LeakyTestProviderToken())
+
+    with pytest.raises(ProviderRequestError, match="forbidden sensitive attribute: 'password'"):
+        _validate_test_provider_instance(LeakyTestProviderPassword())
+
+    with pytest.raises(ProviderRequestError, match="contains credential material"):
+        _validate_test_provider_instance(LeakyTestProviderCredValue())
+
+
+def test_test_only_path_unreachable_from_production():
+    """Section 19: _execute_test_provider_instance is never called from production code."""
+    import inspect
+
+    from app.services.ai import agents, orchestrator, provider
+
+    for mod in (agents, orchestrator, provider):
+        source = inspect.getsource(mod)
+        assert "_execute_test_provider_instance" not in source, f"Production module {mod.__name__} calls test method"
+
+
+def test_static_descriptor_only_type_contract():
+    """Sections 22-23: Production APIs statically type ProviderDescriptor."""
+    import inspect
+
+    from app.services.ai.agents import BaseAnalyticalAgent, MetaController
+    from app.services.ai.execution import ProviderExecutor
+    from app.services.ai.orchestrator import AIOrchestrator
+    from app.services.ai.provider import ProviderDescriptor, analyze_with_controls
+
+    sig_exec = inspect.signature(ProviderExecutor.execute)
+    assert sig_exec.parameters["provider"].annotation in ("ProviderDescriptor", ProviderDescriptor)
+
+    sig_ctrl = inspect.signature(analyze_with_controls)
+    assert sig_ctrl.parameters["provider"].annotation in ("ProviderDescriptor", ProviderDescriptor)
+
+    sig_agent = inspect.signature(BaseAnalyticalAgent.execute)
+    assert sig_agent.parameters["provider"].annotation in ("ProviderDescriptor", ProviderDescriptor)
+
+    sig_meta = inspect.signature(MetaController.execute)
+    assert sig_meta.parameters["provider"].annotation in ("ProviderDescriptor", ProviderDescriptor)
+
+    sig_orch = inspect.signature(AIOrchestrator.__init__)
+    assert "ProviderDescriptor" in str(sig_orch.parameters["provider"].annotation)
+
 
