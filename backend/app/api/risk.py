@@ -26,6 +26,7 @@ from app.models.account import Account
 from app.models.strategy import TradeCandidateRecord
 from app.services.news.repository import event_vintages
 from app.services.risk.domain import (
+    AccountSnapshot,
     KillSwitchState,
     PortfolioRiskSummary,
     RiskDecision,
@@ -301,6 +302,38 @@ async def get_portfolio_risk(
             "kill_switch_active": ks_state.state == "ACTIVE",
             "kill_switch_state": ks_state,
         }
+    )
+
+
+@router.get("/account", response_model=AccountSnapshot)
+async def get_account_snapshot(
+    account_id: str = Query("default_paper_account", max_length=64),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Read-only authoritative account snapshot (balance, equity, margin, drawdown)."""
+    now = dt.datetime.now(dt.UTC)
+    policy = await get_active_policy(session)
+    settings = get_settings()
+    if settings.trading_mode == "PAPER" and account_id == "default_paper_account":
+        from app.services.risk.account_state import PaperAccountStateService
+
+        try:
+            await PaperAccountStateService.refresh_paper_account_snapshot(
+                session,
+                account_id=account_id,
+                now=now,
+                max_observation_age_seconds=policy.account_freshness_seconds,
+            )
+        except Exception as exc:
+            logger.debug("Paper account snapshot refresh skipped: %s", exc)
+
+    return await get_authoritative_account_snapshot(
+        session=session,
+        account_id=account_id,
+        user_id=str(user.id),
+        is_admin=(user.role == Role.ADMIN),
+        now=now,
     )
 
 

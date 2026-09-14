@@ -375,3 +375,25 @@ export function parseRiskDecisions(raw: unknown): RiskDecisionData[] {
   if (!Array.isArray(raw)) fail('Decisions must be array');
   return raw.map(parseRiskDecision);
 }
+
+export function parseAccountSnapshot(raw: unknown): import('@/types').AccountSnapshotData {
+  if (!raw || typeof raw !== 'object') fail('Account snapshot must be object');
+  const d = raw as Record<string, unknown>;
+  return {
+    id: String(d.id || ''),
+    account_id: String(d.account_id || ''),
+    balance: String(d.balance ?? '0.00'),
+    equity: String(d.equity ?? '0.00'),
+    free_margin: d.free_margin != null ? String(d.free_margin) : null,
+    daily_realized_pnl: String(d.daily_realized_pnl ?? '0.00'),
+    weekly_realized_pnl: String(d.weekly_realized_pnl ?? '0.00'),
+    floating_pnl: d.floating_pnl != null ? String(d.floating_pnl) : null,
+    peak_equity: String(d.peak_equity ?? d.equity ?? '0.00'),
+    open_risk_pct: String(d.open_risk_pct ?? '0.00'),
+    reserved_risk_pct: String(d.reserved_risk_pct ?? '0.00'),
+    consecutive_losses: Number(d.consecutive_losses || 0),
+    trading_mode: String(d.trading_mode || 'PAPER'),
+    source: String(d.source || 'CONFIGURED_PAPER'),
+    as_of: String(d.as_of || new Date().toISOString()),
+  };
+}
