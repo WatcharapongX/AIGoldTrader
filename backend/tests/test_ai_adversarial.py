@@ -62,7 +62,7 @@ from app.services.ai.domain import (
 )
 from app.services.ai.orchestrator import AIOrchestrator
 from app.services.ai.prompts import wrap_untrusted_data
-from app.services.ai.provider import FixtureAIProvider, ModelConfig
+from app.services.ai.provider import MIN_PROVIDER_TIMEOUT_SECONDS, FixtureAIProvider, ModelConfig
 from app.services.risk.domain import RiskDecision
 from app.services.users import create_user
 
@@ -329,6 +329,8 @@ async def test_10_schema_invalid_provider_output_degrades_agent(base_ai_input):
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.agent_results["risk_interpreter"].status == "DEGRADED"
+    assert res.agent_results["risk_interpreter"].execution_provenance is not None
+    assert res.agent_results["risk_interpreter"].execution_provenance.model_used == "fixture-v1"
 
 
 # 11. Future news data (available_at > as_of) -> rejected by no-lookahead validator
@@ -519,7 +521,7 @@ async def test_20_deterministic_fingerprint_repeat(base_ai_input):
 @pytest.mark.asyncio
 async def test_21_provider_timeout_handled_safely(base_ai_input):
     provider = FixtureAIProvider(timeout_agents={"trade_thesis"})
-    config = ModelConfig(timeout_seconds=0.1)
+    config = ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS)
     orchestrator = AIOrchestrator(provider=provider, default_config=config)
 
     res = await orchestrator.analyze(base_ai_input, config=config)
@@ -650,7 +652,7 @@ async def test_28_risk_decision_not_evaluated_blocks(base_ai_input):
 @pytest.mark.asyncio
 async def test_29_hanging_provider_hard_timeout_and_cancellation(base_ai_input):
     provider = FixtureAIProvider(hanging_agents={"macro_news"})
-    config = ModelConfig(timeout_seconds=0.1)
+    config = ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS)
     orchestrator = AIOrchestrator(provider=provider, default_config=config)
 
     res = await orchestrator.analyze(base_ai_input, config=config)

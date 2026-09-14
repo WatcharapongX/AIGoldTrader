@@ -27,6 +27,7 @@ from app.services.ai.domain import (
 )
 from app.services.ai.provider import (
     AIProvider,
+    ModelBinding,
     ModelConfig,
     ProviderAuthError,
     ProviderCapacityExhausted,
@@ -66,7 +67,10 @@ class AIOrchestrator:
                     provider_type="openai_compatible",
                     config_profile="primary",
                     base_url=getattr(settings, "ai_provider_base_url", "https://api.openai.com/v1"),
-                    model_bindings=dict(getattr(settings, "ai_model_mapping", {})),
+                    model_bindings=tuple(
+                        ModelBinding(alias=alias, model=model)
+                        for alias, model in getattr(settings, "ai_model_mapping", {}).items()
+                    ),
                 )
             else:
                 target_provider = ProviderDescriptor(

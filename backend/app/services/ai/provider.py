@@ -5,11 +5,13 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import re
 import time
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+from urllib.parse import unquote, urlsplit, urlunsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.services.ai.domain import (
     META_CONTROLLER_ID,
@@ -20,6 +22,31 @@ logger = logging.getLogger(__name__)
 MAX_INPUT_BYTES_PER_AGENT = 20_000
 MAX_PROVIDER_OUTPUT_BYTES = 10_000
 MAX_PROVIDER_HTTP_RESPONSE_BYTES = 50_000
+# Measured Windows spawn-heavy runs exceeded 0.10s before useful worker execution;
+# 0.25s is the minimum truthful isolated-process execution budget on this runtime.
+MIN_PROVIDER_TIMEOUT_SECONDS = 0.25
+
+_SAFE_PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_CREDENTIAL_MARKERS = ("authorization", "bearer", "api_key", "apikey", "credential", "password", "secret", "token")
+
+
+def _looks_like_credential(value: str) -> bool:
+    lowered = value.casefold()
+    return lowered.startswith(("sk-", "sk_", "aiza")) or any(marker in lowered for marker in _CREDENTIAL_MARKERS)
+
+
+def sanitize_provider_url_for_logging(value: str) -> str:
+    """Return a URL safe for diagnostics, stripping userinfo, query, and fragment."""
+    try:
+        parsed = urlsplit(value.strip())
+        host = parsed.hostname
+        if not parsed.scheme or not host:
+            return "<invalid-provider-url>"
+        display_host = f"[{host}]" if ":" in host else host
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        return urlunsplit((parsed.scheme, f"{display_host}{port}", parsed.path, "", ""))
+    except (TypeError, ValueError):
+        return "<invalid-provider-url>"
 
 
 class AIProviderError(Exception):
@@ -70,6 +97,29 @@ class OutputBudgetExceeded(ProviderBudgetExceeded, ValueError):
     """Provider output exceeds the safe local boundary."""
 
 
+class ModelBinding(BaseModel):
+    """One immutable, bounded alias-to-vendor-model mapping."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    alias: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    model: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/:-]*$")
+
+    @field_validator("model")
+    @classmethod
+    def reject_secret_like_model_ids(cls, value: str) -> str:
+        if "://" in value or _looks_like_credential(value):
+            raise ValueError("Vendor model identifier must not contain URLs or credential material")
+        return value
+
+    @field_validator("alias")
+    @classmethod
+    def reject_secret_like_aliases(cls, value: str) -> str:
+        if _looks_like_credential(value):
+            raise ValueError("Model alias must not contain credential material")
+        return value
+
+
 class ProviderDescriptor(BaseModel):
     """Strict, immutable, serializable descriptor for AI providers.
 
@@ -79,36 +129,121 @@ class ProviderDescriptor(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    provider_id: str = Field(default="default_provider", min_length=1, max_length=64)
+    provider_id: str = Field(
+        default="default_provider", min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$"
+    )
     provider_type: Literal["fixture", "openai_compatible"] = "fixture"
     config_profile: Literal["primary", "fixture"] = "fixture"
     base_url: str | None = Field(default=None, max_length=512)
-    model_bindings: dict[str, str] = Field(default_factory=dict)
-    request_schema_version: str = Field(default="v1", max_length=16)
-    response_schema_version: str = Field(default="v1", max_length=16)
-    capabilities: tuple[str, ...] = ("structured_json", "system_prompt")
+    model_bindings: tuple[ModelBinding, ...] = Field(default_factory=tuple, max_length=16)
+    request_schema_version: str = Field(
+        default="v1", min_length=1, max_length=16, pattern=r"^[a-z0-9][a-z0-9_.-]*$"
+    )
+    response_schema_version: str = Field(
+        default="v1", min_length=1, max_length=16, pattern=r"^[a-z0-9][a-z0-9_.-]*$"
+    )
+    capabilities: tuple[
+        Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_.-]*$")], ...
+    ] = Field(default=("structured_json", "system_prompt"), max_length=16)
     enabled: bool = True
     live_external_only: bool = False
 
+    @field_validator("model_bindings", mode="before")
+    @classmethod
+    def normalize_model_bindings(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return tuple({"alias": alias, "model": model} for alias, model in value.items())
+        return value
+
+    @field_validator("provider_id", "request_schema_version", "response_schema_version")
+    @classmethod
+    def reject_secret_like_identity_fields(cls, value: str) -> str:
+        if _looks_like_credential(value):
+            raise ValueError("Provider identity fields must not contain credential material")
+        return value
+
+    @field_validator("capabilities")
+    @classmethod
+    def reject_secret_like_capabilities(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if any(_looks_like_credential(value) for value in values):
+            raise ValueError("Provider capabilities must not contain credential material")
+        return values
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        decoded = unquote(value)
+        if value != value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in decoded):
+            raise ValueError("Provider base_url must not contain whitespace or control characters")
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Provider base_url must be an absolute HTTP(S) URL")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("Provider base_url must not contain userinfo")
+        if parsed.query or parsed.fragment:
+            raise ValueError("Provider base_url must not contain a query or fragment")
+        if parsed.scheme == "http" and parsed.hostname.casefold() not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("Plain HTTP provider base_url is allowed only for localhost integration")
+        try:
+            _ = parsed.port
+        except ValueError:
+            raise ValueError("Provider base_url contains an invalid port") from None
+        return value.rstrip("/")
+
     @model_validator(mode="after")
     def validate_descriptor_invariants(self):
-        if self.provider_type == "openai_compatible" and self.config_profile == "fixture":
-            raise ValueError("openai_compatible provider cannot use fixture config profile")
+        if self.provider_type == "fixture":
+            if self.config_profile != "fixture":
+                raise ValueError("fixture provider must use fixture config profile")
+            if self.base_url is not None:
+                raise ValueError("fixture provider must not define an external base_url")
+            if self.model_bindings:
+                raise ValueError("fixture provider must not define external model bindings")
+        else:
+            if self.config_profile != "primary":
+                raise ValueError("openai_compatible provider must use primary config profile")
+            if self.base_url is None:
+                raise ValueError("openai_compatible provider requires an explicit base_url")
+            if not self.model_bindings:
+                raise ValueError("openai_compatible provider requires explicit non-empty model bindings")
+            aliases = [binding.alias for binding in self.model_bindings]
+            if len(set(aliases)) != len(aliases):
+                raise ValueError("Provider model binding aliases must be unique")
         return self
+
+    @property
+    def model_mapping(self) -> dict[str, str]:
+        return {binding.alias: binding.model for binding in self.model_bindings}
 
 
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    provider: str = "fixture"
-    model_alias: str = "fast-advisory"
+    provider: str = Field(default="fixture", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+    model_alias: str = Field(
+        default="fast-advisory", min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$"
+    )
     temperature: Decimal = Field(default=Decimal("0.0"), ge=Decimal("0.0"), le=Decimal("1.0"))
     max_input_tokens: int = Field(default=8192, ge=1, le=1_000_000)
     max_output_tokens: int = Field(default=1024, ge=64, le=8192)
     max_total_tokens: int = Field(default=9216, ge=65, le=1_008_192)
-    timeout_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
+    timeout_seconds: float = Field(default=10.0, ge=MIN_PROVIDER_TIMEOUT_SECONDS, le=60.0)
     max_retries: int = Field(default=1, ge=0, le=5)
-    schema_version: str = PROMPT_SCHEMA_VERSION
+    schema_version: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9_.-]*$",
+        default=PROMPT_SCHEMA_VERSION,
+    )
+
+    @field_validator("provider", "model_alias", "schema_version")
+    @classmethod
+    def reject_secret_like_request_identity(cls, value: str) -> str:
+        if _looks_like_credential(value):
+            raise ValueError("Provider request identity must not contain credential material")
+        return value
 
 
 class ProviderResult(BaseModel):
@@ -120,9 +255,21 @@ class ProviderResult(BaseModel):
     completion_tokens: int = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
     duration_ms: float = 0.0
-    provider_id: str = "fixture"
-    provider_type: str = "fixture"
-    model_used: str = "fixture-v1"
+    provider_id: str = Field(default="fixture", min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    provider_type: Literal["fixture", "openai_compatible"] = "fixture"
+    model_used: str = Field(
+        default="fixture-v1",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._/:-]*$",
+    )
+
+    @field_validator("provider_id", "model_used")
+    @classmethod
+    def reject_secret_like_result_identity(cls, value: str) -> str:
+        if _looks_like_credential(value):
+            raise ValueError("Provider result identity must not contain credential material")
+        return value
 
     @model_validator(mode="after")
     def consistent_token_accounting(self):
@@ -180,6 +327,7 @@ class FixtureAIProvider(AIProvider):
     def __init__(
         self,
         *,
+        provider_id: str = "fixture",
         fail_agents: set[str] | None = None,
         malformed_json_agents: set[str] | None = None,
         schema_invalid_agents: set[str] | None = None,
@@ -190,6 +338,9 @@ class FixtureAIProvider(AIProvider):
         agent_biases: dict[str, str] | None = None,
         agent_strengths: dict[str, str] | None = None,
     ):
+        if not _SAFE_PROVIDER_ID.fullmatch(provider_id):
+            raise ValueError("Fixture provider_id must be a safe bounded identifier")
+        self.provider_id = provider_id
         self.fail_agents = set(fail_agents or ())
         self.malformed_json_agents = set(malformed_json_agents or ())
         self.schema_invalid_agents = set(schema_invalid_agents or ())
@@ -244,9 +395,9 @@ class FixtureAIProvider(AIProvider):
                 completion_tokens=20,
                 total_tokens=120,
                 duration_ms=(time.perf_counter() - t0) * 1000,
-                provider_id="fixture",
+                provider_id=self.provider_id,
                 provider_type="fixture",
-                model_used=model_config.model_alias,
+                model_used="fixture-v1",
             )
 
         # 4. Simulate token budget exceeded
@@ -324,7 +475,7 @@ class FixtureAIProvider(AIProvider):
             completion_tokens=150,
             total_tokens=400,
             duration_ms=(time.perf_counter() - t0) * 1000,
-            provider_id="fixture",
+            provider_id=self.provider_id,
             provider_type="fixture",
-            model_used=model_config.model_alias,
+            model_used="fixture-v1",
         )

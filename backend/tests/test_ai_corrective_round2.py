@@ -30,8 +30,18 @@ from app.services.ai.domain import (
     AIZoneEvidence,
     compute_semantic_input_fingerprint,
 )
+from app.services.ai.execution import (
+    PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS,
+    PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS,
+)
 from app.services.ai.orchestrator import AIOrchestrator
-from app.services.ai.provider import AIProvider, FixtureAIProvider, ModelConfig, ProviderResult
+from app.services.ai.provider import (
+    MIN_PROVIDER_TIMEOUT_SECONDS,
+    AIProvider,
+    FixtureAIProvider,
+    ModelConfig,
+    ProviderResult,
+)
 from app.services.market_data.domain import Quote
 from app.services.market_data.provider import ReplayProvider
 
@@ -577,10 +587,14 @@ async def test_retries_share_one_hard_deadline_and_cancel_provider() -> None:
     result = await TradeThesisAgent().execute(
         authoritative_input(),
         provider,
-        ModelConfig(timeout_seconds=0.05, max_retries=5),
+        ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS, max_retries=5),
     )
     elapsed = time.perf_counter() - started
     assert result.status == "DEGRADED"
-    assert elapsed < 0.20
+    assert elapsed <= (
+        MIN_PROVIDER_TIMEOUT_SECONDS
+        + PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS
+        + PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS
+    )
     assert 1 <= provider.attempts <= 1 + 5
     assert provider.cancelled is True

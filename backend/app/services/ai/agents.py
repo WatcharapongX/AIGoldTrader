@@ -16,6 +16,7 @@ from app.services.ai.domain import (
     AgentAnalysisResult,
     AIAnalysisInput,
     AIAnalysisResult,
+    AIProviderExecutionProvenance,
     DirectionalBias,
     EvidenceStrength,
     MetaStatus,
@@ -30,6 +31,18 @@ from app.services.ai.provider import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _execution_provenance(res: Any, config: ModelConfig) -> AIProviderExecutionProvenance:
+    """Build server-authoritative provenance from a completed provider result."""
+    provider_type = res.provider_type
+    return AIProviderExecutionProvenance(
+        provider_id=res.provider_id,
+        provider_type=provider_type,
+        model_alias=config.model_alias,
+        model_used=res.model_used,
+        mode="fixture" if provider_type == "fixture" else "external",
+    )
 
 
 def compute_agent_agreement(biases: list[DirectionalBias]) -> AgentAgreement:
@@ -98,6 +111,7 @@ class BaseAnalyticalAgent:
             if isinstance(provider, ProviderDescriptor)
             else getattr(provider, "provider_id", getattr(provider, "provider", "fixture"))
         )
+        execution_provenance: AIProviderExecutionProvenance | None = None
 
         try:
             res = await analyze_with_controls(
@@ -109,11 +123,13 @@ class BaseAnalyticalAgent:
                 timeout_seconds=timeout_seconds,
             )
             raw = dict(res.raw_payload)
+            execution_provenance = _execution_provenance(res, config)
 
             # Enforce server-side authoritative fields that cannot be forged by model
             raw["agent_id"] = self.agent_id
             raw["agent_version"] = "ai-1.0.0"
-            raw["provider_provenance"] = getattr(res, "provider_id", actual_prov)
+            raw["provider_provenance"] = execution_provenance.provider_id
+            raw["execution_provenance"] = execution_provenance.model_dump(mode="json")
             raw["prompt_version"] = self.prompt_id
             raw["generated_at"] = now_utc.isoformat()
             raw["as_of"] = ai_input.as_of.isoformat()
@@ -139,7 +155,10 @@ class BaseAnalyticalAgent:
                 conflicting_factors_th=(),
                 warnings_th=(str(exc),),
                 missing_context_th=(f"Agent failure: {exc}",),
-                provider_provenance=actual_prov,
+                provider_provenance=(
+                    execution_provenance.provider_id if execution_provenance is not None else actual_prov
+                ),
+                execution_provenance=execution_provenance,
                 prompt_version=self.prompt_id,
                 generated_at=now_utc,
                 as_of=ai_input.as_of,
@@ -328,6 +347,7 @@ class MetaController:
         system_prompt = get_prompt(self.prompt_id)
 
         meta_failed = False
+        meta_execution_provenance: AIProviderExecutionProvenance | None = None
         try:
             res = await analyze_with_controls(
                 provider,
@@ -338,6 +358,7 @@ class MetaController:
                 timeout_seconds=timeout_seconds,
             )
             raw = dict(res.raw_payload)
+            meta_execution_provenance = _execution_provenance(res, config)
 
             # Strict validation: any forbidden fields (execute, order_type, stop_loss, etc.) fail here
             validated = MetaSynthesisOutput.model_validate(raw)
@@ -390,7 +411,7 @@ class MetaController:
         }
         analysis_fp = fingerprint(semantic_data)
 
-        actual_prov = (
+        configured_prov = (
             provider.provider_id
             if isinstance(provider, ProviderDescriptor)
             else getattr(provider, "provider_id", getattr(provider, "provider", "fixture"))
@@ -414,7 +435,10 @@ class MetaController:
             risk_decision_id=ai_input.risk_context.decision_id,
             risk_decision_status=ai_input.risk_context.decision,
             kill_switch_state=ai_input.kill_switch_context.state,
-            provider_provenance=actual_prov,
+            provider_provenance=(
+                meta_execution_provenance.provider_id if meta_execution_provenance is not None else configured_prov
+            ),
+            execution_provenance=meta_execution_provenance,
             prompt_versions=prompt_versions,
             generated_at=now_utc,
             input_fingerprint=ai_input.input_fingerprint,

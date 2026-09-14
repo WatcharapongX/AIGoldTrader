@@ -19,6 +19,8 @@ from app.core.masking import mask_secret_text
 _POLL_SECONDS = 0.005
 _TERMINATE_GRACE_SECONDS = 0.03
 _KILL_GRACE_SECONDS = 0.03
+PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS = _TERMINATE_GRACE_SECONDS + _KILL_GRACE_SECONDS
+PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS = 0.05
 _ACTIVE_PROCESSES: set[BaseProcess] = set()
 
 
@@ -200,7 +202,13 @@ def _record_attempt(provider: Any, request: dict[str, Any], attempt: int, seen: 
 
 
 class ProviderExecutor:
-    """Run one provider request in a disposable process under a hard parent deadline."""
+    """Run one provider request in a disposable process under a parent execution deadline.
+
+    Admission has its own queue timeout. The execution deadline begins immediately
+    after admission and includes multiprocessing setup, spawn, worker startup,
+    provider work, and retries. Termination may add the explicitly bounded process
+    cleanup grace plus small operating-system scheduling tolerance.
+    """
 
     def __init__(self, max_concurrent: int = 6, queue_timeout_seconds: float = 15.0):
         self.limiter = GlobalProviderLimiter(
@@ -236,6 +244,7 @@ class ProviderExecutor:
         from app.services.ai.provider import (
             MAX_INPUT_BYTES_PER_AGENT,
             MAX_PROVIDER_OUTPUT_BYTES,
+            MIN_PROVIDER_TIMEOUT_SECONDS,
             InputBudgetExceeded,
             OutputBudgetExceeded,
             ProviderAuthError,
@@ -256,7 +265,11 @@ class ProviderExecutor:
                 f"Provider input budget exceeded for {agent_id}: {input_bytes}>{MAX_INPUT_BYTES_PER_AGENT}"
             )
 
-        timeout = timeout_seconds or model_config.timeout_seconds
+        timeout = timeout_seconds if timeout_seconds is not None else model_config.timeout_seconds
+        if not MIN_PROVIDER_TIMEOUT_SECONDS <= timeout <= 60.0:
+            raise ValueError(
+                f"Provider execution timeout must be between {MIN_PROVIDER_TIMEOUT_SECONDS}s and 60.0s"
+            )
         request = {
             "agent_id": agent_id,
             "system_prompt": system_prompt,
@@ -268,6 +281,8 @@ class ProviderExecutor:
         # 1. Acquire bounded global concurrency slot BEFORE worker creation
         await self.limiter.acquire()
         acquired = True
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
 
         recv_pipe: Any = None
         send_pipe: Any = None
@@ -279,7 +294,8 @@ class ProviderExecutor:
             context = mp.get_context("spawn")
             recv_pipe, send_pipe = context.Pipe(duplex=False)
             process = context.Process(target=_provider_worker_entry, args=(provider, request, send_pipe), daemon=True)
-            deadline = asyncio.get_running_loop().time() + timeout
+            if loop.time() >= deadline:
+                raise ProviderTimeoutError(f"Provider execution timeout during process setup for {agent_id}")
             process.start()
             _ACTIVE_PROCESSES.add(process)
             attempts = getattr(provider, "attempts", None)
@@ -308,7 +324,7 @@ class ProviderExecutor:
 
                 if message is not None:
                     break
-                if asyncio.get_running_loop().time() >= deadline:
+                if loop.time() >= deadline:
                     if process is not None and process.is_alive():
                         _terminate_worker(process)
                     if hasattr(provider, "cancelled"):

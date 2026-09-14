@@ -21,7 +21,7 @@ import os
 import pickle
 import threading
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -47,11 +47,14 @@ from app.services.ai.domain import (
     compute_semantic_input_fingerprint,
 )
 from app.services.ai.execution import (
+    PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS,
+    PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS,
     active_provider_process_count,
     provider_executor,
 )
 from app.services.ai.orchestrator import AIOrchestrator
 from app.services.ai.provider import (
+    MIN_PROVIDER_TIMEOUT_SECONDS,
     FixtureAIProvider,
     ModelConfig,
     OutputBudgetExceeded,
@@ -64,8 +67,26 @@ from app.services.ai.provider import (
     ProviderRequestError,
     ProviderResult,
     ProviderSchemaError,
+    ProviderTimeoutError,
     analyze_with_controls,
 )
+
+TEST_MODEL_MAPPING = {"fast-advisory": "gpt-4o-mini"}
+
+
+class SlowFixtureProvider(FixtureAIProvider):
+    async def analyze(self, **kwargs):
+        await asyncio.sleep(0.2)
+        return await super().analyze(**kwargs)
+
+
+class CancellationResistantFixtureProvider(FixtureAIProvider):
+    async def analyze(self, **kwargs):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            while True:
+                await asyncio.sleep(60)
 
 
 def make_test_ai_input(now_time: dt.datetime | None = None) -> AIAnalysisInput:
@@ -210,12 +231,223 @@ def test_provider_descriptor_defaults_and_immutability():
     assert descriptor.provider_id == "default_provider"
     assert descriptor.provider_type == "fixture"
     assert descriptor.config_profile == "fixture"
-    assert descriptor.model_bindings == {}
+    assert descriptor.model_bindings == ()
     assert descriptor.enabled is True
 
     # Immutability check
     with pytest.raises((TypeError, ValueError)):
         descriptor.provider_id = "mutated"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("provider_type", "config_profile", "valid"),
+    [
+        ("fixture", "fixture", True),
+        ("fixture", "primary", False),
+        ("openai_compatible", "primary", True),
+        ("openai_compatible", "fixture", False),
+    ],
+)
+def test_provider_descriptor_enforces_complete_type_profile_matrix(provider_type, config_profile, valid):
+    kwargs = {
+        "provider_type": provider_type,
+        "config_profile": config_profile,
+    }
+    if provider_type == "openai_compatible":
+        kwargs.update(base_url="https://provider.example/v1", model_bindings=TEST_MODEL_MAPPING)
+    if valid:
+        ProviderDescriptor(**kwargs)
+    else:
+        with pytest.raises(ValueError):
+            ProviderDescriptor(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://user:password@example.com/v1",
+        "https://TOKEN@example.com/v1",
+        "https://example.com/v1?api_key=SECRET",
+        "https://example.com/v1#secret",
+        " https://example.com/v1",
+        "https://example.com/v1%0a",
+        "http://provider.example/v1",
+    ],
+)
+def test_external_descriptor_rejects_credential_bearing_or_unsafe_urls(base_url):
+    with pytest.raises(ValueError):
+        ProviderDescriptor(
+            provider_id="safe_provider",
+            provider_type="openai_compatible",
+            config_profile="primary",
+            base_url=base_url,
+            model_bindings=TEST_MODEL_MAPPING,
+        )
+
+
+def test_external_descriptor_requires_bounded_explicit_immutable_model_bindings():
+    with pytest.raises(ValueError, match="non-empty"):
+        ProviderDescriptor(
+            provider_id="external",
+            provider_type="openai_compatible",
+            config_profile="primary",
+            base_url="https://provider.example/v1",
+        )
+    with pytest.raises(ValueError):
+        ProviderDescriptor(
+            provider_id="external",
+            provider_type="openai_compatible",
+            config_profile="primary",
+            base_url="https://provider.example/v1",
+            model_bindings={f"model-{i}": "vendor-model" for i in range(17)},
+        )
+    for bindings in (
+        {"A": "vendor-model"},
+        {"a" * 65: "vendor-model"},
+        {"fast-advisory": "X" * 129},
+        {"fast-advisory": "https://secret.example/model"},
+    ):
+        with pytest.raises(ValueError):
+            ProviderDescriptor(
+                provider_id="external",
+                provider_type="openai_compatible",
+                config_profile="primary",
+                base_url="https://provider.example/v1",
+                model_bindings=bindings,
+            )
+
+    descriptor = ProviderDescriptor(
+        provider_id="external",
+        provider_type="openai_compatible",
+        config_profile="primary",
+        base_url="https://provider.example/v1",
+        model_bindings=TEST_MODEL_MAPPING,
+    )
+    assert descriptor.model_mapping == TEST_MODEL_MAPPING
+    with pytest.raises((TypeError, ValueError)):
+        descriptor.model_bindings[0].model = "changed"  # type: ignore[misc]
+
+
+def test_provider_descriptor_rejects_oversized_or_secret_like_identity_fields():
+    for provider_id in ("P" * 65, "sk-live-secret", "provider id"):
+        with pytest.raises(ValueError):
+            ProviderDescriptor(provider_id=provider_id)
+
+
+def test_model_config_enforces_measured_windows_subprocess_minimum():
+    with pytest.raises(ValueError):
+        ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS - 0.001)
+    assert ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS).timeout_seconds == MIN_PROVIDER_TIMEOUT_SECONDS
+    assert ModelConfig(timeout_seconds=10.0).timeout_seconds == 10.0
+
+
+@pytest.mark.asyncio
+async def test_execution_timeout_override_cannot_bypass_windows_minimum():
+    with pytest.raises(ValueError, match="execution timeout must be between"):
+        await analyze_with_controls(
+            FixtureAIProvider(),
+            agent_id="tiny_timeout",
+            system_prompt="system",
+            user_payload="{}",
+            model_config=ModelConfig(),
+            timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS - 0.001,
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancellation_resistant_worker_is_killed_within_documented_contract():
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(ProviderTimeoutError):
+        await analyze_with_controls(
+            CancellationResistantFixtureProvider(),
+            agent_id="cancellation_resistant",
+            system_prompt="system",
+            user_payload="{}",
+            model_config=ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS, max_retries=3),
+        )
+    elapsed = asyncio.get_running_loop().time() - started
+    assert elapsed <= (
+        MIN_PROVIDER_TIMEOUT_SECONDS
+        + PROVIDER_PROCESS_CLEANUP_GRACE_SECONDS
+        + PROVIDER_OS_SCHEDULING_TOLERANCE_SECONDS
+    )
+    assert active_provider_process_count() == 0
+
+
+@pytest.mark.parametrize(("max_retries", "expected_calls"), [(0, 1), (1, 2), (3, 4)])
+@pytest.mark.asyncio
+async def test_spawned_rate_limit_retries_match_configured_count(
+    monkeypatch: pytest.MonkeyPatch, max_retries: int, expected_calls: int
+):
+    calls = 0
+
+    class RateLimitServer(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            nonlocal calls
+            calls += 1
+            size = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(size)
+            body = b'{"error":"rate limited"}'
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, _format, *_args):
+            pass
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), RateLimitServer)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    monkeypatch.setenv("AI_PROVIDER_API_KEY", "rate-limit-test-key")
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ai_provider_api_key", "rate-limit-test-key")
+    descriptor = ProviderDescriptor(
+        provider_id="rate_limit_provider",
+        provider_type="openai_compatible",
+        config_profile="primary",
+        base_url=f"http://127.0.0.1:{httpd.server_address[1]}",
+        model_bindings=TEST_MODEL_MAPPING,
+    )
+    try:
+        with pytest.raises(ProviderRateLimitError):
+            await analyze_with_controls(
+                descriptor,
+                agent_id="rate_limit_test",
+                system_prompt="system",
+                user_payload="{}",
+                model_config=ModelConfig(timeout_seconds=20.0, max_retries=max_retries),
+            )
+        assert calls == expected_calls
+        assert active_provider_process_count() == 0
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+@pytest.mark.asyncio
+async def test_network_error_defensively_redacts_unsafe_direct_adapter_url():
+    secret = "URL_PASSWORD_VALUE_887766"
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"connection failed for {request.url}", request=request)
+
+    provider = OpenAICompatibleProvider(
+        api_key="different-api-key",
+        model_mapping=TEST_MODEL_MAPPING,
+        base_url=f"https://user:{secret}@provider.example/v1?api_key={secret}",
+        transport=httpx.MockTransport(fail),
+    )
+    with pytest.raises(ProviderNetworkError) as caught:
+        await provider.analyze(
+            agent_id="test_agent",
+            system_prompt="system",
+            user_payload="{}",
+            model_config=ModelConfig(),
+        )
+    assert secret not in str(caught.value)
+    assert "user" not in str(caught.value)
+    assert "api_key" not in str(caught.value)
 
 
 def test_provider_descriptor_serialization_and_picklability():
@@ -246,8 +478,13 @@ def test_provider_descriptor_rejects_raw_secrets():
 
 
 def test_provider_descriptor_rejects_openai_with_fixture_profile():
-    with pytest.raises(ValueError, match="cannot use fixture config profile"):
-        ProviderDescriptor(provider_type="openai_compatible", config_profile="fixture")
+    with pytest.raises(ValueError, match="must use primary config profile"):
+        ProviderDescriptor(
+            provider_type="openai_compatible",
+            config_profile="fixture",
+            base_url="https://provider.example/v1",
+            model_bindings=TEST_MODEL_MAPPING,
+        )
 
 
 def test_provider_descriptor_extra_forbid():
@@ -286,6 +523,8 @@ def test_factory_missing_secret_raises(monkeypatch: pytest.MonkeyPatch):
         provider_id="custom_ext",
         provider_type="openai_compatible",
         config_profile="primary",
+        base_url="https://provider.example/v1",
+        model_bindings=TEST_MODEL_MAPPING,
     )
     with pytest.raises(ProviderAuthError, match="Configured external provider credential is unavailable"):
         ProviderFactory.create_provider(descriptor)
@@ -319,13 +558,18 @@ def test_settings_model_mapping_wired_through_descriptor(monkeypatch: pytest.Mon
     monkeypatch.setenv("AI_PROVIDER_API_KEY", "test-key")
     settings = get_settings()
     monkeypatch.setattr(settings, "ai_provider_api_key", "test-key")
-
-    descriptor = ProviderDescriptor(
-        provider_id="mapped_provider",
-        provider_type="openai_compatible",
-        config_profile="primary",
-        model_bindings={"fast-advisory": "gpt-4o-mini", "reasoning-advisory": "o1-mini"},
+    monkeypatch.setattr(settings, "ai_provider_mode", "external")
+    monkeypatch.setattr(settings, "ai_provider_type", "openai_compatible")
+    monkeypatch.setattr(settings, "ai_provider_base_url", "https://provider.example/v1")
+    monkeypatch.setattr(
+        settings,
+        "ai_model_mapping",
+        {"fast-advisory": "gpt-4o-mini", "reasoning-advisory": "o1-mini"},
     )
+
+    descriptor = AIOrchestrator().provider
+    assert isinstance(descriptor, ProviderDescriptor)
+    assert descriptor.model_mapping == settings.ai_model_mapping
     provider = ProviderFactory.create_provider(descriptor)
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.model_mapping["fast-advisory"] == "gpt-4o-mini"
@@ -362,6 +606,7 @@ async def test_openai_adapter_success():
     transport = httpx.MockTransport(mock_handler)
     provider = OpenAICompatibleProvider(
         api_key="mock-api-key",
+        model_mapping=TEST_MODEL_MAPPING,
         transport=transport,
     )
     config = ModelConfig(timeout_seconds=5.0)
@@ -395,7 +640,9 @@ async def test_openai_adapter_missing_usage_raises_schema_error():
         )
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-api-key", transport=transport)
+    provider = OpenAICompatibleProvider(
+        api_key="mock-api-key", model_mapping=TEST_MODEL_MAPPING, transport=transport
+    )
     config = ModelConfig(timeout_seconds=5.0)
 
     with pytest.raises(ProviderSchemaError, match="usage"):
@@ -420,7 +667,7 @@ async def test_openai_adapter_inconsistent_token_accounting_raises_schema_error(
         )
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-key", transport=transport)
+    provider = OpenAICompatibleProvider(api_key="mock-key", model_mapping=TEST_MODEL_MAPPING, transport=transport)
     config = ModelConfig(timeout_seconds=5.0)
 
     with pytest.raises(ProviderSchemaError, match="inconsistent"):
@@ -454,7 +701,7 @@ async def test_openai_adapter_rejects_invalid_token_types(bad_usage):
         )
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-key", transport=transport)
+    provider = OpenAICompatibleProvider(api_key="mock-key", model_mapping=TEST_MODEL_MAPPING, transport=transport)
     config = ModelConfig(timeout_seconds=5.0)
 
     with pytest.raises(ProviderSchemaError):
@@ -475,7 +722,7 @@ async def test_http_entity_streaming_aborts_on_body_exceeding_byte_limit():
         return httpx.Response(200, content=huge_chunk)
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-key", transport=transport)
+    provider = OpenAICompatibleProvider(api_key="mock-key", model_mapping=TEST_MODEL_MAPPING, transport=transport)
     config = ModelConfig(timeout_seconds=5.0)
 
     with pytest.raises((OutputBudgetExceeded, ProviderBudgetExceeded), match="exceeded limit"):
@@ -493,7 +740,9 @@ async def test_openai_adapter_auth_failure_401():
         return httpx.Response(401, text="Unauthorized: invalid api key")
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-api-key", transport=transport)
+    provider = OpenAICompatibleProvider(
+        api_key="mock-api-key", model_mapping=TEST_MODEL_MAPPING, transport=transport
+    )
     config = ModelConfig(timeout_seconds=5.0, max_retries=2)
 
     with pytest.raises(ProviderAuthError, match="HTTP 401"):
@@ -511,7 +760,9 @@ async def test_openai_adapter_rate_limit_429():
         return httpx.Response(429, text="Rate limit exceeded")
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-api-key", transport=transport)
+    provider = OpenAICompatibleProvider(
+        api_key="mock-api-key", model_mapping=TEST_MODEL_MAPPING, transport=transport
+    )
     config = ModelConfig(timeout_seconds=5.0)
 
     with pytest.raises(ProviderRateLimitError, match="HTTP 429"):
@@ -529,7 +780,9 @@ async def test_openai_adapter_client_error_400():
         return httpx.Response(400, text="Bad Request: context length exceeded")
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-api-key", transport=transport)
+    provider = OpenAICompatibleProvider(
+        api_key="mock-api-key", model_mapping=TEST_MODEL_MAPPING, transport=transport
+    )
     config = ModelConfig(timeout_seconds=5.0)
 
     with pytest.raises(ProviderRequestError, match="HTTP 400"):
@@ -547,7 +800,9 @@ async def test_openai_adapter_server_error_500():
         return httpx.Response(500, text="Internal Server Error")
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-api-key", transport=transport)
+    provider = OpenAICompatibleProvider(
+        api_key="mock-api-key", model_mapping=TEST_MODEL_MAPPING, transport=transport
+    )
     config = ModelConfig(timeout_seconds=5.0)
 
     with pytest.raises(ProviderNetworkError, match="HTTP 500"):
@@ -570,7 +825,9 @@ async def test_openai_adapter_malformed_json_response():
         )
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-api-key", transport=transport)
+    provider = OpenAICompatibleProvider(
+        api_key="mock-api-key", model_mapping=TEST_MODEL_MAPPING, transport=transport
+    )
     config = ModelConfig(timeout_seconds=5.0)
 
     with pytest.raises(ProviderSchemaError, match="JSON"):
@@ -596,7 +853,9 @@ async def test_openai_adapter_output_byte_limit_exceeded():
         )
 
     transport = httpx.MockTransport(mock_handler)
-    provider = OpenAICompatibleProvider(api_key="mock-api-key", transport=transport)
+    provider = OpenAICompatibleProvider(
+        api_key="mock-api-key", model_mapping=TEST_MODEL_MAPPING, transport=transport
+    )
     config = ModelConfig(timeout_seconds=5.0)
 
     with pytest.raises(OutputBudgetExceeded, match="exceeded output budget"):
@@ -631,7 +890,9 @@ async def test_zero_secret_leakage_across_failure_modes():
             return httpx.Response(code, text=f"Error containing {secret_key}")
 
         transport = httpx.MockTransport(mock_handler)
-        provider = OpenAICompatibleProvider(api_key=secret_key, transport=transport)
+        provider = OpenAICompatibleProvider(
+            api_key=secret_key, model_mapping=TEST_MODEL_MAPPING, transport=transport
+        )
         config = ModelConfig(timeout_seconds=2.0)
 
         try:
@@ -760,17 +1021,49 @@ async def test_admission_slot_recovery_on_pipe_or_process_failure():
 
 
 @pytest.mark.asyncio
+async def test_execution_deadline_starts_before_process_resource_setup():
+    provider = ProviderDescriptor()
+    config = ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS)
+    recv_pipe = MagicMock()
+    send_pipe = MagicMock()
+    process = MagicMock()
+    process.is_alive.return_value = False
+    process.pid = None
+
+    def delayed_pipe(*, duplex):
+        assert duplex is False
+        import time
+
+        time.sleep(MIN_PROVIDER_TIMEOUT_SECONDS + 0.02)
+        return recv_pipe, send_pipe
+
+    with patch("multiprocessing.get_context") as get_context:
+        context = get_context.return_value
+        context.Pipe.side_effect = delayed_pipe
+        context.Process.return_value = process
+        with pytest.raises(ProviderTimeoutError, match="during process setup"):
+            await provider_executor.execute(
+                provider,
+                agent_id="setup_deadline",
+                system_prompt="sys",
+                user_payload="{}",
+                model_config=config,
+            )
+
+    process.start.assert_not_called()
+    recv_pipe.close.assert_called_once()
+    send_pipe.close.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_global_concurrency_bounding():
     provider_executor.configure_concurrency(max_concurrent=2, queue_timeout_seconds=15.0)
 
     peak_workers = 0
-    provider = FixtureAIProvider()
-    config = ModelConfig(timeout_seconds=5.0)
+    provider = SlowFixtureProvider()
+    config = ModelConfig(timeout_seconds=10.0)
 
     async def call_agent(aid: str):
-        nonlocal peak_workers
-        workers = active_provider_process_count()
-        peak_workers = max(peak_workers, workers)
         res = await analyze_with_controls(
             provider,
             agent_id=aid,
@@ -780,11 +1073,14 @@ async def test_global_concurrency_bounding():
         )
         return res
 
-    tasks = [call_agent(f"agent_{i}") for i in range(6)]
+    tasks = [asyncio.create_task(call_agent(f"agent_{i}")) for i in range(6)]
+    while not all(task.done() for task in tasks):
+        peak_workers = max(peak_workers, active_provider_process_count())
+        await asyncio.sleep(0.005)
     results = await asyncio.gather(*tasks)
 
     assert len(results) == 6
-    assert peak_workers <= 2, f"Peak workers exceeded limit: {peak_workers} > 2"
+    assert 0 < peak_workers <= 2, f"Peak workers outside expected bound: {peak_workers}"
     assert active_provider_process_count() == 0
 
     provider_executor.configure_concurrency(max_concurrent=6, queue_timeout_seconds=15.0)
@@ -794,7 +1090,7 @@ async def test_global_concurrency_bounding():
 async def test_backpressure_queue_timeout_rejects():
     provider_executor.configure_concurrency(max_concurrent=1, queue_timeout_seconds=0.05)
 
-    provider = FixtureAIProvider()
+    provider = SlowFixtureProvider()
     config = ModelConfig(timeout_seconds=5.0)
 
     async def long_task():
@@ -839,13 +1135,67 @@ async def test_provider_provenance_spoofing_defeated():
 
     assert res.provider_provenance == "fixture"
     assert res.provider_provenance != "attacker_spoofed_provider"
+    assert res.execution_provenance is not None
+    assert res.execution_provenance.model_alias == "fast-advisory"
+    assert res.execution_provenance.model_used == "fixture-v1"
     for _agent_id, a_res in res.agent_results.items():
         assert a_res.provider_provenance == "fixture"
         assert a_res.provider_provenance != "attacker_spoofed_provider"
+        assert a_res.execution_provenance is not None
+        assert a_res.execution_provenance.provider_id == "fixture"
+
+
+@pytest.mark.asyncio
+async def test_custom_fixture_descriptor_preserves_identity_end_to_end():
+    descriptor = ProviderDescriptor(provider_id="primary-fixture")
+    result = await AIOrchestrator(descriptor=descriptor).analyze(make_test_ai_input())
+    assert result.provider_provenance == "primary-fixture"
+    assert result.execution_provenance is not None
+    assert result.execution_provenance.provider_id == "primary-fixture"
+    assert result.execution_provenance.provider_type == "fixture"
+    assert result.execution_provenance.model_used == "fixture-v1"
+    assert all(
+        agent.execution_provenance is not None
+        and agent.execution_provenance.provider_id == "primary-fixture"
+        for agent in result.agent_results.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_zero_call_gate_has_no_execution_provenance():
+    ai_input = make_test_ai_input()
+    blocked = ai_input.model_copy(
+        update={"kill_switch_context": ai_input.kill_switch_context.model_copy(update={"state": "ACTIVE"})}
+    )
+    result = await AIOrchestrator().analyze(blocked)
+    assert result.execution_provenance is None
+    assert result.agent_results == {}
 
 
 @pytest.mark.asyncio
 async def test_orchestrator_auth_failure_degrades_gracefully(monkeypatch: pytest.MonkeyPatch):
+    calls = 0
+
+    class AuthFailureServer(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            nonlocal calls
+            calls += 1
+            size = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(size)
+            body = b'{"error":"unauthorized"}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, _format, *_args):
+            pass
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), AuthFailureServer)
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+
     monkeypatch.setenv("AI_PROVIDER_API_KEY", "bad-key")
     settings = get_settings()
     monkeypatch.setattr(settings, "ai_provider_api_key", "bad-key")
@@ -854,17 +1204,24 @@ async def test_orchestrator_auth_failure_degrades_gracefully(monkeypatch: pytest
         provider_id="fail_auth_provider",
         provider_type="openai_compatible",
         config_profile="primary",
+        base_url=f"http://127.0.0.1:{httpd.server_address[1]}",
+        model_bindings=TEST_MODEL_MAPPING,
     )
-
-    def mock_handler(_req: httpx.Request) -> httpx.Response:
-        return httpx.Response(401, text="Unauthorized key")
-
-    ProviderFactory.register_test_transport("fail_auth_provider", httpx.MockTransport(mock_handler))
+    ai_input = make_test_ai_input()
+    before = ai_input.model_dump(mode="json")
     try:
-        orch = AIOrchestrator(descriptor=descriptor)
-        assert orch.provider == descriptor
+        result = await AIOrchestrator(
+            descriptor=descriptor, default_config=ModelConfig(timeout_seconds=20.0, max_retries=3)
+        ).analyze(ai_input)
+        assert result.status == "UNAVAILABLE"
+        assert calls == 7
+        assert all(agent.status != "READY" for agent in result.agent_results.values())
+        assert ai_input.model_dump(mode="json") == before
+        assert result.execution_provenance is None
+        assert active_provider_process_count() == 0
     finally:
-        ProviderFactory.clear_test_transports()
+        httpd.shutdown()
+        httpd.server_close()
 
 
 # ============================================================================
@@ -876,6 +1233,7 @@ async def test_orchestrator_auth_failure_degrades_gracefully(monkeypatch: pytest
 async def test_mock_server_spawn_full_orchestration_all_agents(monkeypatch: pytest.MonkeyPatch):
     """Verify complete analytical pipeline (6 agents + MetaController) across real spawn boundary."""
     called_agents = []
+    called_models = []
 
     def make_response_for_body(body: dict) -> dict:
         messages = body.get("messages", [])
@@ -910,6 +1268,7 @@ async def test_mock_server_spawn_full_orchestration_all_agents(monkeypatch: pyte
         def do_POST(self):
             content_len = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(content_len))
+            called_models.append(body["model"])
             resp_payload = make_response_for_body(body)
             payload = {
                 "choices": [{"message": {"content": json.dumps(resp_payload)}}],
@@ -938,11 +1297,11 @@ async def test_mock_server_spawn_full_orchestration_all_agents(monkeypatch: pyte
         provider_type="openai_compatible",
         config_profile="primary",
         base_url=base_url,
-        model_bindings={"fast-advisory": "gpt-4o-mini", "reasoning-advisory": "gpt-4o-mini"},
+        model_bindings={"fast-advisory": "test-model-fast-123"},
     )
 
     try:
-        config = ModelConfig(timeout_seconds=20.0)
+        config = ModelConfig(provider="ATTACKER_FAKE_PROVIDER", timeout_seconds=20.0)
         ai_input = make_test_ai_input()
         orch = AIOrchestrator(descriptor=descriptor, default_config=config)
 
@@ -951,12 +1310,23 @@ async def test_mock_server_spawn_full_orchestration_all_agents(monkeypatch: pyte
         assert isinstance(res, AIAnalysisResult)
         assert res.status == "READY"
         assert res.provider_provenance == "mock_all_agents"
+        assert res.execution_provenance is not None
+        assert res.execution_provenance.model_dump() == {
+            "provider_id": "mock_all_agents",
+            "provider_type": "openai_compatible",
+            "model_alias": "fast-advisory",
+            "model_used": "test-model-fast-123",
+            "mode": "external",
+        }
         assert len(res.agent_results) == 6
         for _agent_id, a_res in res.agent_results.items():
             assert a_res.provider_provenance == "mock_all_agents"
             assert a_res.status == "READY"
+            assert a_res.execution_provenance == res.execution_provenance
 
         assert len(called_agents) == 7  # 6 analytical agents + 1 MetaController
+        assert called_models == ["test-model-fast-123"] * 7
+        assert "ATTACKER_FAKE_PROVIDER" not in res.model_dump_json()
         assert active_provider_process_count() == 0
     finally:
         httpd.shutdown()
@@ -976,11 +1346,13 @@ async def test_live_external_llm_smoke():
     if not api_key or mode != "external":
         pytest.skip("BLOCKED BY CREDENTIAL AVAILABILITY: AI_PROVIDER_API_KEY not set or AI_PROVIDER_MODE != external")
 
+    settings = Settings()
     descriptor = ProviderDescriptor(
         provider_id="live_test",
         provider_type="openai_compatible",
         config_profile="primary",
-        base_url=os.environ.get("AI_PROVIDER_BASE_URL"),
+        base_url=settings.ai_provider_base_url,
+        model_bindings=settings.ai_model_mapping,
     )
     config = ModelConfig(timeout_seconds=15.0)
     res = await analyze_with_controls(

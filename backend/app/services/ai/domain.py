@@ -37,6 +37,18 @@ MetaStatus = Literal[
     "BLOCKED_BY_RISK",
     "BLOCKED_BY_UPSTREAM",
 ]
+
+
+class AIProviderExecutionProvenance(BaseModel):
+    """Immutable, non-secret identity of one completed provider execution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    provider_type: Literal["fixture", "openai_compatible"]
+    model_alias: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    model_used: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/:-]*$")
+    mode: Literal["fixture", "external"]
 AuthorityAvailability = Literal["AVAILABLE", "STALE", "UNAVAILABLE"]
 
 # Explicit Phase 3 -> AI temporal projection audit. Every clock on the actual
@@ -108,6 +120,7 @@ class AgentAnalysisResult(BaseModel):
     warnings_th: tuple[str, ...] = ()
     missing_context_th: tuple[str, ...] = ()
     provider_provenance: str = "fixture"
+    execution_provenance: AIProviderExecutionProvenance | None = None
     prompt_version: str = "v1"
     generated_at: AwareDatetime
     as_of: AwareDatetime
@@ -680,6 +693,8 @@ class AIAnalysisResult(BaseModel):
     kill_switch_state: str = "INACTIVE"
 
     provider_provenance: str = "fixture"
+    # Meta Controller execution identity. None means no successful Meta provider call.
+    execution_provenance: AIProviderExecutionProvenance | None = None
     prompt_versions: dict[str, str] = Field(default_factory=dict)
     generated_at: AwareDatetime
     input_fingerprint: str = ""

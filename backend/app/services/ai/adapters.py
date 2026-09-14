@@ -31,16 +31,10 @@ from app.services.ai.provider import (
     ProviderResult,
     ProviderSchemaError,
     ProviderTimeoutError,
+    sanitize_provider_url_for_logging,
 )
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_MODEL_MAPPING: dict[str, str] = {
-    "fast-advisory": "gpt-4o-mini",
-    "reasoning-advisory": "gpt-4o",
-    "deep-analysis": "gpt-4o",
-}
-
 
 class ProviderConfigResolver:
     """Worker-side resolution of secrets from Settings or environment.
@@ -81,14 +75,16 @@ class OpenAIChatCompletionsProvider(AIProvider):
     def __init__(
         self,
         api_key: str,
+        model_mapping: dict[str, str],
         base_url: str = "https://api.openai.com/v1",
-        model_mapping: dict[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         provider_id: str = "configured_external",
     ):
+        if not model_mapping:
+            raise ValueError("External provider requires explicit non-empty model mapping")
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
-        self.model_mapping = dict(model_mapping or DEFAULT_MODEL_MAPPING)
+        self.model_mapping = dict(model_mapping)
         self.transport = transport
         self.provider_id = provider_id
 
@@ -149,7 +145,10 @@ class OpenAIChatCompletionsProvider(AIProvider):
             msg = mask_secret_text(f"Provider request timed out after {timeout}s: {exc}", [self.api_key])
             raise ProviderTimeoutError(msg) from exc
         except (httpx.ConnectError, httpx.NetworkError, httpx.ProtocolError) as exc:
-            msg = mask_secret_text(f"Provider network error connecting to {self.base_url}: {exc}", [self.api_key])
+            safe_url = sanitize_provider_url_for_logging(self.base_url)
+            msg = mask_secret_text(
+                f"Provider network error connecting to {safe_url}: {type(exc).__name__}", [self.api_key]
+            )
             raise ProviderNetworkError(msg) from exc
         except ProviderBudgetExceeded:
             raise
@@ -308,12 +307,13 @@ class ProviderFactory:
             raise ProviderAuthError(f"AI Provider '{descriptor.provider_id}' is disabled")
 
         if descriptor.provider_type == "fixture":
-            return FixtureAIProvider()
+            return FixtureAIProvider(provider_id=descriptor.provider_id)
 
         if descriptor.provider_type == "openai_compatible":
             api_key = ProviderConfigResolver.resolve_secret(descriptor.config_profile)
-            base_url = descriptor.base_url or "https://api.openai.com/v1"
-            mapping = dict(descriptor.model_bindings or DEFAULT_MODEL_MAPPING)
+            assert descriptor.base_url is not None
+            base_url = descriptor.base_url
+            mapping = descriptor.model_mapping
 
             transport = cls._custom_transports.get(descriptor.provider_id)
             return OpenAIChatCompletionsProvider(

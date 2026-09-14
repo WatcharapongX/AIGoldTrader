@@ -19,6 +19,7 @@ from app.services.ai.domain import (
 from app.services.ai.execution import active_provider_process_count
 from app.services.ai.orchestrator import AIOrchestrator
 from app.services.ai.provider import (
+    MIN_PROVIDER_TIMEOUT_SECONDS,
     AIProvider,
     FixtureAIProvider,
     ModelConfig,
@@ -138,7 +139,7 @@ async def test_cancellation_resistant_provider_cannot_defeat_wall_clock_deadline
             agent_id="cancellation_resistant",
             system_prompt="system",
             user_payload="{}",
-            model_config=ModelConfig(timeout_seconds=0.10, max_retries=3),
+            model_config=ModelConfig(timeout_seconds=MIN_PROVIDER_TIMEOUT_SECONDS, max_retries=3),
         )
     elapsed = time.perf_counter() - started
 
