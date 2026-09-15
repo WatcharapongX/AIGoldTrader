@@ -528,7 +528,7 @@ export const PERFORMANCE_READINESS_ITEMS: PerformanceReadinessItem[] = [
     nameTh: 'สมุดบันทึกการเทรด (Trade Journal)',
     status: 'NOT_IMPLEMENTED',
     phase: 'Phase 8',
-    detailsTh: 'ยังเป็น Placeholder อยู่ในเส้นทาง /journal รอเชื่อมต่อเมื่อมีข้อมูลการเทรดจริง',
+    detailsTh: 'ยังไม่มี Executed Trade Dataset สำหรับ Trade Journal; เส้นทาง /journal ใช้เป็น Reports Workspace โดยไม่สร้าง trade history ทดแทน',
   },
   {
     name: 'Backtest Results',
