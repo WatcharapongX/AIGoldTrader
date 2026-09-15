@@ -53,6 +53,17 @@ test('NewsSentimentScreen is dedicated to macroeconomic context and sentiment', 
   assert.match(code, /href="\/calendar"/);
 });
 
+test('PerformanceScreen is dedicated to operational analytics and decoupled from trade execution', () => {
+  const code = fs.readFileSync(path.resolve(__dirname, '../src/features/analytics/PerformanceScreen.tsx'), 'utf8');
+  assert.match(code, /PerformanceStatusHeader/);
+  assert.match(code, /AccountSnapshotCard/);
+  assert.match(code, /PortfolioRiskCard/);
+  assert.match(code, /CandidateAnalyticsPanel/);
+  assert.match(code, /RiskDecisionAnalyticsPanel/);
+  assert.match(code, /ExecutionPerformanceSection/);
+  assert.match(code, /PerformanceReadinessPanel/);
+});
+
 test('Page routes mount the decoupled screens', () => {
   const tradingPage = fs.readFileSync(path.resolve(__dirname, '../src/app/(dashboard)/trading/page.tsx'), 'utf8');
   assert.match(tradingPage, /MarketOverviewScreen/);
@@ -68,4 +79,7 @@ test('Page routes mount the decoupled screens', () => {
 
   const backtestingPage = fs.readFileSync(path.resolve(__dirname, '../src/app/(dashboard)/backtesting/page.tsx'), 'utf8');
   assert.match(backtestingPage, /StrategyLabScreen/);
+
+  const analyticsPage = fs.readFileSync(path.resolve(__dirname, '../src/app/(dashboard)/analytics/page.tsx'), 'utf8');
+  assert.match(analyticsPage, /PerformanceScreen/);
 });
