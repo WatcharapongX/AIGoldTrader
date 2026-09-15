@@ -65,4 +65,7 @@ test('Page routes mount the decoupled screens', () => {
 
   const scannerPage = fs.readFileSync(path.resolve(__dirname, '../src/app/(dashboard)/scanner/page.tsx'), 'utf8');
   assert.match(scannerPage, /NewsSentimentScreen/);
+
+  const backtestingPage = fs.readFileSync(path.resolve(__dirname, '../src/app/(dashboard)/backtesting/page.tsx'), 'utf8');
+  assert.match(backtestingPage, /StrategyLabScreen/);
 });
