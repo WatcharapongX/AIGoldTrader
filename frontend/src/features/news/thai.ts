@@ -25,7 +25,31 @@ export const labels: Record<string, string> = {
   TREND_CONTINUATION:'ตามแนวโน้ม', MEAN_REVERSION:'กลับสู่ค่าเฉลี่ย', NEWS_MOMENTUM:'แรงส่งหลังข่าว',
   NEWS_REVERSAL:'กลับทิศหลังข่าว', ALL_ALIGNED:'องค์ประกอบสอดคล้องกันทั้งหมด',
   MOSTLY_ALIGNED:'ส่วนใหญ่สอดคล้องกัน', COMPLETE:'องค์ประกอบครบ', PARTIAL:'องค์ประกอบยังไม่ครบ',
+  // Surprise direction & magnitude
+  ABOVE:'สูงกว่าคาดการณ์', BELOW:'ต่ำกว่าคาดการณ์', INLINE:'ตามคาดการณ์',
+  LARGE:'ต่างจากคาดมาก', SMALL:'ต่างจากคาดเล็กน้อย', ZERO:'ไม่มีความต่าง',
+  // USD direction
+  POSITIVE:'สนับสนุน USD', NEGATIVE:'กดดัน USD', NEUTRAL:'เป็นกลางต่อ USD',
+  // Data Quality & Conflicts
+  CONFLICT:'ข้อมูลขัดแย้งกัน',
+  // Release Status
+  NO_EVENT:'ไม่มีข่าวที่ประเมิน', WAITING_FOR_ACTUAL:'รอผลประกาศจริง', WAITING_FOR_RELEASE:'รอยืนยันการประกาศ',
+  // Calendar State
+  CALENDAR_UNAVAILABLE:'ปฏิทินไม่พร้อมใช้งาน', AVAILABLE:'ปฏิทินพร้อมใช้งาน',
 };
+export const reasonLabels: Record<string, string> = {
+  SURPRISE_ALIGNMENT: 'ทิศทางตัวเลขสอดคล้องกัน',
+  POLICY_INFORMATIONAL: 'นโยบายปกติ ใช้ประกอบบริบท',
+  POLICY_CAUTION_NEWS_LOCK: 'ระมัดระวังช่วงข่าวเสี่ยงสูง (News Lock)',
+  POLICY_RESTRICTED: 'จำกัดสิทธิ์การเทรดตามนโยบายข่าว',
+  MULTIPLE_HIGH_IMPACT: 'มีข่าวผลกระทบสูงหลายรายการพร้อมกัน',
+  SPREAD_ELEVATED: 'สเปรดถ่างตัวสูงกว่าระดับปกติ',
+  VOLATILITY_ELEVATED: 'ความผันผวนสูงกว่าระดับปกติ',
+  REACTION_WHIPSAW: 'ราคาสะบัดสองทิศทาง (Whipsaw)',
+  STRUCTURE_ALIGNED: 'โครงสร้างราคาสอดคล้องกับทิศทางปฏิกิริยา',
+  STRUCTURE_CONFLICTING: 'โครงสร้างราคาขัดแย้งกับทิศทางปฏิกิริยา',
+};
+export const reasonDesc = (code: string) => reasonLabels[code] || code;
 const names: Record<string, string> = {
  NFP:'การจ้างงานนอกภาคเกษตร (NFP)', UNEMPLOYMENT:'อัตราว่างงาน', WAGES:'ค่าจ้างเฉลี่ยรายชั่วโมง',
  CPI:'ดัชนีราคาผู้บริโภค (CPI)', CORE_CPI:'เงินเฟ้อพื้นฐาน (Core CPI)', PCE:'ดัชนีราคาการบริโภค (PCE)',
