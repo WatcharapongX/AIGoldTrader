@@ -2,11 +2,25 @@
 
 import React, { memo, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { CandlestickSeries, ColorType, createChart, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts';
+import {
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  type IChartApi,
+  type ISeriesApi,
+  type UTCTimestamp,
+} from 'lightweight-charts';
 import { AnalysisWorkspace } from '@/features/analysis/AnalysisWorkspace';
 import { AnalysisPrimitive } from '@/features/analysis/primitive';
+import { StrategyAnalysisContext } from '@/features/analysis/StrategyAnalysisContext';
+import { AIAgentAdvisoryPanel } from '@/features/analysis/AIAgentAdvisoryPanel';
 import { api } from '@/lib/api';
 import type { Candle, MarketDataStatus, Quote, SymbolInfo, Timeframe } from '@/types/market.generated';
+import type { SetupCandidate, StrategyResponse } from '@/types/strategy.generated';
+import type { AccountSnapshotData, SystemStatusResponse } from '@/types';
+import type { KillSwitchData, RiskDecisionData } from '@/features/risk/contracts';
+import { parseKillSwitch, parseRiskDecisions } from '@/features/risk/contracts';
+import type { AIAnalysisResult } from '@/types/ai.generated';
 import { instant, parseCandles, parseStatus, parseSymbols, providerLabel, timeframes } from '@/features/chart/contracts';
 import { MarketConnection, type ConnectionState } from '@/features/chart/transport';
 
@@ -20,7 +34,7 @@ function chartPoint(candle: Candle) {
   };
 }
 
-const ChartCanvas = memo(function ChartCanvas({
+export const ChartCanvas = memo(function ChartCanvas({
   bind,
 }: {
   bind: (chart: IChartApi, series: ISeriesApi<'Candlestick'>) => () => void;
@@ -50,8 +64,320 @@ const ChartCanvas = memo(function ChartCanvas({
       chart.remove();
     };
   }, [bind]);
-  return <div ref={container} className="market-chart" aria-label="XAUUSD SMC analysis candlestick chart" role="img" />;
+  return (
+    <div
+      ref={container}
+      className="market-chart"
+      aria-label="XAUUSD SMC analysis candlestick chart"
+      role="img"
+    />
+  );
 });
+
+export interface MarketAnalysisViewProps {
+  symbols: SymbolInfo[];
+  symbol: string;
+  setSymbol: (symbol: string) => void;
+  timeframe: Timeframe;
+  setTimeframe: (tf: Timeframe) => void;
+  quote: Quote | null;
+  status: ConnectionState;
+  provider: MarketDataStatus | null;
+  count: number;
+  error: string;
+  primitive: AnalysisPrimitive;
+  revision: string;
+  setRetry: React.Dispatch<React.SetStateAction<number>>;
+  bind: (chart: IChartApi, series: ISeriesApi<'Candlestick'>) => () => void;
+  // Upstream Strategy & Risk Context
+  candidates: SetupCandidate[];
+  selectedCandidateId: string;
+  setSelectedCandidateId: (id: string) => void;
+  account: AccountSnapshotData | null;
+  killSwitch: KillSwitchData | null;
+  riskDecision: RiskDecisionData | null;
+  systemStatus: SystemStatusResponse | null;
+  // AI Advisory Evaluation
+  isEvaluating: boolean;
+  aiResult: AIAnalysisResult | null;
+  evaluatedCandidateId: string | null;
+  aiError: string | null;
+  onEvaluateAI: () => void;
+}
+
+export function MarketAnalysisView({
+  symbols,
+  symbol,
+  setSymbol,
+  timeframe,
+  setTimeframe,
+  quote,
+  status,
+  provider,
+  count,
+  error,
+  primitive,
+  revision,
+  setRetry,
+  bind,
+  candidates,
+  selectedCandidateId,
+  setSelectedCandidateId,
+  account,
+  killSwitch,
+  riskDecision,
+  systemStatus,
+  isEvaluating,
+  aiResult,
+  evaluatedCandidateId,
+  aiError,
+  onEvaluateAI,
+}: MarketAnalysisViewProps) {
+  const selected = symbols.find((item) => item.name === symbol);
+  const digits = provider?.digits ?? selected?.digits ?? 2;
+
+  const number = (value?: string) =>
+    value === undefined
+      ? '—'
+      : Number(value).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+  const lastUpdate = quote
+    ? new Date(quote.timestamp).toLocaleTimeString('en-GB', { timeZone: 'UTC', hour12: false }) + ' UTC'
+    : 'Waiting for quote';
+
+  // Check if current AI result was produced for a different candidate than current selection
+  const isOutdated = Boolean(
+    aiResult && evaluatedCandidateId && selectedCandidateId && evaluatedCandidateId !== selectedCandidateId
+  );
+  const outdatedReason = isOutdated && evaluatedCandidateId
+    ? `ผลวิเคราะห์ AI นี้สร้างขึ้นสำหรับ Candidate (${evaluatedCandidateId.slice(0, 12)}…) ก่อนหน้า กรุณากดปุ่มเพื่อประเมินใหม่อีกครั้ง`
+    : undefined;
+
+  return (
+    <div className="trading-workspace space-y-6">
+      {/* Header with Navigation Link to Overview */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
+            <p className="market-eyebrow tracking-widest text-xs font-semibold text-gray-400">
+              SMART MONEY CONCEPTS & MARKET STRUCTURE WORKBENCH
+            </p>
+          </div>
+          <h1 className="text-2xl lg:text-3xl font-bold text-white tracking-tight mt-1">
+            Market Analysis
+          </h1>
+          <p className="text-xs text-gray-400 mt-0.5">
+            วิเคราะห์โครงสร้างราคา BOS, CHoCH, Liquidity Sweeps และ Multi-Timeframe Confluence จากแท่งเทียนที่ปิดสมบูรณ์แล้ว
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/trading"
+            className="px-3 py-1.5 bg-white/10 hover:bg-white/15 text-gray-300 hover:text-white text-xs font-medium rounded-md border border-white/10 transition-colors flex items-center gap-1"
+          >
+            <span>←</span>
+            <span>กลับไป Market Overview</span>
+          </Link>
+          <div className="market-mode">◈ {providerLabel(provider)}</div>
+          <span className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded-md border border-emerald-500/20 font-mono">
+            PAPER · EXECUTION DISABLED
+          </span>
+        </div>
+      </div>
+
+      {/* Market Toolbar */}
+      <section className="market-toolbar" aria-label="Market quote">
+        <div className="market-symbol">
+          <span className="gold-symbol">Au</span>
+          <div>
+            <label htmlFor="market-symbol">Instrument</label>
+            <select
+              id="market-symbol"
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value)}
+              className="bg-transparent text-white font-bold"
+            >
+              {(symbols.length ? symbols : [{ name: 'XAUUSD', source_available: true }]).map((item) => (
+                <option key={item.name} value={item.name} disabled={!item.source_available}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+            <small>Gold / US Dollar</small>
+          </div>
+        </div>
+
+        <div className="quote-cell">
+          <span>BID</span>
+          <strong data-testid="bid" className="bid-value">
+            {number(quote?.bid)}
+          </strong>
+        </div>
+
+        <div className="quote-cell">
+          <span>ASK</span>
+          <strong data-testid="ask">{number(quote?.ask)}</strong>
+        </div>
+
+        <div className="quote-cell">
+          <span>SPREAD · USD</span>
+          <strong data-testid="spread">{number(quote?.spread)}</strong>
+        </div>
+
+        <div className="market-connection">
+          <span data-testid="connection" className={'connection-label state-' + status.toLowerCase()}>
+            ● {status}
+          </span>
+          <small data-testid="last-update">{lastUpdate}</small>
+        </div>
+      </section>
+
+      {/* SMC Candlestick Chart Panel with Layer Overlays */}
+      <section className="chart-panel">
+        <div className="chart-toolbar">
+          <div className="timeframes" role="group" aria-label="Timeframe">
+            {timeframes.map((tf) => (
+              <button key={tf} aria-pressed={timeframe === tf} onClick={() => setTimeframe(tf)}>
+                {tf}
+              </button>
+            ))}
+          </div>
+          <span className="chart-caption">SMC OVERLAYS · CANDLES · BID · UTC</span>
+        </div>
+
+        <div className="chart-heading">
+          <span>
+            {symbol} <b> / {timeframe}</b>
+          </span>
+          <span data-testid="candle-count">{count} candles</span>
+        </div>
+
+        <div className="chart-stage">
+          <ChartCanvas bind={bind} />
+          {!count && (
+            <div className="chart-overlay" role="status">
+              {error ? 'NO DATA' : 'Loading historical candles…'}
+            </div>
+          )}
+        </div>
+
+        <div className="chart-footer">
+          <span>
+            {provider?.mode === 'SIMULATED'
+              ? 'Deterministic replay · not live market prices'
+              : provider?.detail || 'Verifying market source…'}
+          </span>
+          <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">
+            Charts by TradingView
+          </a>
+        </div>
+      </section>
+
+      {/* Notice bar if error/reconnecting */}
+      {(error || ['ERROR', 'DISCONNECTED', 'RECONNECTING', 'STALE'].includes(status)) && (
+        <div className="market-notice" role="status">
+          <span>{error || status + ' — waiting for fresh market data.'}</span>
+          <button onClick={() => setRetry((v) => v + 1)}>Reconnect</button>
+        </div>
+      )}
+
+      {/* Deep SMC & Multi-Timeframe Structural Analysis Component */}
+      <AnalysisWorkspace
+        symbol={symbol}
+        timeframe={timeframe}
+        source={provider?.source || ''}
+        revision={revision}
+        primitive={primitive}
+        key={symbol + timeframe + revision}
+      />
+
+      {/* Deterministic Strategy Candidate & Risk Gate Context */}
+      <StrategyAnalysisContext
+        candidates={candidates}
+        selectedCandidateId={selectedCandidateId}
+        onSelectCandidate={setSelectedCandidateId}
+        account={account}
+        killSwitch={killSwitch}
+        riskDecision={riskDecision}
+        onEvaluateAI={onEvaluateAI}
+        isEvaluating={isEvaluating}
+        evaluateError={aiError}
+        hasAIResult={Boolean(aiResult)}
+        isOutdated={isOutdated}
+      />
+
+      {/* Multi-Agent AI Analytical Advisory Panel */}
+      <AIAgentAdvisoryPanel
+        result={aiResult}
+        isLoading={isEvaluating}
+        isOutdated={isOutdated}
+        outdatedReason={outdatedReason}
+        aiSystemStatus={systemStatus?.modules?.ai_provider || null}
+      />
+
+      {/* Technical Market Information Table */}
+      <div className="market-bottom">
+        <section className="market-info">
+          <h2>Market information</h2>
+          <dl>
+            <div>
+              <dt>Asset class</dt>
+              <dd>{selected?.asset_class || 'METAL'}</dd>
+            </div>
+            <div>
+              <dt>Provider</dt>
+              <dd>
+                {provider?.source || 'Unconfirmed'} / {provider?.mode || 'UNCONFIRMED'}
+              </dd>
+            </div>
+            <div>
+              <dt>Trading mode</dt>
+              <dd className="gold-text">PAPER · execution disabled</dd>
+            </div>
+            <div>
+              <dt>Timeframe</dt>
+              <dd>{timeframe} · UTC boundaries</dd>
+            </div>
+            <div>
+              <dt>Feed session</dt>
+              <dd>
+                {provider?.mode === 'SIMULATED'
+                  ? 'Synthetic · continuous 24/7'
+                  : 'Broker session; hours not confirmed'}
+              </dd>
+            </div>
+            <div>
+              <dt>Connection</dt>
+              <dd>{status}</dd>
+            </div>
+            <div>
+              <dt>Market state</dt>
+              <dd>{provider?.market_state || 'UNKNOWN'}</dd>
+            </div>
+            <div>
+              <dt>Source symbol</dt>
+              <dd>{provider?.provider_symbol || 'XAUUSD'}</dd>
+            </div>
+            <div>
+              <dt>Tick size · USD</dt>
+              <dd>{provider?.tick_size || '—'}</dd>
+            </div>
+            <div>
+              <dt>Last candle · UTC</dt>
+              <dd>{provider?.last_candle || '—'}</dd>
+            </div>
+          </dl>
+        </section>
+      </div>
+
+      <p className="chart-attribution">
+        TradingView Lightweight Charts™ · Copyright © 2025 TradingView, Inc.
+      </p>
+    </div>
+  );
+}
 
 export function MarketAnalysisScreen() {
   const [symbols, setSymbols] = useState<SymbolInfo[]>([]);
@@ -65,6 +391,20 @@ export function MarketAnalysisScreen() {
   const [primitive] = useState(() => new AnalysisPrimitive());
   const [revision, setRevision] = useState('');
   const [retry, setRetry] = useState(0);
+
+  // Upstream Strategy & Risk state
+  const [candidates, setCandidates] = useState<SetupCandidate[]>([]);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string>('');
+  const [account, setAccount] = useState<AccountSnapshotData | null>(null);
+  const [killSwitch, setKillSwitch] = useState<KillSwitchData | null>(null);
+  const [riskDecision, setRiskDecision] = useState<RiskDecisionData | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatusResponse | null>(null);
+
+  // AI Advisory evaluation state (transient local state)
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [aiResult, setAiResult] = useState<AIAnalysisResult | null>(null);
+  const [evaluatedCandidateId, setEvaluatedCandidateId] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -85,6 +425,77 @@ export function MarketAnalysisScreen() {
     };
   });
 
+  // 1. Fetch Upstream Context (Candidates, Account, Kill Switch, Risk Decisions, System Status)
+  useEffect(() => {
+    let active = true;
+    const abort = new AbortController();
+
+    const fetchUpstream = async () => {
+      // System status
+      try {
+        const sys = (await api.get('/system/status', { signal: abort.signal })) as SystemStatusResponse;
+        if (active) setSystemStatus(sys);
+      } catch {}
+
+      // Account
+      try {
+        const acc = (await api.get('/risk/account?account_id=default_paper_account', {
+          signal: abort.signal,
+        })) as AccountSnapshotData;
+        if (active) setAccount(acc);
+      } catch {}
+
+      // Kill Switch
+      try {
+        const rawKs = await api.get('/risk/kill-switch', { signal: abort.signal });
+        if (active) setKillSwitch(parseKillSwitch(rawKs));
+      } catch {}
+
+      // Strategy Candidates
+      try {
+        const list = (await api.get('/trade-candidates?limit=10', {
+          signal: abort.signal,
+        })) as SetupCandidate[];
+        if (active && Array.isArray(list) && list.length > 0) {
+          setCandidates(list);
+          setSelectedCandidateId((prev) => prev || list[0].id);
+        } else {
+          // Fallback to /strategy/context
+          const strat = (await api.get('/strategy/context', { signal: abort.signal })) as StrategyResponse;
+          if (active && strat.evaluation?.candidates?.length) {
+            setCandidates(strat.evaluation.candidates);
+            setSelectedCandidateId((prev) => prev || strat.evaluation.candidates[0].id);
+          }
+        }
+      } catch {
+        try {
+          const strat = (await api.get('/strategy/context', { signal: abort.signal })) as StrategyResponse;
+          if (active && strat.evaluation?.candidates?.length) {
+            setCandidates(strat.evaluation.candidates);
+            setSelectedCandidateId((prev) => prev || strat.evaluation.candidates[0].id);
+          }
+        } catch {}
+      }
+
+      // Risk Decisions
+      try {
+        const rawDecisions = await api.get('/risk/decisions?limit=10', { signal: abort.signal });
+        const parsed = parseRiskDecisions(rawDecisions);
+        if (active && parsed.length > 0) {
+          setRiskDecision(parsed[0]);
+        }
+      } catch {}
+    };
+
+    void fetchUpstream();
+
+    return () => {
+      active = false;
+      abort.abort();
+    };
+  }, [retry]);
+
+  // 2. Fetch Candlestick & Quote Market Feed
   useEffect(() => {
     let active = true;
     let connection: MarketConnection | null = null;
@@ -225,6 +636,7 @@ export function MarketAnalysisScreen() {
     };
   }, [symbol, timeframe, retry]);
 
+  // Digits update
   const selected = symbols.find((item) => item.name === symbol);
   const digits = provider?.digits ?? selected?.digits ?? 2;
 
@@ -238,209 +650,59 @@ export function MarketAnalysisScreen() {
     });
   }, [digits, provider?.tick_size]);
 
-  const number = (value?: string) =>
-    value === undefined
-      ? '—'
-      : Number(value).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  // 3. AI Evaluation Trigger
+  const handleEvaluateAI = async () => {
+    const candidate = candidates.find((c) => c.id === selectedCandidateId) || candidates[0];
+    if (!candidate) return;
 
-  const lastUpdate = quote
-    ? new Date(quote.timestamp).toLocaleTimeString('en-GB', { timeZone: 'UTC', hour12: false }) + ' UTC'
-    : 'Waiting for quote';
+    setIsEvaluating(true);
+    setAiError(null);
+
+    try {
+      const payload = {
+        candidate_id: candidate.id,
+        account_id: account?.account_id || 'default_paper_account',
+        profile_id: candidate.profile_id || undefined,
+      };
+      const result = (await api.post('/ai-analysis/evaluate', payload)) as AIAnalysisResult;
+      setAiResult(result);
+      setEvaluatedCandidateId(candidate.id);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการวิเคราะห์ AI';
+      setAiError(message);
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
 
   return (
-    <div className="trading-workspace space-y-6">
-      {/* Header with Navigation Link to Overview */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
-            <p className="market-eyebrow tracking-widest text-xs font-semibold text-gray-400">
-              SMART MONEY CONCEPTS & MARKET STRUCTURE WORKBENCH
-            </p>
-          </div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-white tracking-tight mt-1">Market Analysis</h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            วิเคราะห์โครงสร้างราคา BOS, CHoCH, Liquidity Sweeps และ Multi-Timeframe Confluence จากแท่งเทียนที่ปิดสมบูรณ์แล้ว
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/trading"
-            className="px-3 py-1.5 bg-white/10 hover:bg-white/15 text-gray-300 hover:text-white text-xs font-medium rounded-md border border-white/10 transition-colors flex items-center gap-1"
-          >
-            <span>←</span>
-            <span>กลับไป Market Overview</span>
-          </Link>
-          <div className="market-mode">◈ {providerLabel(provider)}</div>
-          <span className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded-md border border-emerald-500/20">
-            PAPER · EXECUTION DISABLED
-          </span>
-        </div>
-      </div>
-
-      {/* Market Toolbar */}
-      <section className="market-toolbar" aria-label="Market quote">
-        <div className="market-symbol">
-          <span className="gold-symbol">Au</span>
-          <div>
-            <label htmlFor="market-symbol">Instrument</label>
-            <select
-              id="market-symbol"
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
-              className="bg-transparent text-white font-bold"
-            >
-              {(symbols.length ? symbols : [{ name: 'XAUUSD', source_available: true }]).map((item) => (
-                <option key={item.name} value={item.name} disabled={!item.source_available}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-            <small>Gold / US Dollar</small>
-          </div>
-        </div>
-
-        <div className="quote-cell">
-          <span>BID</span>
-          <strong data-testid="bid" className="bid-value">
-            {number(quote?.bid)}
-          </strong>
-        </div>
-
-        <div className="quote-cell">
-          <span>ASK</span>
-          <strong data-testid="ask">{number(quote?.ask)}</strong>
-        </div>
-
-        <div className="quote-cell">
-          <span>SPREAD · USD</span>
-          <strong data-testid="spread">{number(quote?.spread)}</strong>
-        </div>
-
-        <div className="market-connection">
-          <span data-testid="connection" className={'connection-label state-' + status.toLowerCase()}>
-            ● {status}
-          </span>
-          <small data-testid="last-update">{lastUpdate}</small>
-        </div>
-      </section>
-
-      {/* SMC Candlestick Chart Panel with Layer Overlays */}
-      <section className="chart-panel">
-        <div className="chart-toolbar">
-          <div className="timeframes" role="group" aria-label="Timeframe">
-            {timeframes.map((tf) => (
-              <button key={tf} aria-pressed={timeframe === tf} onClick={() => setTimeframe(tf)}>
-                {tf}
-              </button>
-            ))}
-          </div>
-          <span className="chart-caption">SMC OVERLAYS · CANDLES · BID · UTC</span>
-        </div>
-
-        <div className="chart-heading">
-          <span>
-            {symbol} <b> / {timeframe}</b>
-          </span>
-          <span data-testid="candle-count">{count} candles</span>
-        </div>
-
-        <div className="chart-stage">
-          <ChartCanvas bind={bind} />
-          {!count && (
-            <div className="chart-overlay" role="status">
-              {error ? 'NO DATA' : 'Loading historical candles…'}
-            </div>
-          )}
-        </div>
-
-        <div className="chart-footer">
-          <span>
-            {provider?.mode === 'SIMULATED'
-              ? 'Deterministic replay · not live market prices'
-              : provider?.detail || 'Verifying market source…'}
-          </span>
-          <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">
-            Charts by TradingView
-          </a>
-        </div>
-      </section>
-
-      {/* Notice bar if error/reconnecting */}
-      {(error || ['ERROR', 'DISCONNECTED', 'RECONNECTING', 'STALE'].includes(status)) && (
-        <div className="market-notice" role="status">
-          <span>{error || status + ' — waiting for fresh market data.'}</span>
-          <button onClick={() => setRetry((v) => v + 1)}>Reconnect</button>
-        </div>
-      )}
-
-      {/* Deep SMC & Multi-Timeframe Structural Analysis Component */}
-      <AnalysisWorkspace
-        symbol={symbol}
-        timeframe={timeframe}
-        source={provider?.source || ''}
-        revision={revision}
-        primitive={primitive}
-        key={symbol + timeframe + retry}
-      />
-
-      {/* Technical Market Information Table */}
-      <div className="market-bottom">
-        <section className="market-info">
-          <h2>Market information</h2>
-          <dl>
-            <div>
-              <dt>Asset class</dt>
-              <dd>{selected?.asset_class || 'METAL'}</dd>
-            </div>
-            <div>
-              <dt>Provider</dt>
-              <dd>
-                {provider?.source || 'Unconfirmed'} / {provider?.mode || 'UNCONFIRMED'}
-              </dd>
-            </div>
-            <div>
-              <dt>Trading mode</dt>
-              <dd className="gold-text">PAPER · execution disabled</dd>
-            </div>
-            <div>
-              <dt>Timeframe</dt>
-              <dd>{timeframe} · UTC boundaries</dd>
-            </div>
-            <div>
-              <dt>Feed session</dt>
-              <dd>
-                {provider?.mode === 'SIMULATED'
-                  ? 'Synthetic · continuous 24/7'
-                  : 'Broker session; hours not confirmed'}
-              </dd>
-            </div>
-            <div>
-              <dt>Connection</dt>
-              <dd>{status}</dd>
-            </div>
-            <div>
-              <dt>Market state</dt>
-              <dd>{provider?.market_state || 'UNKNOWN'}</dd>
-            </div>
-            <div>
-              <dt>Source symbol</dt>
-              <dd>{provider?.provider_symbol || 'XAUUSD'}</dd>
-            </div>
-            <div>
-              <dt>Tick size · USD</dt>
-              <dd>{provider?.tick_size || '—'}</dd>
-            </div>
-            <div>
-              <dt>Last candle · UTC</dt>
-              <dd>{provider?.last_candle || '—'}</dd>
-            </div>
-          </dl>
-        </section>
-      </div>
-
-      <p className="chart-attribution">TradingView Lightweight Charts™ · Copyright © 2025 TradingView, Inc.</p>
-    </div>
+    <MarketAnalysisView
+      symbols={symbols}
+      symbol={symbol}
+      setSymbol={setSymbol}
+      timeframe={timeframe}
+      setTimeframe={setTimeframe}
+      quote={quote}
+      status={status}
+      provider={provider}
+      count={count}
+      error={error}
+      primitive={primitive}
+      revision={revision}
+      setRetry={setRetry}
+      bind={bind}
+      candidates={candidates}
+      selectedCandidateId={selectedCandidateId}
+      setSelectedCandidateId={setSelectedCandidateId}
+      account={account}
+      killSwitch={killSwitch}
+      riskDecision={riskDecision}
+      systemStatus={systemStatus}
+      isEvaluating={isEvaluating}
+      aiResult={aiResult}
+      evaluatedCandidateId={evaluatedCandidateId}
+      aiError={aiError}
+      onEvaluateAI={handleEvaluateAI}
+    />
   );
 }
