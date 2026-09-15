@@ -9,6 +9,9 @@ import type {
   StrategyResponse,
   TraderProfile,
 } from '@/types/strategy.generated';
+import { parseStatus } from '@/features/chart/contracts';
+import { DataProvenanceLine } from '@/components/data-provenance';
+import type { MarketDataStatus } from '@/types/market.generated';
 import { StrategyCatalogTab } from './StrategyCatalogTab';
 import { TraderProfilesTab } from './TraderProfilesTab';
 import { EvaluationsTab } from './EvaluationsTab';
@@ -16,11 +19,6 @@ import { BacktestReadinessTab } from './BacktestReadinessTab';
 
 type TabKey = 'STRATEGIES' | 'PROFILES' | 'EVALUATIONS' | 'BACKTEST';
 
-interface MarketProviderInfo {
-  source: string;
-  mode: string;
-  status: string;
-}
 
 export function StrategyLabScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>('STRATEGIES');
@@ -33,7 +31,7 @@ export function StrategyLabScreen() {
   const [currentEval, setCurrentEval] = useState<StrategyResponse | null>(null);
   const [evaluations, setEvaluations] = useState<StrategyResponse[]>([]);
   const [candidates, setCandidates] = useState<SetupCandidate[]>([]);
-  const [provider, setProvider] = useState<MarketProviderInfo | null>(null);
+  const [provider, setProvider] = useState<MarketDataStatus | null>(null);
 
   // Loading and error states
   const [loadingStrategies, setLoadingStrategies] = useState(true);
@@ -43,6 +41,7 @@ export function StrategyLabScreen() {
   const [loadingCandidates, setLoadingCandidates] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
   // Fetch all domain data from authoritative endpoints
   useEffect(() => {
     let active = true;
@@ -52,34 +51,27 @@ export function StrategyLabScreen() {
       setIsRefreshing(true);
       setError(null);
 
+      setLoadErrors({});
       // 1. Fetch Market Status
       try {
-        const rawStatus = (await api.get('/market/status', { signal: abort.signal })) as {
-          provider?: { source?: string; mode?: string; status?: string };
-        };
-        if (active && rawStatus?.provider) {
-          setProvider({
-            source: rawStatus.provider.source || 'mt5_demo_iux',
-            mode: rawStatus.provider.mode || 'DEMO',
-            status: rawStatus.provider.status || 'CONNECTED',
-          });
-        }
+        const rawStatus = await api.get('/market/status', { signal: abort.signal });
+        if (active) setProvider(parseStatus(rawStatus));
       } catch {
-        // Fallback provider
-        if (active) {
-          setProvider({ source: 'mt5_demo_iux', mode: 'DEMO', status: 'CONNECTED' });
-        }
+        if (active) setProvider(null);
+        if (active) setLoadErrors((current) => ({ ...current, provider: 'Market provider status ไม่พร้อมใช้งาน' }));
       }
 
       // 2. Fetch Strategies Catalog (GET /api/strategies)
       try {
         setLoadingStrategies(true);
         const strats = (await api.get('/strategies', { signal: abort.signal })) as StrategyDefinition[];
+        if (!Array.isArray(strats)) throw new Error('Invalid strategies payload');
         if (active) {
           setStrategies(Array.isArray(strats) ? strats : []);
         }
       } catch (err) {
         if (active) {
+          setLoadErrors((current) => ({ ...current, strategies: 'Strategy catalog ไม่พร้อมใช้งาน' }));
           setError(err instanceof Error ? err.message : 'โหลดกลยุทธ์ไม่สำเร็จ');
         }
       } finally {
@@ -90,10 +82,12 @@ export function StrategyLabScreen() {
       try {
         setLoadingProfiles(true);
         const profs = (await api.get('/trader-profiles', { signal: abort.signal })) as TraderProfile[];
+        if (!Array.isArray(profs)) throw new Error('Invalid trader profiles payload');
         if (active) {
           setProfiles(Array.isArray(profs) ? profs : []);
         }
       } catch {
+        if (active) setLoadErrors((current) => ({ ...current, profiles: 'Trader profiles ไม่พร้อมใช้งาน' }));
         // Graceful handling
       } finally {
         if (active) setLoadingProfiles(false);
@@ -107,6 +101,7 @@ export function StrategyLabScreen() {
           setCurrentEval(currentResp);
         }
       } catch {
+        if (active) setLoadErrors((current) => ({ ...current, current: 'Current evaluation ไม่พร้อมใช้งาน' }));
         // Graceful handling
       } finally {
         if (active) setLoadingCurrent(false);
@@ -116,10 +111,12 @@ export function StrategyLabScreen() {
       try {
         setLoadingEvaluations(true);
         const evalsResp = (await api.get('/strategy/evaluations?limit=25', { signal: abort.signal })) as StrategyResponse[];
+        if (!Array.isArray(evalsResp)) throw new Error('Invalid evaluations payload');
         if (active) {
           setEvaluations(Array.isArray(evalsResp) ? evalsResp : []);
         }
       } catch {
+        if (active) setLoadErrors((current) => ({ ...current, evaluations: 'Evaluation history ไม่พร้อมใช้งาน' }));
         if (active) setEvaluations([]);
       } finally {
         if (active) setLoadingEvaluations(false);
@@ -129,10 +126,12 @@ export function StrategyLabScreen() {
       try {
         setLoadingCandidates(true);
         const cands = (await api.get('/trade-candidates?limit=100', { signal: abort.signal })) as SetupCandidate[];
+        if (!Array.isArray(cands)) throw new Error('Invalid candidates payload');
         if (active) {
           setCandidates(Array.isArray(cands) ? cands : []);
         }
       } catch {
+        if (active) setLoadErrors((current) => ({ ...current, candidates: 'Candidate history ไม่พร้อมใช้งาน' }));
         if (active) setCandidates([]);
       } finally {
         if (active) {
@@ -183,7 +182,7 @@ export function StrategyLabScreen() {
             <span>Market Overview</span>
           </Link>
           <span className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded-md border border-emerald-500/20 font-mono">
-            PAPER MODE · EXECUTION DISABLED
+            CONFIGURED PAPER · EXECUTION DISABLED
           </span>
         </div>
       </div>
@@ -229,7 +228,7 @@ export function StrategyLabScreen() {
         <div className="p-3.5 bg-[#0e1726] border border-gray-800 rounded-xl">
           <span className="text-[10px] text-gray-400 block uppercase">กลยุทธ์ในระบบ</span>
           <strong className="text-xl font-bold text-white block mt-0.5">
-            {loadingStrategies ? '…' : `${strategies.length} Strategies`}
+            {loadingStrategies ? '…' : loadErrors.strategies ? 'UNAVAILABLE' : `${strategies.length} Strategies`}
           </strong>
           <span className="text-[10px] text-emerald-400">STRAT01–STRAT06</span>
         </div>
@@ -238,7 +237,7 @@ export function StrategyLabScreen() {
         <div className="p-3.5 bg-[#0e1726] border border-gray-800 rounded-xl">
           <span className="text-[10px] text-gray-400 block uppercase">โปรไฟล์ผู้เทรด</span>
           <strong className="text-xl font-bold text-blue-400 block mt-0.5">
-            {loadingProfiles ? '…' : `${profiles.length} Profiles`}
+            {loadingProfiles ? '…' : loadErrors.profiles ? 'UNAVAILABLE' : `${profiles.length} Profiles`}
           </strong>
           <span className="text-[10px] text-gray-400">4 Trading Styles</span>
         </div>
@@ -247,10 +246,10 @@ export function StrategyLabScreen() {
         <div className="p-3.5 bg-[#0e1726] border border-gray-800 rounded-xl">
           <span className="text-[10px] text-gray-400 block uppercase">ผู้สมัครรอบปัจจุบัน</span>
           <strong className="text-xl font-bold text-amber-300 block mt-0.5">
-            {loadingCurrent ? '…' : currentCandidatesList.length}
+            {loadingCurrent ? '…' : loadErrors.current ? 'UNAVAILABLE' : currentCandidatesList.length}
           </strong>
           <span className="text-[10px] text-emerald-400 font-semibold">
-            READY: {readyCount} รายการ
+            READY: {loadErrors.current ? 'UNAVAILABLE' : `${readyCount} รายการ`}
           </span>
         </div>
 
@@ -258,7 +257,7 @@ export function StrategyLabScreen() {
         <div className="p-3.5 bg-[#0e1726] border border-gray-800 rounded-xl">
           <span className="text-[10px] text-gray-400 block uppercase">ประวัติ SNAPSHOTS</span>
           <strong className="text-xl font-bold text-purple-400 block mt-0.5">
-            {loadingEvaluations ? '…' : evaluations.length}
+            {loadingEvaluations ? '…' : loadErrors.evaluations ? 'UNAVAILABLE' : evaluations.length}
           </strong>
           <span className="text-[10px] text-gray-400">Stored Audits</span>
         </div>
@@ -272,6 +271,12 @@ export function StrategyLabScreen() {
           <span className="text-[10px] text-gray-400 block">NOT IMPLEMENTED</span>
         </div>
       </div>
+
+      {Object.keys(loadErrors).length > 0 && (
+        <div role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+          UNAVAILABLE: {Object.values(loadErrors).join(' · ')} ไม่มีการแทนด้วย fixture หรือค่า 0
+        </div>
+      )}
 
       {/* 4. Tab Navigation & Refresh Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-800 pb-2">
@@ -331,11 +336,7 @@ export function StrategyLabScreen() {
 
         {/* Refresh button & Source */}
         <div className="flex items-center gap-2 self-end sm:self-auto">
-          {provider && (
-            <span className="text-[11px] font-mono text-gray-400 hidden lg:inline">
-              Source: {provider.source} ({provider.mode})
-            </span>
-          )}
+          <DataProvenanceLine source={provider?.source} mode={provider?.mode} condition={provider?.status === 'CONNECTED' ? 'FRESH' : provider ? 'DEGRADED' : 'UNAVAILABLE'} asOf={provider?.last_quote || provider?.server_time} />
           <button
             type="button"
             data-testid="refresh-btn"
@@ -380,6 +381,8 @@ export function StrategyLabScreen() {
             loadingHistory={loadingEvaluations}
             loadingCandidates={loadingCandidates}
             error={error}
+            historyError={loadErrors.evaluations}
+            candidatesError={loadErrors.candidates}
           />
         )}
 

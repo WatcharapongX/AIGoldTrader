@@ -21,6 +21,7 @@ import {
   timeframes,
 } from '@/features/chart/contracts';
 import { MarketConnection, type ConnectionState } from '@/features/chart/transport';
+import { DataProvenanceLine } from '@/components/data-provenance';
 import { AnalysisPrimitive, defaultLayers, type Layers } from '@/features/analysis/primitive';
 import { parseAnalysis, parseContext } from '@/features/analysis/contracts';
 import type {
@@ -490,17 +491,18 @@ export function MarketOverviewView({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className={`px-2.5 py-1 text-xs font-bold rounded border ${sourceLabel.cls}`}>
+          <DataProvenanceLine source={provider?.source} mode={provider?.mode} condition={status === 'STALE' ? 'STALE' : status === 'CONNECTED' && provider ? 'FRESH' : status === 'CONNECTING' || status === 'RECONNECTING' ? 'DEGRADED' : 'UNAVAILABLE'} asOf={quote?.timestamp || provider?.last_quote} />
             ◈ {sourceLabel.text}
           </span>
           <div className="market-mode">◈ {providerLabel(provider)}</div>
           <span className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded-md border border-emerald-500/20">
-            🛡️ TRADING MODE: PAPER
+            🛡️ TRADING MODE: {systemStatus?.trading_mode ?? 'UNKNOWN'}
           </span>
           <span className="px-3 py-1.5 bg-gray-800 text-gray-300 text-xs font-semibold rounded-md border border-gray-700">
-            AUTO TRADING: OFF
+            AUTO TRADING: {systemStatus ? (systemStatus.live_auto_trading ? 'ON' : 'OFF') : 'UNKNOWN'}
           </span>
           <span className="px-3 py-1.5 bg-gray-800 text-gray-300 text-xs font-semibold rounded-md border border-gray-700">
-            FAIL-CLOSED ACTIVE
+            FAIL-CLOSED POLICY
           </span>
         </div>
       </div>
@@ -512,7 +514,7 @@ export function MarketOverviewView({
             <span>🌐</span> สภาวะตลาดโลก (Global Trading Sessions)
           </span>
           <span className="text-xs text-gray-400 font-mono">
-            UTC Time: {currentUtc.toISOString().slice(11, 19)} · Bangkok: {currentUtc.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok' })}
+            UTC Time: {currentUtc.toISOString().slice(11, 19)} · Bangkok: {currentUtc.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok' })} · DERIVED FROM CLIENT CLOCK + UTC SESSION RULES
           </span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -741,7 +743,7 @@ export function MarketOverviewView({
           </div>
           <div className="text-[11px] text-gray-500 mt-2 border-t border-gray-800 pt-1.5 flex justify-between">
             <span>Volume:</span>
-            <span className="font-mono text-gray-400">{latestCandle?.volume ? Number(latestCandle.volume).toLocaleString() : '—'}</span>
+            <span className="font-mono text-gray-400">{latestCandle?.volume != null ? Number(latestCandle.volume).toLocaleString() : '—'}</span>
           </div>
         </div>
 
@@ -764,7 +766,7 @@ export function MarketOverviewView({
           <div className="text-xs text-gray-400 mt-2 border-t border-gray-800 pt-2 flex justify-between">
             <span>สภาวะความผันผวน:</span>
             <span className="text-gray-300 font-medium">
-              {analysis?.regime ? REGIME_NAMES_TH[analysis.regime] || analysis.regime : 'ปกติ'}
+              {analysis?.regime ? REGIME_NAMES_TH[analysis.regime] || analysis.regime : '—'}
             </span>
           </div>
         </div>
@@ -777,7 +779,7 @@ export function MarketOverviewView({
           </div>
           <div className="text-xs text-gray-400 mt-2 border-t border-gray-800 pt-2 flex justify-between">
             <span>สถานะสเปรด:</span>
-            <span className="text-emerald-400 font-medium">ปกติสำหรับการเทรดทอง</span>
+            <span className="text-gray-300 font-medium">ไม่มีการจัดระดับเกณฑ์ · แสดง Spread ตาม Quote</span>
           </div>
         </div>
 
@@ -917,41 +919,41 @@ export function MarketOverviewView({
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-xs">
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
             <span className="text-[11px] text-gray-400 block">Market Provider</span>
-            <span className="font-semibold text-emerald-400 mt-0.5 block">{provider?.source || 'mt5_demo_iux'}</span>
-            <span className="text-[10px] text-gray-500">{provider?.mode || 'DEMO'}</span>
+            <span className="font-semibold text-gray-200 mt-0.5 block">{provider?.source || 'UNAVAILABLE'}</span>
+            <span className="text-[10px] text-gray-500">{provider?.mode || 'UNAVAILABLE'}</span>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
             <span className="text-[11px] text-gray-400 block">MT5 Connection</span>
             <span className={`font-semibold mt-0.5 block ${provider?.status === 'CONNECTED' ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {provider?.status || 'CONNECTED'}
+              {provider?.status || 'UNAVAILABLE'}
             </span>
-            <span className="text-[10px] text-gray-500">Spread: {quote?.spread ?? '0.33'}</span>
+            <span className="text-[10px] text-gray-500">Spread: {quote?.spread ?? 'UNAVAILABLE'}</span>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
             <span className="text-[11px] text-gray-400 block">WebSocket Transport</span>
             <span className={`font-semibold mt-0.5 block ${status === 'CONNECTED' ? 'text-emerald-400' : 'text-amber-400'}`}>
               {status}
             </span>
-            <span className="text-[10px] text-gray-500">Live Quotes</span>
+            <span className="text-[10px] text-gray-500">Quote transport status</span>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
             <span className="text-[11px] text-gray-400 block">Historical Data</span>
-            <span className="font-semibold text-gray-200 mt-0.5 block">{candles.length} Bars</span>
+            <span className="font-semibold text-gray-200 mt-0.5 block">{error ? 'UNAVAILABLE' : `${candles.length} Bars`}</span>
             <span className="text-[10px] text-gray-500">{timeframe} Timeframe</span>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
             <span className="text-[11px] text-gray-400 block">Risk Engine</span>
             <span className="font-semibold text-emerald-400 mt-0.5 block">
-              {systemStatus?.modules?.risk_engine?.state || 'HEALTHY'}
+              {systemStatus?.modules?.risk_engine?.state || 'UNAVAILABLE'}
             </span>
-            <span className="text-[10px] text-gray-500">Fail-Closed Gate</span>
+            <span className="text-[10px] text-gray-500">Fail-closed by policy</span>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/5">
             <span className="text-[11px] text-gray-400 block">Kill Switch</span>
             <span className="font-semibold text-emerald-400 mt-0.5 block">
-              {systemStatus?.modules?.kill_switch?.state || 'NORMAL'}
+              {systemStatus?.modules?.kill_switch?.state || 'UNAVAILABLE'}
             </span>
-            <span className="text-[10px] text-gray-500">Standby Ready</span>
+            <span className="text-[10px] text-gray-500">Authoritative system status</span>
           </div>
         </div>
       </section>

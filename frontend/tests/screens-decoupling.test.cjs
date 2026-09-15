@@ -11,9 +11,9 @@ test('MarketOverviewScreen is decoupled and focuses on market pulse and global s
   assert.match(code, /European Session/);
   assert.match(code, /US Session/);
   assert.match(code, /London \/ NY Overlap/);
-  assert.match(code, /TRADING MODE: PAPER/);
-  assert.match(code, /AUTO TRADING: OFF/);
-  assert.match(code, /FAIL-CLOSED ACTIVE/);
+  assert.match(code, /systemStatus\?\.trading_mode \?\? 'UNKNOWN'/);
+  assert.match(code, /systemStatus\.live_auto_trading/);
+  assert.match(code, /FAIL-CLOSED POLICY/);
   assert.match(code, /US Dollar Index \(DXY\)/);
   assert.match(code, /US 10Y Yield/);
   assert.match(code, /href="\/analysis"/);

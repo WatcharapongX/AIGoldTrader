@@ -70,14 +70,14 @@ export function AIAgentAdvisoryPanel({
               <span>
                 {isFixture
                   ? 'FIXTURE ADVISORY'
-                  : aiSystemStatus?.state || 'AI SUBSYSTEM'}
+                  : aiSystemStatus?.state || 'UNAVAILABLE'}
               </span>
             </span>
           </div>
           <span className="text-[10px] text-gray-400 font-mono">
             {isFixture
               ? 'OFFLINE DETERMINISTIC TEST PROVIDER'
-              : aiSystemStatus?.detail_th || 'ระบบวิเคราะห์พร้อมใช้งาน'}
+              : aiSystemStatus?.detail_th || 'AI STATUS UNAVAILABLE / ยังไม่ยืนยัน'}
           </span>
         </div>
       </div>
@@ -120,7 +120,7 @@ export function AIAgentAdvisoryPanel({
             }`}
           >
             <span>⚡</span>
-            <span>ข้อขัดแย้งในการวิเคราะห์ ({result?.conflicts_th.length || 0})</span>
+            <span>ข้อขัดแย้งในการวิเคราะห์ ({result ? result.conflicts_th.length : 'UNAVAILABLE'})</span>
           </button>
 
           <button
@@ -135,7 +135,7 @@ export function AIAgentAdvisoryPanel({
             }`}
           >
             <span>📋</span>
-            <span>หลักฐานสำคัญ ({result?.key_evidence_th.length || 0})</span>
+            <span>หลักฐานสำคัญ ({result ? result.key_evidence_th.length : 'UNAVAILABLE'})</span>
           </button>
         </div>
 
@@ -167,7 +167,7 @@ export function AIAgentAdvisoryPanel({
               <span>ข้อขัดแย้งระหว่างเอเจนต์ในการประเมิน (Agent Conflicts)</span>
             </h4>
             <span className="text-xs text-gray-400 font-mono">
-              {result?.conflicts_th.length || 0} CONFLICTS DETECTED
+              {result ? result.conflicts_th.length : 'UNAVAILABLE'} CONFLICTS DETECTED
             </span>
           </div>
 
@@ -204,7 +204,7 @@ export function AIAgentAdvisoryPanel({
               <span>หลักฐานสำคัญที่ใช้สังเคราะห์ Thesis (Key Evidence)</span>
             </h4>
             <span className="text-xs text-gray-400 font-mono">
-              {result?.key_evidence_th.length || 0} PIECES OF EVIDENCE
+              {result ? result.key_evidence_th.length : 'UNAVAILABLE'} PIECES OF EVIDENCE
             </span>
           </div>
 

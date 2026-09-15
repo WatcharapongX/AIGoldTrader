@@ -58,7 +58,7 @@ export function RuntimeHealth({ health, ready, market, system }: RuntimeState) {
     <div><dt>Database</dt><dd>{ready?.checks.database === true ? 'HEALTHY' : ready?.checks.database === false ? 'UNAVAILABLE' : 'UNKNOWN / ไม่พร้อมใช้งาน'}</dd></div>
     <div><dt>Market Data / MT5</dt><dd>{market ? `${market.source} · ${market.mode} · ${market.status}` : 'UNKNOWN / ไม่พร้อมใช้งาน'}</dd>
       <dd>{market?.detail}</dd></div>
-    <div><dt>AI</dt><dd>{aiStatus || 'NOT IMPLEMENTED'}</dd></div>
+    <div><dt>AI</dt><dd>{aiStatus || 'UNKNOWN / ไม่พร้อมใช้งาน'}</dd></div>
     {system?.modules?.risk_engine && <div><dt>Risk Engine</dt><dd>{system.modules.risk_engine.state}</dd></div>}
     {system?.modules?.kill_switch && <div><dt>Kill Switch</dt><dd>{system.modules.kill_switch.state}</dd></div>}
   </dl>;

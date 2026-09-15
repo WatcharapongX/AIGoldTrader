@@ -161,7 +161,7 @@ export function TradingNewsPanel() {
           </div>
 
           <span className="text-[10px] opacity-80">
-            Market Source: {n?.market_source || 'mt5_demo_iux'} · ข่าวและราคาเป็นคนละแหล่งข้อมูล
+            Market Source: {n?.market_source || 'UNAVAILABLE'} · ข่าวและราคาเป็นคนละแหล่งข้อมูล
           </span>
         </div>
 

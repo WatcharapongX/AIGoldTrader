@@ -311,7 +311,7 @@ export function ReleaseGroupPanel({
                     {eventName(ev)}
                   </strong>
                   <span className="text-amber-300 font-bold shrink-0 ml-1">
-                    ระดับ {rel?.score ?? 0}/3
+                    ระดับ {rel?.score != null ? `${rel.score}/3` : 'UNAVAILABLE'}
                   </span>
                 </div>
 

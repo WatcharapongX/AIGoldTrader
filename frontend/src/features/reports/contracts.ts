@@ -11,12 +11,39 @@ export interface ExportColumn {
 
 export interface ReportExportMetadata {
   report_type: string;
+  condition: ReportStatus;
   generated_at: string;
   data_as_of: string | null;
   source: string;
   mode: string;
   coverage: string;
   filters: Record<string, string>;
+}
+
+const PROVENANCE_COLUMNS: ExportColumn[] = [
+  { key: '_report_type', label: 'REPORT TYPE' },
+  { key: '_report_condition', label: 'REPORT CONDITION' },
+  { key: '_report_source', label: 'REPORT SOURCE' },
+  { key: '_report_mode', label: 'REPORT MODE' },
+  { key: '_report_data_as_of', label: 'REPORT DATA AS OF' },
+  { key: '_report_generated_at', label: 'REPORT GENERATED AT' },
+  { key: '_report_filters', label: 'REPORT FILTERS' },
+  { key: '_report_coverage', label: 'REPORT COVERAGE' },
+];
+
+export function buildCsvExport(metadata: ReportExportMetadata, columns: ExportColumn[], rows: ExportRow[]): string {
+  const enriched = rows.map((row) => ({
+    _report_type: metadata.report_type,
+    _report_condition: metadata.condition,
+    _report_source: metadata.source,
+    _report_mode: metadata.mode,
+    _report_data_as_of: metadata.data_as_of,
+    _report_generated_at: metadata.generated_at,
+    _report_coverage: metadata.coverage,
+    _report_filters: JSON.stringify(metadata.filters),
+    ...row,
+  }));
+  return buildCsv([...PROVENANCE_COLUMNS, ...columns], enriched);
 }
 
 const FORMULA_PREFIX = /^[\s\u0000-\u001f]*[=+\-@]/u;

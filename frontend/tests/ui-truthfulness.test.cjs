@@ -73,25 +73,25 @@ test('portfolio, performance and sentiment have no invented numbers or charts',(
  assert.doesNotMatch(t,/12,450|285.41|2.35%|68%|24%|8%|Profit Factor|Total Equity|Win Rate/);
 });
 test('live market label requires real mode, fresh quote and confirmed transport/provider',()=>{
- const p=props();assert.match(text(DashboardView,p),/Live Market Data/);
+ const p=props();assert.match(text(DashboardView,p),/MT5 DEMO · REAL MARKET DATA/);
  for(const state of ['STALE','ERROR','DISCONNECTED','CONNECTING']){
-  p.data.market.status=state;assert.doesNotMatch(text(DashboardView,p),/Live Market Data/);
+  p.data.market.status=state;assert.doesNotMatch(text(DashboardView,p),/REAL MARKET DATA/);
  }
- p.data.market.status='CONNECTED';p.ws='RECONNECTING';assert.doesNotMatch(text(DashboardView,p),/Live Market Data/);
- p.ws='CONNECTED';p.clock+=60000;assert.doesNotMatch(text(DashboardView,p),/Live Market Data/);
+ p.data.market.status='CONNECTED';p.ws='RECONNECTING';assert.doesNotMatch(text(DashboardView,p),/REAL MARKET DATA/);
+ p.ws='CONNECTED';p.clock+=60000;assert.doesNotMatch(text(DashboardView,p),/REAL MARKET DATA/);
  p.clock=now;p.data.market.mode='SIMULATED';assert.match(text(DashboardView,p),/SIMULATED DATA/);
- assert.doesNotMatch(text(DashboardView,p),/Live Market Data/);
+ assert.doesNotMatch(text(DashboardView,p),/REAL MARKET DATA/);
 });
 test('unknown API state cannot invent quotes, mode, AI health or a plan',()=>{
  const p={...props(),data:null,marketStatus:null,error:'โหลดข้อมูลไม่สำเร็จ'};
  const t=text(DashboardView,p);assert.match(t,/Trading: UNKNOWN/);assert.match(t,/Auto Trading: UNKNOWN/);
  assert.match(t,/Market Data: UNKNOWN/);assert.match(t,/Setup Score —/);
- assert.doesNotMatch(t,/4,123|Live Market Data|HEALTHY/);
+ assert.doesNotMatch(t,/4,123|REAL MARKET DATA|HEALTHY/);
 });
 test('API failure after data keeps an explicit stale warning and suppresses live label/plan',()=>{
  const p=props();p.error='โหลดข้อมูลไม่สำเร็จ';
  const t=text(DashboardView,p);assert.match(t,/ข้อมูลเดิมอาจล้าสมัย/);
- assert.doesNotMatch(t,/Live Market Data/);assert.match(t,/Setup Score —/);
+ assert.doesNotMatch(t,/REAL MARKET DATA/);assert.match(t,/Setup Score —/);
 });
 test('canonical calendar forecast/previous/actual render and change with data',()=>{
  const p=props();p.data.calendar_events[0]={...p.data.calendar_events[0],forecast:'7.7',previous:'6.6',actual:null};
@@ -103,12 +103,12 @@ test('global safety renders backend PAPER/OFF, other values and UNKNOWN honestly
  assert.match(text(TradingStatus,{health:{trading_mode:'LIVE',live_auto_trading:true}}),/LIVE Auto Trading: ON/);
  assert.match(text(TradingStatus,{health:null}),/Trading: UNKNOWN Auto Trading: UNKNOWN/);
 });
-test('runtime health renders actual database and MT5 configuration failures; AI unimplemented',()=>{
+test('runtime health renders actual database and MT5 configuration failures; unknown AI stays unknown',()=>{
  const p={health:{},ready:{checks:{database:true}},market:props().data.market};
  assert.match(text(RuntimeHealth,p),/Database HEALTHY/);
  p.ready.checks.database=false;p.market={...p.market,status:'ERROR',mode:'UNCONFIRMED',detail:'MT5_CONFIGURATION_REQUIRED'};
  let t=text(RuntimeHealth,p);assert.match(t,/Database UNAVAILABLE/);assert.match(t,/MT5_CONFIGURATION_REQUIRED/);
- assert.match(t,/AI NOT IMPLEMENTED/);assert.doesNotMatch(t,/MT5 OK|AI OK/);
+ assert.match(t,/AI UNKNOWN \/ ไม่พร้อมใช้งาน/);assert.doesNotMatch(t,/MT5 OK|AI OK/);
  t=text(RuntimeHealth,{health:null,ready:null,market:null});assert.doesNotMatch(t,/HEALTHY/);assert.match(t,/UNKNOWN/);
 });
 test('login is decorative, has no static quote or premature AI/risk feature claims',()=>{

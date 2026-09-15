@@ -338,7 +338,7 @@ export function DashboardView({
     market?.mode === 'SIMULATED'
       ? 'SIMULATED DATA'
       : liveMarket
-      ? 'Live Market Data'
+      ? market?.mode === 'DEMO' ? 'MT5 DEMO · REAL MARKET DATA' : 'REAL MARKET DATA · LIVE'
       : market
       ? 'Market Data: ' + market.status + ' · ' + (staleQuote ? 'STALE / ไม่พร้อม' : 'ข้อมูลล่าสุด')
       : 'Market Data: UNKNOWN';
@@ -392,10 +392,10 @@ export function DashboardView({
       : 'NORMAL';
 
   // AI Provider status label
-  const aiProviderMode = systemStatus?.ai_mode || 'fixture';
+  const aiProviderMode = systemStatus?.ai_mode || 'unavailable';
   const aiStatusLabel =
     systemStatus?.ai_status_label ||
-    (aiProviderMode === 'fixture' ? 'FIXTURE ADVISORY' : 'EXTERNAL NOT CONFIGURED');
+    (aiProviderMode === 'fixture' ? 'FIXTURE ADVISORY' : 'AI STATUS UNAVAILABLE');
 
   return (
     <div className="space-y-5 min-w-0" data-testid="dashboard">
@@ -404,10 +404,10 @@ export function DashboardView({
         <TradingStatus health={safetyHealth} />
         <div className="flex items-center gap-2 text-xs">
           <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-medium">
-            TRADING_MODE=PAPER
+            TRADING_MODE={safetyHealth?.trading_mode ?? 'UNKNOWN'}
           </span>
           <span className="px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-gray-400 font-mono">
-            LIVE_AUTO_TRADING=OFF
+            LIVE_AUTO_TRADING={safetyHealth ? (safetyHealth.live_auto_trading ? 'ON' : 'OFF') : 'UNKNOWN'}
           </span>
         </div>
         {error && <p role="alert" className="text-red-400 text-sm w-full">{error} · ข้อมูลเดิมอาจล้าสมัย</p>}
@@ -823,14 +823,14 @@ export function DashboardView({
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">
                 <span className="text-gray-400">คำสั่งที่จองความเสี่ยง:</span>
                 <span className="font-mono text-gray-200">
-                  {portfolioRisk?.active_reservations_count ?? 0} คำสั่ง
+                  {portfolioRisk ? `${portfolioRisk.active_reservations_count} คำสั่ง` : 'UNAVAILABLE'}
                 </span>
               </div>
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">
                 <span className="text-gray-400">เพดานขาดทุนรายวัน:</span>
                 <span className="font-mono text-gray-200">
                   {riskPolicyState === 'UNAVAILABLE' || !riskPolicy
-                    ? '3%'
+                    ? 'UNAVAILABLE'
                     : `${Math.round(Number(riskPolicy.daily_loss_limit_pct))}%`}
                 </span>
               </div>
@@ -838,7 +838,7 @@ export function DashboardView({
                 <span className="text-gray-400">เสี่ยงสูงสุดต่อไม้:</span>
                 <span className="font-mono text-gray-200">
                   {riskPolicyState === 'UNAVAILABLE' || !riskPolicy
-                    ? '1%'
+                    ? 'UNAVAILABLE'
                     : `${Math.round(Number(riskPolicy.max_risk_per_trade_pct))}%`}
                 </span>
               </div>
@@ -868,7 +868,7 @@ export function DashboardView({
                 <span>💼</span> Capital Health
               </h2>
               <span className="text-[10px] text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded font-medium">
-                {accountState === 'STALE' ? 'PAPER (STALE)' : 'PAPER'}
+                {account ? `${account.trading_mode}${accountState === 'STALE' ? ' · STALE' : ''}` : 'UNAVAILABLE'}
               </span>
             </div>
 
@@ -876,27 +876,27 @@ export function DashboardView({
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">
                 <span className="text-gray-400">ยอดเงินในบัญชี (Balance):</span>
                 <span className="font-mono text-white font-bold">
-                  {account ? `$${fmtPrice(account.balance)}` : '$10,000.00'}
+                  {account ? `$${fmtPrice(account.balance)}` : 'UNAVAILABLE'}
                 </span>
               </div>
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">
                 <span className="text-gray-400">มูลค่าสุทธิ (Equity):</span>
                 <span className="font-mono text-white font-bold">
-                  {account ? `$${fmtPrice(account.equity)}` : '$10,000.00'}
+                  {account ? `$${fmtPrice(account.equity)}` : 'UNAVAILABLE'}
                 </span>
               </div>
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">
                 <span className="text-gray-400">Free Margin:</span>
                 <span className="font-mono text-gray-200">
-                  {account?.free_margin ? `$${fmtPrice(account.free_margin)}` : '$10,000.00'}
+                  {account?.free_margin != null ? `$${fmtPrice(account.free_margin)}` : 'UNAVAILABLE'}
                 </span>
               </div>
               <div className="flex justify-between border-b border-gray-800/80 pb-1.5">
-                <span className="text-gray-400">Peak Drawdown:</span>
+                <span className="text-gray-400">Current Snapshot Drawdown:</span>
                 <span className="font-mono text-emerald-400 font-semibold">
                   {account && Number(account.peak_equity) > Number(account.equity) && Number(account.peak_equity) > 0
                     ? `${(((Number(account.peak_equity) - Number(account.equity)) / Number(account.peak_equity)) * 100).toFixed(2)}%`
-                    : '$0.00'}
+                    : account ? '0.00%' : 'UNAVAILABLE'}
                 </span>
               </div>
             </div>
@@ -914,10 +914,10 @@ export function DashboardView({
           </div>
 
           <Link
-            href="/journal"
+            href="/reports"
             className="mt-4 w-full inline-flex items-center justify-center gap-1.5 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white rounded-lg text-xs font-medium transition-colors"
           >
-            <span>ดูบันทึกประวัติ (Trade Journal) →</span>
+            <span>เปิดรายงานข้อมูล (Reports) →</span>
           </Link>
         </div>
 

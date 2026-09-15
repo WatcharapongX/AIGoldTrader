@@ -23,11 +23,11 @@ interface MacroBiasCardProps {
 export function MacroBiasCard({
   macroBias,
   macroStrength,
-  newsRegime = 'NORMAL',
-  releaseStatus = 'NO_EVENT',
-  dataQuality = 'COMPLETE',
+  newsRegime = 'UNKNOWN',
+  releaseStatus = 'UNAVAILABLE',
+  dataQuality = 'UNAVAILABLE',
   multipleEventRisk = false,
-  calendarState = 'AVAILABLE',
+  calendarState = 'CALENDAR_UNAVAILABLE',
 }: MacroBiasCardProps) {
   // Determine color styling based on bias
   const isPositive = macroBias === 'USD_STRONG_POSITIVE' || macroBias === 'USD_POSITIVE';

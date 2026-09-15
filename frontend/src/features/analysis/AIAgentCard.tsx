@@ -233,7 +233,7 @@ export function AIAgentCard({ agentId, result, isLoading }: AIAgentCardProps) {
             <div>
               <dt className="text-gray-400">Model:</dt>
               <dd className="text-gray-300 truncate">
-                {result.execution_provenance?.model_used || 'fixture-v1'}
+                {result.execution_provenance?.model_used || 'UNAVAILABLE'}
               </dd>
             </div>
             <div>

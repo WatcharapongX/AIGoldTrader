@@ -18,12 +18,12 @@ interface MarketReactionPanelProps {
 export function MarketReactionPanel({
   reactionState = 'REACTION_UNAVAILABLE',
   reactionWindows = [],
-  spreadState = 'SPREAD_NORMAL',
+  spreadState = 'UNAVAILABLE',
   currentSpread,
   baselineSpread,
   spreadRatio,
-  volatilityState = 'NORMAL',
-  sourceMode = 'LIVE',
+  volatilityState = 'UNAVAILABLE',
+  sourceMode = 'UNAVAILABLE',
 }: MarketReactionPanelProps) {
   // Classification badge helper
   const getClassificationBadge = (cls?: string) => {
@@ -158,7 +158,7 @@ export function MarketReactionPanel({
             แหล่งข้อมูลตลาด (Market Source)
           </span>
           <strong className="text-sm font-bold text-amber-300 block">
-            {sourceMode === 'LIVE' ? 'XAUUSD Real Tick Data' : 'XAUUSD Fixture Data'}
+            {sourceMode === 'LIVE' ? 'XAUUSD Real Tick Data' : sourceMode === 'FIXTURE' ? 'XAUUSD Fixture Data' : 'UNAVAILABLE'}
           </strong>
           <div className="pt-1.5 border-t border-white/5 text-[11px] text-gray-400">
             <span>แท่งเทียน M1 ประเมินผลแบบปิดแท่ง (No Incomplete Interpolation)</span>

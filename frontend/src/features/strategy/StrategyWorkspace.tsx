@@ -95,7 +95,7 @@ export function StrategyWorkspace({timeframe,source,revision,primitive}:{
      {selected && <div className="strategy-detail" data-testid="strategy-detail">
        <div><h3>เงื่อนไขและหลักฐาน</h3>
          <p>{ev!.strategies.find(s=>s.id===selected.strategy_id)?.description_th}</p>
-         <ul>{selected.evidence.map((e,i)=><li key={e.code+i}>{e.description_th} <b>{e.weight || 0} คะแนน</b>
+         <ul>{selected.evidence.map((e,i)=><li key={e.code+i}>{e.description_th} <b>{e.weight != null ? `${e.weight} คะแนน` : 'UNAVAILABLE'}</b>
            {e.source_ids?.length ? <small>อ้างอิง {e.source_ids.map(id=>id.slice(0,8)).join(' · ')}</small>:null}</li>)}</ul>
          {!!selected.missing_conditions.length && <><h4>เงื่อนไขที่ยังขาด</h4><ul>{selected.missing_conditions.map(m=><li key={m}>{m}</li>)}</ul></>}
          {!!selected.conflicts.length && <><h4>ข้อจำกัดที่บล็อก Setup</h4><ul>{selected.conflicts.map(m=><li key={m}>{m}</li>)}</ul></>}

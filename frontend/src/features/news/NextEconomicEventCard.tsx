@@ -41,8 +41,8 @@ export function formatCountdown(scheduledAt: string, nowMs: number): string {
 
 export function NextEconomicEventCard({
   events,
-  source = 'mock_macro_v1',
-  sourceMode = 'FIXTURE',
+  source,
+  sourceMode,
   onSelectEvent,
   asOf,
 }: NextEconomicEventCardProps) {
@@ -94,15 +94,17 @@ export function NextEconomicEventCard({
         </div>
 
         <div className="flex items-center gap-2 text-[10px] font-mono">
-          <span className="text-gray-400">แหล่งข้อมูล: {source}</span>
+          <span className="text-gray-400">แหล่งข้อมูล: {source || 'UNAVAILABLE'}</span>
           <span
             className={`px-2 py-0.5 rounded font-bold ${
               sourceMode === 'LIVE'
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                : sourceMode === 'FIXTURE'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                : 'bg-gray-800 text-gray-400 border border-gray-700'
             }`}
           >
-            {sourceMode}
+            {sourceMode || 'UNAVAILABLE'}
           </span>
         </div>
       </div>

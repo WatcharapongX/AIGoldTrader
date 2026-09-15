@@ -15,7 +15,7 @@ export function PerformanceStatusHeader({
   lastUpdated,
   isRefreshing,
   onRefresh,
-  tradingMode = 'PAPER',
+  tradingMode = 'UNAVAILABLE',
 }: PerformanceStatusHeaderProps) {
   return (
     <div className="bg-[#0f172a]/90 border border-slate-800 rounded-xl p-5 mb-6 backdrop-blur-md shadow-lg">

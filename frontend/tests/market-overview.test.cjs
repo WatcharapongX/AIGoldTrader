@@ -236,16 +236,16 @@ function defaultProps() {
   };
 }
 
-test('MarketOverviewView renders XAUUSD quote, spread, and paper trading invariants', () => {
+test('MarketOverviewView renders quote and does not invent missing runtime safety state', () => {
   const p = defaultProps();
   const t = text(MarketOverviewView, p);
   assert.match(t, /Market Overview/);
   assert.match(t, /4,123.45/); // Bid
   assert.match(t, /4,123.78/); // Ask
   assert.match(t, /0.33/); // Spread
-  assert.match(t, /TRADING MODE: PAPER/);
-  assert.match(t, /AUTO TRADING: OFF/);
-  assert.match(t, /FAIL-CLOSED ACTIVE/);
+  assert.match(t, /TRADING MODE: UNKNOWN/);
+  assert.match(t, /AUTO TRADING: UNKNOWN/);
+  assert.match(t, /FAIL-CLOSED POLICY/);
 });
 
 test('truthful market data source labeling for DEMO, REAL, SIMULATED and STALE', () => {

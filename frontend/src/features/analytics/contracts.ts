@@ -61,28 +61,31 @@ export function parseExtendedAccountSnapshot(raw: unknown): ExtendedAccountSnaps
     throw new Error('Account snapshot must be an object');
   }
   const d = raw as Record<string, unknown>;
+  const required = ['id', 'account_id', 'balance', 'equity', 'daily_realized_pnl', 'weekly_realized_pnl', 'peak_equity', 'open_risk_pct', 'reserved_risk_pct', 'consecutive_losses', 'open_positions_count', 'state_version', 'trading_mode', 'source', 'as_of'];
+  if (required.some((key) => d[key] === null || d[key] === undefined || d[key] === '')) throw new Error('Account snapshot missing required field');
+  if (![d.consecutive_losses, d.open_positions_count, d.state_version].every((value) => Number.isInteger(Number(value)) && Number(value) >= 0) || !Number.isFinite(Date.parse(String(d.as_of)))) throw new Error('Account snapshot contains invalid field');
   return {
-    id: String(d.id || ''),
-    account_id: String(d.account_id || 'default_paper_account'),
-    balance: String(d.balance ?? '0.00'),
-    equity: String(d.equity ?? '0.00'),
+    id: String(d.id),
+    account_id: String(d.account_id),
+    balance: String(d.balance),
+    equity: String(d.equity),
     free_margin: d.free_margin != null ? String(d.free_margin) : null,
-    daily_realized_pnl: String(d.daily_realized_pnl ?? '0.00'),
-    weekly_realized_pnl: String(d.weekly_realized_pnl ?? '0.00'),
+    daily_realized_pnl: String(d.daily_realized_pnl),
+    weekly_realized_pnl: String(d.weekly_realized_pnl),
     floating_pnl: d.floating_pnl != null ? String(d.floating_pnl) : null,
-    peak_equity: String(d.peak_equity ?? d.equity ?? '0.00'),
-    open_risk_pct: String(d.open_risk_pct ?? '0.0000'),
-    reserved_risk_pct: String(d.reserved_risk_pct ?? '0.0000'),
-    consecutive_losses: Number(d.consecutive_losses || 0),
+    peak_equity: String(d.peak_equity),
+    open_risk_pct: String(d.open_risk_pct),
+    reserved_risk_pct: String(d.reserved_risk_pct),
+    consecutive_losses: Number(d.consecutive_losses),
     last_loss_at: d.last_loss_at != null ? String(d.last_loss_at) : null,
     cooldown_until: d.cooldown_until != null ? String(d.cooldown_until) : null,
-    open_positions_count: Number(d.open_positions_count || 0),
-    state_version: Number(d.state_version || 1),
+    open_positions_count: Number(d.open_positions_count),
+    state_version: Number(d.state_version),
     state_updated_at: d.state_updated_at != null ? String(d.state_updated_at) : null,
     observed_at: d.observed_at != null ? String(d.observed_at) : null,
-    trading_mode: String(d.trading_mode || 'PAPER'),
-    source: String(d.source || 'CONFIGURED_PAPER'),
-    as_of: String(d.as_of || new Date().toISOString()),
+    trading_mode: String(d.trading_mode),
+    source: String(d.source),
+    as_of: String(d.as_of),
   };
 }
 

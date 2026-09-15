@@ -233,7 +233,7 @@ export function PerformanceScreen() {
         lastUpdated={lastUpdated}
         isRefreshing={isRefreshing}
         onRefresh={handleRefresh}
-        tradingMode={account?.trading_mode || 'PAPER'}
+        tradingMode={account?.trading_mode || 'UNAVAILABLE'}
       />
 
       {/* Filter Control Bar */}

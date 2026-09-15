@@ -379,21 +379,24 @@ export function parseRiskDecisions(raw: unknown): RiskDecisionData[] {
 export function parseAccountSnapshot(raw: unknown): import('@/types').AccountSnapshotData {
   if (!raw || typeof raw !== 'object') fail('Account snapshot must be object');
   const d = raw as Record<string, unknown>;
+  const required = ['id', 'account_id', 'balance', 'equity', 'daily_realized_pnl', 'weekly_realized_pnl', 'peak_equity', 'open_risk_pct', 'reserved_risk_pct', 'consecutive_losses', 'trading_mode', 'source', 'as_of'];
+  if (required.some((key) => d[key] === null || d[key] === undefined || d[key] === '')) fail('Account snapshot missing required field');
+  if (!Number.isInteger(Number(d.consecutive_losses)) || Number(d.consecutive_losses) < 0 || !Number.isFinite(Date.parse(String(d.as_of)))) fail('Account snapshot contains invalid field');
   return {
-    id: String(d.id || ''),
-    account_id: String(d.account_id || ''),
-    balance: String(d.balance ?? '0.00'),
-    equity: String(d.equity ?? '0.00'),
+    id: String(d.id),
+    account_id: String(d.account_id),
+    balance: String(d.balance),
+    equity: String(d.equity),
     free_margin: d.free_margin != null ? String(d.free_margin) : null,
-    daily_realized_pnl: String(d.daily_realized_pnl ?? '0.00'),
-    weekly_realized_pnl: String(d.weekly_realized_pnl ?? '0.00'),
+    daily_realized_pnl: String(d.daily_realized_pnl),
+    weekly_realized_pnl: String(d.weekly_realized_pnl),
     floating_pnl: d.floating_pnl != null ? String(d.floating_pnl) : null,
-    peak_equity: String(d.peak_equity ?? d.equity ?? '0.00'),
-    open_risk_pct: String(d.open_risk_pct ?? '0.00'),
-    reserved_risk_pct: String(d.reserved_risk_pct ?? '0.00'),
-    consecutive_losses: Number(d.consecutive_losses || 0),
-    trading_mode: String(d.trading_mode || 'PAPER'),
-    source: String(d.source || 'CONFIGURED_PAPER'),
-    as_of: String(d.as_of || new Date().toISOString()),
+    peak_equity: String(d.peak_equity),
+    open_risk_pct: String(d.open_risk_pct),
+    reserved_risk_pct: String(d.reserved_risk_pct),
+    consecutive_losses: Number(d.consecutive_losses),
+    trading_mode: String(d.trading_mode),
+    source: String(d.source),
+    as_of: String(d.as_of),
   };
 }

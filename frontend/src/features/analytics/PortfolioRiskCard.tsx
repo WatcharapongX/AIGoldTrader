@@ -46,8 +46,8 @@ export function PortfolioRiskCard({
     );
   }
 
-  const totalRisk = Number(portfolio.total_risk_pct) || 0;
-  const maxRisk = Number(portfolio.max_account_risk_pct) || 6.0;
+  const totalRisk = Number(portfolio.total_risk_pct);
+  const maxRisk = Number(portfolio.max_account_risk_pct);
   const usedRiskPctOfMax = maxRisk > 0 ? Math.min(100, Math.max(0, (totalRisk / maxRisk) * 100)) : 0;
 
   return (

@@ -25,6 +25,12 @@ test('Account Snapshot contract correctly handles nulls, decimal values, and sou
   assert.match(contractsCode, /floating_pnl: string \| null/);
   assert.match(contractsCode, /peak_equity: string/);
   assert.match(contractsCode, /open_positions_count: number/);
+  assert.doesNotMatch(contractsCode, /balance \?\? '0\.00'/);
+  assert.doesNotMatch(contractsCode, /account_id \|\| 'default_paper_account'/);
+  assert.doesNotMatch(contractsCode, /trading_mode \|\| 'PAPER'/);
+  assert.doesNotMatch(contractsCode, /source \|\| 'CONFIGURED_PAPER'/);
+  assert.doesNotMatch(contractsCode, /as_of \|\| new Date/);
+
 
   // Assert null handling in card
   assert.match(accountCardCode, /N\/A \/ ไม่มีข้อมูล Position/);

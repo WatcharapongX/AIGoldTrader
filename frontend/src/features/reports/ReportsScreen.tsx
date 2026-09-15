@@ -18,7 +18,7 @@ import type { Quote } from '@/types/market.generated';
 import type { NewsResponse } from '@/types/news.generated';
 import type { StrategyResponse } from '@/types/strategy.generated';
 import {
-  buildCsv,
+  buildCsvExport,
   buildJsonExport,
   downloadTextArtifact,
   parseCandidateList,
@@ -425,11 +425,11 @@ export function ReportsScreen() {
   function exportReport(extension: 'csv' | 'json') {
     if (!state.data || !visibleRows.length) return;
     const metadata: ReportExportMetadata = {
-      report_type: selected, generated_at: new Date().toISOString(), data_as_of: state.data.dataAsOf,
+      report_type: selected, condition: state.data.status, generated_at: new Date().toISOString(), data_as_of: state.data.dataAsOf,
       source: state.data.source, mode: state.data.mode, coverage: state.data.coverage,
       filters: Object.fromEntries(Object.entries(filters).filter(([, value]) => value)),
     };
-    const content = extension === 'csv' ? buildCsv(state.data.columns, visibleRows) : buildJsonExport(metadata, visibleRows);
+    const content = extension === 'csv' ? buildCsvExport(metadata, state.data.columns, visibleRows) : buildJsonExport(metadata, visibleRows);
     downloadTextArtifact(reportFilename(selected, extension), content, extension === 'csv' ? 'text/csv' : 'application/json');
   }
 

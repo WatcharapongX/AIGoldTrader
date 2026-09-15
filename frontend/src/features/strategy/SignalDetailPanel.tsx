@@ -281,7 +281,7 @@ export function SignalDetailPanel({
                     <span>{e.description_th}</span>
                   </div>
                   <span className="text-amber-300 font-mono font-bold shrink-0">
-                    +{e.weight || 0} คะแนน
+                    {e.weight != null ? `+${e.weight} คะแนน` : 'UNAVAILABLE'}
                   </span>
                 </div>
               ))}

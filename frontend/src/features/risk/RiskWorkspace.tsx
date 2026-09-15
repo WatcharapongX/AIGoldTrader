@@ -535,7 +535,7 @@ export function RiskWorkspace() {
 
             <div className="col-span-2 bg-gray-800/60 p-3 rounded-lg border border-gray-800 flex justify-between items-center">
               <div>
-                <span className="text-gray-400 block">Drawdown สูงสุดปัจจุบัน:</span>
+                <span className="text-gray-400 block">Current Snapshot Drawdown:</span>
                 <span className="text-[10px] text-gray-500">เพดานสูงสุด: {policy ? `${policy.max_drawdown_pct}%` : 'UNKNOWN'}</span>
               </div>
               <span className="font-mono font-bold text-gray-100 text-base">

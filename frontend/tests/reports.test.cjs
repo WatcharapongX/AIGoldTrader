@@ -43,11 +43,15 @@ test('CSV formula injection is neutralized for text but numeric negatives are pr
 
 test('JSON export is a metadata envelope and safe filenames are normalized', () => {
   const metadata = {
-    report_type: 'risk', generated_at: '2026-09-15T00:00:00.000Z', data_as_of: null,
+    report_type: 'risk', condition: 'PARTIAL', generated_at: '2026-09-15T00:00:00.000Z', data_as_of: null,
     source: '/risk/decisions', mode: 'PAPER', coverage: '50 max', filters: {},
   };
   const parsed = JSON.parse(contracts.buildJsonExport(metadata, [{ decision: 'BLOCKED', amount: null }]));
   assert.equal(parsed.metadata.report_type, 'risk');
+  assert.equal(parsed.metadata.condition, 'PARTIAL');
+  const csv = contracts.buildCsvExport(metadata, [{ key: 'decision', label: 'DECISION' }], [{ decision: 'BLOCKED' }]);
+  assert.match(csv, /^﻿REPORT TYPE,REPORT CONDITION,REPORT SOURCE,REPORT MODE,REPORT DATA AS OF,REPORT GENERATED AT,REPORT FILTERS,REPORT COVERAGE,DECISION/);
+  assert.match(csv, /risk,PARTIAL,\/risk\/decisions,PAPER,NULL,2026-09-15T00:00:00\.000Z,\{\},50 max,BLOCKED/);
   assert.equal(parsed.records[0].amount, null);
   assert.equal(contracts.reportFilename('../../Risk Report', 'csv', new Date('2026-09-15T00:00:00Z')), 'aigoldtrader-risk-report-2026-09-15.csv');
 });

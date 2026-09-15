@@ -30,6 +30,7 @@ const {
   parseRiskPolicy,
   parseKillSwitch,
   parsePortfolioRisk,
+  parseAccountSnapshot,
   parseRiskDecision,
   parseRiskDecisions,
   RiskContractError,
@@ -326,4 +327,29 @@ test('Kill Switch card authority never comes from stale portfolio metadata', () 
   assert.ok(activeExpression, 'Kill Switch active expression must exist');
   assert.match(activeExpression[1], /killSwitch\?\.state === 'ACTIVE'/);
   assert.doesNotMatch(activeExpression[1], /portfolio/);
+});
+
+test('account snapshot rejects missing financial fields and preserves explicit zero', () => {
+  const account = {
+    id: 'snap-1',
+    account_id: 'paper-1',
+    balance: '0.00',
+    equity: '0.00',
+    free_margin: '0.00',
+    daily_realized_pnl: '0.00',
+    weekly_realized_pnl: '0.00',
+    floating_pnl: null,
+    peak_equity: '0.00',
+    open_risk_pct: '0.00',
+    reserved_risk_pct: '0.00',
+    consecutive_losses: 0,
+    trading_mode: 'PAPER',
+    source: 'CONFIGURED_PAPER',
+    as_of: '2026-09-15T10:00:00Z',
+  };
+  const parsed = parseAccountSnapshot(account);
+  assert.equal(parsed.balance, '0.00');
+  assert.equal(parsed.consecutive_losses, 0);
+  assert.throws(() => parseAccountSnapshot({ ...account, balance: undefined }), RiskContractError);
+  assert.throws(() => parseAccountSnapshot({ ...account, as_of: '' }), RiskContractError);
 });

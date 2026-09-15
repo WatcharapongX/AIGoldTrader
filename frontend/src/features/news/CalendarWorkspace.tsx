@@ -306,7 +306,7 @@ export function CalendarWorkspace() {
           </div>
 
           <span className="text-[10px] opacity-80">
-            Source: {currentCalendar?.source || 'mock_macro_v1'} · State: {currentCalendar?.state || 'AVAILABLE'}
+            Source: {currentCalendar?.source || 'UNAVAILABLE'} · State: {currentCalendar?.state || 'UNAVAILABLE'}
           </span>
         </div>
       </div>

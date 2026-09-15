@@ -88,10 +88,10 @@ export function StrategyAnalysisContext({
         <div className="p-3 bg-black/20 rounded-lg border border-white/5">
           <span className="text-gray-400 block text-[11px]">ผูกกับบัญชีเทรด (Account):</span>
           <strong className="text-gray-200 block truncate font-mono mt-0.5">
-            {account?.account_id || 'default_paper_account'}
+            {account?.account_id || 'UNAVAILABLE'}
           </strong>
           <small className="text-gray-400 block mt-0.5">
-            Balance: ${account ? Number(account.balance).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '100,000.00'} · PAPER
+            Balance: {account ? `$${Number(account.balance).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : 'UNAVAILABLE'} · {account ? 'ACCOUNT SNAPSHOT' : 'NO ACCOUNT DATA'}
           </small>
         </div>
 

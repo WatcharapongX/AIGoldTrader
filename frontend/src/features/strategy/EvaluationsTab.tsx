@@ -15,6 +15,8 @@ interface EvaluationsTabProps {
   loadingHistory: boolean;
   loadingCandidates: boolean;
   error: string | null;
+  historyError?: string | null;
+  candidatesError?: string | null;
 }
 
 const CANONICAL_STATES = [
@@ -38,6 +40,8 @@ export function EvaluationsTab({
   loadingHistory,
   loadingCandidates,
   error,
+  historyError,
+  candidatesError,
 }: EvaluationsTabProps) {
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null);
 
@@ -162,7 +166,7 @@ export function EvaluationsTab({
               <div>
                 <span className="text-[10px] text-gray-400 block">ENGINE VERSION</span>
                 <strong className="text-gray-200">
-                  {currentEvaluation.evaluation.context.engine_version || 'v1.2.1'}
+                  {currentEvaluation.evaluation.context.engine_version || 'UNAVAILABLE'}
                 </strong>
               </div>
               <div>
@@ -172,7 +176,7 @@ export function EvaluationsTab({
                     currentEvaluation.stale ? 'text-rose-400' : 'text-emerald-400'
                   }`}
                 >
-                  {currentEvaluation.stale ? 'STALE FEED' : 'LIVE / FRESH'}
+                  {currentEvaluation.stale ? 'STALE' : 'FRESH'}
                 </span>
               </div>
             </div>
@@ -324,6 +328,10 @@ export function EvaluationsTab({
         {loadingHistory ? (
           <div data-testid="history-eval-loading" className="p-8 text-center text-gray-400 text-sm">
             กำลังโหลดประวัติผลการประเมิน...
+          </div>
+        ) : historyError ? (
+          <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs">
+            UNAVAILABLE: {historyError}
           </div>
         ) : historicalEvaluations.length === 0 ? (
           <div data-testid="history-empty" className="p-8 bg-[#0e1726] border border-gray-800 rounded-xl text-center text-gray-400 text-xs">
@@ -493,13 +501,17 @@ export function EvaluationsTab({
             </p>
           </div>
           <span className="text-xs font-mono text-gray-400">
-            รวม {candidateStats.total} บันทึก
+            รวม {candidatesError ? 'UNAVAILABLE' : candidateStats.total} บันทึก
           </span>
         </div>
 
         {loadingCandidates ? (
           <div data-testid="candidates-stats-loading" className="p-8 text-center text-gray-400 text-sm">
             กำลังคำนวณสถิติสัญญาณ...
+          </div>
+        ) : candidatesError ? (
+          <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs">
+            UNAVAILABLE: {candidatesError}
           </div>
         ) : (
           <div className="space-y-4">

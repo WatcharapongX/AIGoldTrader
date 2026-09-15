@@ -209,14 +209,14 @@ export function TradingScreen() {
         primitive={primitive} key={symbol + timeframe + retry} />
       <div className="market-bottom">
         <section className="market-info"><h2>Market information</h2><dl>
-          <div><dt>Asset class</dt><dd>{selected?.asset_class || 'METAL'}</dd></div>
+          <div><dt>Asset class</dt><dd>{selected?.asset_class || 'UNCONFIRMED'}</dd></div>
           <div><dt>Provider</dt><dd>{provider?.source || 'Unconfirmed'} / {provider?.mode || 'UNCONFIRMED'}</dd></div>
           <div><dt>Trading mode</dt><dd className="gold-text">PAPER · execution disabled</dd></div>
           <div><dt>Timeframe</dt><dd>{timeframe} · UTC boundaries</dd></div>
           <div><dt>Feed session</dt><dd>{provider?.mode === 'SIMULATED' ? 'Synthetic · continuous 24/7' : 'Broker session; hours not confirmed'}</dd></div>
           <div><dt>Connection</dt><dd>{status}</dd></div>
           <div><dt>Market state</dt><dd>{provider?.market_state || 'UNKNOWN'}</dd></div>
-          <div><dt>Source symbol</dt><dd>{provider?.provider_symbol || 'XAUUSD'}</dd></div>
+          <div><dt>Source symbol</dt><dd>{provider?.provider_symbol || 'UNCONFIRMED'}</dd></div>
           <div><dt>Tick size · USD</dt><dd>{provider?.tick_size || '—'}</dd></div>
           <div><dt>Last candle · UTC</dt><dd>{provider?.last_candle || '—'}</dd></div>
         </dl></section>
