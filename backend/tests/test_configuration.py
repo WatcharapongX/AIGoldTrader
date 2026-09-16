@@ -5,7 +5,15 @@ from fastapi.testclient import TestClient
 from app.core.config import get_settings
 
 EXPECTED_TOP_LEVEL = {
-    "as_of", "authority", "restart_required", "trading", "market", "news", "ai", "infrastructure", "session",
+    "as_of",
+    "authority",
+    "restart_required",
+    "trading",
+    "market",
+    "news",
+    "ai",
+    "infrastructure",
+    "session",
 }
 
 
@@ -20,14 +28,28 @@ def test_safe_configuration_is_explicit_read_only_allow_list(client: TestClient,
     assert set(data) == EXPECTED_TOP_LEVEL
     assert set(data["trading"]) == {"mode", "live_auto_trading", "broker_execution", "account_provenance"}
     assert set(data["market"]) == {
-        "provider", "account_mode", "configured_symbol", "server_timezone", "poll_seconds",
-        "stale_after_seconds", "archive_real_ticks", "terminal", "account_validation",
-        "server_validation", "provenance",
+        "provider",
+        "account_mode",
+        "configured_symbol",
+        "server_timezone",
+        "poll_seconds",
+        "stale_after_seconds",
+        "archive_real_ticks",
+        "terminal",
+        "account_validation",
+        "server_validation",
+        "provenance",
     }
     assert set(data["news"]) == {"provider", "poll_seconds", "stale_after_seconds", "provenance"}
     assert set(data["ai"]) == {
-        "mode", "provider_type", "credential", "endpoint", "model_mapping",
-        "max_concurrent_provider_calls", "queue_timeout_seconds", "provenance",
+        "mode",
+        "provider_type",
+        "credential",
+        "endpoint",
+        "model_mapping",
+        "max_concurrent_provider_calls",
+        "queue_timeout_seconds",
+        "provenance",
     }
     assert set(data["infrastructure"]) == {"environment", "redis_enabled"}
     assert set(data["session"]) == {"access_token_minutes", "refresh_session_days"}
@@ -41,6 +63,9 @@ def test_safe_configuration_maps_modes_without_collapsing_provenance(
     client: TestClient, auth_headers: dict[str, str], monkeypatch
 ):
     settings = get_settings()
+    monkeypatch.setattr(settings, "mt5_terminal_path", "")
+    monkeypatch.setattr(settings, "mt5_expected_login", None)
+    monkeypatch.setattr(settings, "mt5_expected_server", "")
 
     baseline = client.get("/api/configuration/safe", headers=auth_headers).json()
     assert baseline["market"]["provider"] == "simulated"
@@ -72,6 +97,7 @@ def test_safe_configuration_maps_modes_without_collapsing_provenance(
     monkeypatch.setattr(settings, "ai_provider_api_key", "configured-but-never-returned")
     assert client.get("/api/configuration/safe", headers=auth_headers).json()["ai"]["credential"] == "CONFIGURED"
 
+
 def test_safe_configuration_never_leaks_secret_values(client: TestClient, auth_headers: dict[str, str], monkeypatch):
     settings = get_settings()
     sentinels = {
@@ -91,8 +117,14 @@ def test_safe_configuration_never_leaks_secret_values(client: TestClient, auth_h
     for value in hidden_values:
         assert str(value) not in rendered
     for forbidden_key in (
-        "secret_key", "database_connection_url", "postgres_password", "ai_provider_api_key",
-        "mt5_terminal_path", "mt5_expected_login", "mt5_expected_server", "redis_host",
+        "secret_key",
+        "database_connection_url",
+        "postgres_password",
+        "ai_provider_api_key",
+        "mt5_terminal_path",
+        "mt5_expected_login",
+        "mt5_expected_server",
+        "redis_host",
     ):
         assert forbidden_key not in rendered
 

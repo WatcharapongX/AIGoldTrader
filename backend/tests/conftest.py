@@ -201,6 +201,7 @@ def isolate_settings(monkeypatch: pytest.MonkeyPatch, request):
     if request.node.get_closest_marker("live_external") is None:
         monkeypatch.setenv("MARKET_DATA_PROVIDER", "simulated")
     monkeypatch.setenv("TRADING_MODE", "PAPER")
+    monkeypatch.setenv("NEWS_CALENDAR_PROVIDER", "unavailable")
     monkeypatch.setenv("LIVE_AUTO_TRADING", "false")
     monkeypatch.setenv("REDIS_ENABLED", "false")
     monkeypatch.setenv("DATABASE_URL_OVERRIDE", "sqlite+aiosqlite:///:memory:")

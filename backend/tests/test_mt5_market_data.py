@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from app.core.config import Settings
 from app.models import MarketCandle, MarketTick, Symbol
-from app.services.market_data.domain import SECONDS, MarketDataStatus, Timeframe, bucket
+from app.services.market_data.domain import SECONDS, MarketDataStatus, Quote, Timeframe, bucket
 from app.services.market_data.mt5 import MT5MarketDataProvider, MT5Unavailable, ReadOnlyMT5
 from app.services.market_data.provider import ReplayProvider
 from app.services.market_data.repository import candles_query, upsert_candles
@@ -265,6 +265,38 @@ async def test_service_real_persistence_and_source_isolation(configured, db_sess
     assert market.sequence == 1
     assert await session.scalar(select(func.count()).select_from(MarketCandle)) >= 300 * 9
     await market.stop()
+
+
+async def test_authoritative_gap_requests_controlled_resnapshot(configured):
+    from unittest.mock import AsyncMock
+
+    settings, _, provider = configured
+    market = MarketService(None, settings)
+    await provider.connect()
+    market.provider = provider
+    current = dt.datetime.now(dt.UTC)
+    first = provider.get_quote("XAUUSD").model_copy(update={"timestamp": current - dt.timedelta(seconds=6)})
+    market.quote = Quote(**first.model_dump(), spread=first.ask - first.bid, status="CONNECTED", mode=provider.mode)
+    gap = first.model_copy(update={"timestamp": current})
+
+    async def ticks():
+        yield gap
+
+    provider.subscribe_ticks = lambda _symbol: ticks()
+    market.initialize = AsyncMock(side_effect=[None, asyncio.CancelledError()])
+    market.event = AsyncMock()
+    provider.disconnect = AsyncMock()
+    queue = market.bus.subscribe()
+
+    with pytest.raises(asyncio.CancelledError):
+        await market.run()
+
+    assert market.state == "STALE"
+    assert market.detail == "Provider gap detected; rebuilding authoritative history"
+    assert queue.get_nowait() is None
+    market.event.assert_awaited_once_with("MARKET_RESNAPSHOT_REQUIRED")
+    provider.disconnect.assert_awaited_once()
+    assert market.initialize.await_count == 2
 
 
 async def test_short_history_blocks_bootstrap_atomically(configured, db_session):

@@ -19,6 +19,10 @@ from app.services.market_data.repository import prune, save_tick, upsert_candles
 logger = logging.getLogger(__name__)
 
 
+class ProviderResnapshotRequired(Exception):
+    """Signal a routine authoritative-feed resnapshot without marking the worker failed."""
+
+
 class LocalMarketBus:
     """Replaceable single-instance pub/sub; slow consumers must reconnect for a fresh snapshot."""
 
@@ -186,7 +190,7 @@ class MarketService:
             and (tick.timestamp - self.quote.timestamp).total_seconds()
             > max(self.settings.market_stale_seconds, self.settings.mt5_poll_seconds * 2)
         ):
-            raise ValueError("Provider gap requires historical resnapshot")
+            raise ProviderResnapshotRequired
         candles = (
             await self.provider.candle_updates(now) if self.provider.authoritative_candles else self.engine.ingest(tick)
         )
@@ -237,6 +241,16 @@ class MarketService:
                     await stream.aclose()
             except asyncio.CancelledError:
                 raise
+            except ProviderResnapshotRequired:
+                self.state = "STALE"
+                self.detail = "Provider gap detected; rebuilding authoritative history"
+                self.bus.publish(None)  # Reconnect clients to the rebuilt authoritative history.
+                logger.warning("market_data_resnapshot", extra={"event_code": "MARKET_RESNAPSHOT_REQUIRED"})
+                with suppress(Exception):
+                    await self.event("MARKET_RESNAPSHOT_REQUIRED")
+                with suppress(Exception):
+                    await self.provider.disconnect()
+                delay = 1
             except Exception as exc:
                 self.state, self.detail = "ERROR", "Market source or persistence unavailable; retrying"
                 self.bus.publish(None)  # Reconnect clients to the rebuilt authoritative history.
