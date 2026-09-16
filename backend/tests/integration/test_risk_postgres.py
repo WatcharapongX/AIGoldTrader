@@ -72,7 +72,8 @@ def test_risk_migration_idempotence_and_preservation(isolated_postgres):  # noqa
         ) VALUES (
             'dec_test_pg_001', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
             'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
-            'default_paper_account', 'snap_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}',
+            '00000000-0000-0000-0000-000000000001', 'snap_01', 'risk-policy-1.0.0',
+            NOW(), NOW() + interval '1 hour', '{}',
             'fp_test_pg_001'
         )
         """
@@ -105,9 +106,10 @@ def test_mandatory_postgresql_concurrency_oversubscription_gate(isolated_postgre
         max_directional_risk_pct=Decimal("3.0"),
         max_concurrent_trades=10,
     )
+    acc_id = "00000000-0000-0000-0000-000000000002"
     account = AccountSnapshot(
         id="snap_conc_001",
-        account_id="acc_conc_001",
+        account_id=acc_id,
         balance=Decimal("10000.00"),
         equity=Decimal("10000.00"),
         peak_equity=Decimal("10000.00"),
@@ -129,11 +131,11 @@ def test_mandatory_postgresql_concurrency_oversubscription_gate(isolated_postgre
             ) VALUES (
                 %s, 'cand_conc', 'plan_conc', 'STRAT01', %s, 'XAUUSD', 'LONG',
                 'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
-                'default_paper_account', 'snap_conc_001', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}',
+                %s, 'snap_conc_001', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}',
                 %s
             )
             """,
-            (f"dec_conc_{i}", f"profile_{i}", f"fp_conc_{i}"),
+            (f"dec_conc_{i}", f"profile_{i}", acc_id, f"fp_conc_{i}"),
         )
 
     async def run_concurrent_requests():
@@ -214,7 +216,7 @@ def test_duplicate_concurrency_idempotency_gate(isolated_postgres):  # noqa: F81
     )
     account = AccountSnapshot(
         id="snap_dup_conc_001",
-        account_id="acc_dup_conc_001",
+        account_id="00000000-0000-0000-0000-000000000003",
         balance=Decimal("10000.00"),
         equity=Decimal("10000.00"),
         peak_equity=Decimal("10000.00"),
@@ -373,7 +375,37 @@ def test_migration_0007_to_0009_matrix(isolated_postgres):  # noqa: F811
         """
     )
 
-    # Step 3: Insert legacy decisions in 0007
+    # Step 3: Insert user, account, and snapshot for authoritative decision ownership in 0007
+    uid_legacy = str(uuid.uuid4())
+    acc_legacy_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES (%(uid)s, 'legacy_migration@example.com', 'dummy_hash', 'TRADER', true, NOW(), NOW())
+        """,
+        {"uid": uid_legacy},
+    )
+    conn.execute(
+        """
+        INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, is_active, created_at, updated_at)
+        VALUES (%(id)s, %(uid)s, 'Legacy Acc', 'PAPER', 10000.00, true, NOW(), NOW())
+        """,
+        {"id": acc_legacy_id, "uid": uid_legacy},
+    )
+    conn.execute(
+        """
+        INSERT INTO account_snapshots (
+            id, account_id, balance, equity, free_margin, daily_realized_pnl, weekly_realized_pnl,
+            peak_equity, open_risk_pct, reserved_risk_pct, consecutive_losses, trading_mode,
+            source, as_of, payload
+        ) VALUES (
+            'snap_legacy_01', %(acc_id)s, 10000.00, 10000.00, 10000.00, 0.00, 0.00,
+            10000.00, 0.0000, 0.0000, 0, 'PAPER', 'PAPER_ACCOUNT_STATE', NOW(), '{}'
+        )
+        """,
+        {"acc_id": acc_legacy_id},
+    )
+
     for i in range(2):
         conn.execute(
             """

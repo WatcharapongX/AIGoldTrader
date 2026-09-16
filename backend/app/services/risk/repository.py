@@ -1,14 +1,12 @@
 import datetime as dt
 import logging
-import uuid
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ForbiddenError, NotFoundError, ValidationError
-from app.models.account import Account
+from app.core.errors import NotFoundError, ValidationError
 from app.models.risk import (
     AccountSnapshotRecord,
     RiskDecisionRecord,
@@ -265,6 +263,9 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
             )
         return RiskDecision.model_validate(existing.payload)
 
+    if not decision.account_id:
+        raise ValidationError("RiskDecision requires an account_id")
+
     record = RiskDecisionRecord(
         id=decision.id,
         candidate_id=decision.candidate_id,
@@ -283,7 +284,7 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
         entry_upper=decision.entry_upper,
         stop_loss=decision.stop_loss,
         stop_distance=decision.stop_distance,
-        account_id=decision.account_id or "default_paper_account",
+        account_id=decision.account_id,
         account_snapshot_id=decision.account_snapshot_id,
         policy_version=decision.policy_version,
         as_of=decision.as_of,

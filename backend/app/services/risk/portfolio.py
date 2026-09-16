@@ -559,24 +559,25 @@ class PortfolioRiskManager:
     async def release_candidate_reservations(
         self,
         session: AsyncSession,
-        account_id: str,
         candidate_id: str,
         now: dt.datetime,
         reason: str,
+        account_id: str | None = None,
     ) -> int:
-        """Release every active reservation before returning a BLOCKED decision."""
-        active_rows = (
-            await session.scalars(
-                select(RiskReservationRecord)
-                .where(
-                    RiskReservationRecord.account_id == account_id,
-                    RiskReservationRecord.candidate_id == candidate_id,
-                    RiskReservationRecord.status == "ACTIVE",
-                )
-                .with_for_update()
-                .execution_options(populate_existing=True)
+        """Release every active reservation before returning a BLOCKED decision or on terminal transition."""
+        stmt = (
+            select(RiskReservationRecord)
+            .where(
+                RiskReservationRecord.candidate_id == candidate_id,
+                RiskReservationRecord.status == "ACTIVE",
             )
-        ).all()
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if account_id is not None:
+            stmt = stmt.where(RiskReservationRecord.account_id == account_id)
+
+        active_rows = (await session.scalars(stmt)).all()
         for row in active_rows:
             row.status = "RELEASED"
             row.released_at = now

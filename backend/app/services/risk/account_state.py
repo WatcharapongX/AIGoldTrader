@@ -14,9 +14,8 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError
-from app.models.account import Account
 from app.models.risk import AccountSnapshotRecord, PaperAccountStateRecord
+from app.services.risk.account_resolver import resolve_canonical_account
 from app.services.risk.domain import AccountSnapshot
 
 
@@ -36,17 +35,8 @@ class PaperAccountStateService:
         """Retrieves or creates canonical PaperAccountStateRecord."""
         effective_now = now or dt.datetime.now(dt.UTC)
 
-        # 1. Look up authoritative Account
-        try:
-            parsed_uuid = uuid.UUID(account_id)
-            acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
-        except (ValueError, TypeError):
-            acc_row = await session.scalar(select(Account).where(Account.name == account_id))
-
-        if acc_row is None:
-            raise NotFoundError(f"Account '{account_id}' not found")
-
-        canonical_id = str(acc_row.id)
+        # 1. Look up authoritative Account via safe canonical resolver (AUD-P1-004, BATCHA-P1-002)
+        acc_row, canonical_id = await resolve_canonical_account(session, account_ref=account_id)
 
         # Acquire advisory lock on account bootstrap to prevent first-row creation race (AUD-P1-004)
         if session.get_bind().dialect.name == "postgresql":
@@ -201,14 +191,8 @@ class PaperAccountStateService:
         """
         effective_now = now or dt.datetime.now(dt.UTC)
 
-        # 1. Resolve canonical ID
-        try:
-            parsed_uuid = uuid.UUID(account_id)
-            acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
-        except (ValueError, TypeError):
-            acc_row = await session.scalar(select(Account).where(Account.name == account_id))
-
-        canonical_id = str(acc_row.id) if acc_row is not None else account_id
+        # 1. Resolve canonical ID via safe resolver (AUD-P1-004, BATCHA-P1-002)
+        acc_row, canonical_id = await resolve_canonical_account(session, account_ref=account_id)
 
         # 2. Acquire row lock before comparing/updating state
         state = await session.scalar(

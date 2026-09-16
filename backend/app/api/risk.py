@@ -7,7 +7,6 @@ Execution (orders, Phase 7) is strictly forbidden.
 
 import datetime as dt
 import logging
-import uuid
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -23,8 +22,8 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.db.session import get_session
 from app.models import Role, User
 from app.models.account import Account
-from app.models.strategy import TradeCandidateRecord
 from app.services.news.repository import event_vintages
+from app.services.risk.account_resolver import resolve_canonical_account
 from app.services.risk.domain import (
     AccountSnapshot,
     KillSwitchState,
@@ -33,7 +32,6 @@ from app.services.risk.domain import (
     RiskEvaluationRequest,
     RiskPolicy,
 )
-from app.services.risk.account_resolver import resolve_canonical_account
 from app.services.risk.engine import risk_engine
 from app.services.risk.kill_switch import kill_switch_manager
 from app.services.risk.portfolio import portfolio_manager
@@ -45,7 +43,6 @@ from app.services.risk.repository import (
     list_recent_decisions,
     persist_risk_decision,
 )
-from app.services.strategy.domain import SetupCandidate
 from app.services.strategy.lifecycle import resolve_candidate_current_lifecycle
 
 logger = logging.getLogger(__name__)
@@ -59,24 +56,23 @@ class KillSwitchActionRequest(BaseModel):
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != Role.ADMIN:
-        raise ForbiddenError("Only administrators can manage the Kill Switch")
+        raise ForbiddenError("Admin privileges required")
     return user
 
 
 @router.post("/evaluate", response_model=RiskDecision)
 async def evaluate_risk(
-    request: Request,
     body: RiskEvaluationRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-):
-    """Command to evaluate a trade candidate/plan and create an atomic risk reservation."""
-    # AUD-P1-002: VIEWER role cannot invoke state-changing risk evaluation
+) -> RiskDecision:
+    """Evaluates risk for a given candidate trade plan against active RiskPolicy."""
+    # VIEWER role cannot invoke state-changing risk evaluation (AUD-P1-002)
     if user.role == Role.VIEWER:
         raise ForbiddenError("VIEWER role cannot execute risk evaluation")
 
     settings = get_settings()
-    # In PAPER mode, caller as_of is strictly ignored in favor of server UTC clock (SOL-P5-P1-007)
     if settings.trading_mode == "PAPER":
         now = dt.datetime.now(dt.UTC)
     else:
@@ -95,7 +91,7 @@ async def evaluate_risk(
         is_admin=(user.role == Role.ADMIN),
     )
 
-    # Transaction-level advisory lock on canonical account to serialize concurrent evaluations (SOL-P5-P1-031, AUD-P1-004)
+    # Transaction-level advisory lock on canonical account (SOL-P5-P1-031, AUD-P1-004)
     if session.get_bind().dialect.name == "postgresql":
         from sqlalchemy import text
 

@@ -79,8 +79,9 @@ async def _persist_projection(session: AsyncSession, evaluation: Evaluation) -> 
         raise ValueError("Concurrent evaluation identity conflict")
     for candidate in evaluation.candidates:
         # Predecessor must belong to this profile/strategy, including mixed requests.
-        previous = await session.scalar(
-            select(TradeCandidateRecord)
+        # Lock predecessor candidate row to serialize with concurrent Risk evaluation (Section 21, AUD-P1-001)
+        prev_subquery = (
+            select(TradeCandidateRecord.id)
             .join(StrategyEvaluationRecord)
             .where(
                 StrategyEvaluationRecord.symbol == evaluation.context.symbol,
@@ -95,6 +96,12 @@ async def _persist_projection(session: AsyncSession, evaluation: Evaluation) -> 
             )
             .limit(1)
         )
+        previous_id = await session.scalar(prev_subquery)
+        previous = None
+        if previous_id:
+            previous = await session.scalar(
+                select(TradeCandidateRecord).where(TradeCandidateRecord.id == previous_id).with_for_update()
+            )
         await session.execute(
             insert(TradeCandidateRecord)
             .values(
@@ -151,6 +158,15 @@ async def _persist_projection(session: AsyncSession, evaluation: Evaluation) -> 
                     )
                     .on_conflict_do_nothing()
                 )
+                if change.to_status in {"INVALIDATED", "EXPIRED", "SUPERSEDED"}:
+                    from app.services.risk.portfolio import portfolio_manager
+
+                    await portfolio_manager.release_candidate_reservations(
+                        session=session,
+                        candidate_id=change.candidate_id,
+                        now=evaluation.context.as_of,
+                        reason=f"Candidate became terminal ({change.to_status})",
+                    )
     return utc(stored.generated_at)
 
 

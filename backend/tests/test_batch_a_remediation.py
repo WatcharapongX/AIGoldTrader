@@ -8,14 +8,13 @@ Verifies:
 """
 
 import datetime as dt
-import uuid
 from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.models import Account, Role, User
+from app.models import Account, Role
 from app.models.account import TradingMode
 from app.models.risk import RiskDecisionRecord, RiskReservationRecord
 from app.models.strategy import (
@@ -26,7 +25,6 @@ from app.models.strategy import (
 from app.services.ai.assembler import AIAnalysisInputAssembler
 from app.services.risk.account_resolver import resolve_canonical_account
 from app.services.risk.account_state import PaperAccountStateRecord, PaperAccountStateService
-from app.services.risk.fingerprint import compute_risk_dependency_fingerprint
 from app.services.strategy.domain import (
     Evidence,
     SetupCandidate,
@@ -143,12 +141,15 @@ async def test_aud_p1_001_lifecycle_projection_with_transitions(db_session):
     assert "จุดตัดขาดทุน" in lifecycle_after.reason_th
 
 
-def test_aud_p1_001_risk_evaluate_blocks_terminal_candidate(client: TestClient, auth_headers: dict[str, str], db_session):
+def test_aud_p1_001_risk_evaluate_blocks_terminal_candidate(
+    client: TestClient, auth_headers: dict[str, str], db_session
+):
     session, _ = db_session
     now = dt.datetime.now(dt.UTC)
     cand = _make_candidate("cand_eval_term_01", status="READY")
 
     import asyncio
+
     async def _setup():
         rec = TradeCandidateRecord(
             id=cand.id,
@@ -159,28 +160,30 @@ def test_aud_p1_001_risk_evaluate_blocks_terminal_candidate(client: TestClient, 
             payload=cand.model_dump(mode="json"),
         )
         session.add(rec)
-        # Add transition to EXPIRED
+        await session.flush()
+
+        # Add EXPIRED transition
         trans = Transition(
-            id="trans_expired_01",
+            id="trans_term_01",
             candidate_id=cand.id,
-            context_id="ctx_003",
+            context_id="ctx_01",
             from_status="READY",
             to_status="EXPIRED",
-            as_of=now + dt.timedelta(minutes=5),
-            reason_th="ครบเวลาหมดอายุ",
+            as_of=now,
+            reason_th="หมดอายุตามเวลา",
         )
         trans_rec = CandidateTransitionRecord(
             id=trans.id,
             candidate_id=cand.id,
-            as_of=trans.as_of,
+            as_of=now,
             payload=trans.model_dump(mode="json"),
         )
         session.add(trans_rec)
-        await session.commit()
+        await session.flush()
 
     asyncio.run(_setup())
 
-    # Call evaluate
+    # Call POST /api/risk/evaluate
     resp = client.post(
         "/api/risk/evaluate",
         headers=auth_headers,
@@ -188,10 +191,13 @@ def test_aud_p1_001_risk_evaluate_blocks_terminal_candidate(client: TestClient, 
             "candidate_id": cand.id,
             "profile_id": cand.profile_id,
             "account_id": "default_paper_account",
+            "requested_risk_pct": 1.0,
         },
     )
     assert resp.status_code == 200
     data = resp.json()
+
+    # Must be BLOCKED with 0 reservation
     assert data["decision"] == "BLOCKED"
     assert data["approved_risk_pct"] == "0.0000"
     assert data["position_size"] == "0.0000"
@@ -199,7 +205,8 @@ def test_aud_p1_001_risk_evaluate_blocks_terminal_candidate(client: TestClient, 
 
     # Verify zero active reservations created
     async def _verify_zero_reservations():
-        res = (await session.scalars(select(RiskReservationRecord).where(RiskReservationRecord.candidate_id == cand.id))).all()
+        stmt = select(RiskReservationRecord).where(RiskReservationRecord.candidate_id == cand.id)
+        res = (await session.scalars(stmt)).all()
         assert len(res) == 0
 
     asyncio.run(_verify_zero_reservations())
@@ -320,8 +327,10 @@ def test_aud_p1_002_viewer_role_forbidden_on_evaluate(client: TestClient, db_ses
 
     # Verify zero risk decisions and zero reservations created (zero state mutation)
     async def _verify_zero():
-        decisions = (await session.scalars(select(RiskDecisionRecord).where(RiskDecisionRecord.candidate_id == "cand_viewer_01"))).all()
-        reservations = (await session.scalars(select(RiskReservationRecord).where(RiskReservationRecord.candidate_id == "cand_viewer_01"))).all()
+        dec_stmt = select(RiskDecisionRecord).where(RiskDecisionRecord.candidate_id == "cand_viewer_01")
+        decisions = (await session.scalars(dec_stmt)).all()
+        res_stmt = select(RiskReservationRecord).where(RiskReservationRecord.candidate_id == "cand_viewer_01")
+        reservations = (await session.scalars(res_stmt)).all()
         assert len(decisions) == 0
         assert len(reservations) == 0
 

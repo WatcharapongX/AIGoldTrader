@@ -18,9 +18,8 @@ from fastapi import Request
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ForbiddenError, NotFoundError, ValidationError
+from app.core.errors import NotFoundError, ValidationError
 from app.models import Role, User
-from app.models.account import Account
 from app.models.risk import (
     AccountSnapshotRecord,
     RiskDecisionRecord,

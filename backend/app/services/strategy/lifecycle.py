@@ -1,6 +1,7 @@
 """Explicit transitions preserve frozen evidence; absence never means invalidation."""
 
 import datetime as dt
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
@@ -144,3 +145,65 @@ def transition(
         as_of=context.as_of,
         reason_th=reason,
     )
+
+
+async def apply_terminal_candidate_transition(
+    session: AsyncSession,
+    candidate_id: str,
+    target_status: State,
+    now: dt.datetime,
+    reason_th: str = "",
+    context_id: str = "manual_or_system",
+) -> Transition:
+    """Atomically locks candidate, records terminal transition, and revokes active risk reservations.
+
+    Enforces BATCHA-P1-003 and Section 21-25:
+    1. Locks target candidate row under SELECT ... FOR UPDATE.
+    2. Records CandidateTransitionRecord.
+    3. Revokes all active RiskReservations for candidate_id in the same transaction.
+    """
+    cand_row = await session.scalar(
+        select(TradeCandidateRecord).where(TradeCandidateRecord.id == candidate_id).with_for_update()
+    )
+    if cand_row is None:
+        raise NotFoundError(f"Trade candidate '{candidate_id}' not found")
+
+    cand = SetupCandidate.model_validate(cand_row.payload)
+    change = Transition(
+        id=fingerprint([candidate_id, context_id, cand.status, target_status]),
+        candidate_id=candidate_id,
+        context_id=context_id,
+        from_status=cand.status,
+        to_status=target_status,
+        as_of=now,
+        reason_th=reason_th,
+    )
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    insert_fn: Any = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+
+    await session.execute(
+        insert_fn(CandidateTransitionRecord)
+        .values(
+            id=change.id,
+            candidate_id=change.candidate_id,
+            as_of=change.as_of,
+            payload=change.model_dump(mode="json"),
+        )
+        .on_conflict_do_nothing()
+    )
+
+    if target_status in TERMINAL:
+        from app.services.risk.portfolio import portfolio_manager
+
+        await portfolio_manager.release_candidate_reservations(
+            session=session,
+            candidate_id=candidate_id,
+            now=now,
+            reason=reason_th or f"Candidate became terminal ({target_status})",
+        )
+
+    await session.flush()
+    return change
