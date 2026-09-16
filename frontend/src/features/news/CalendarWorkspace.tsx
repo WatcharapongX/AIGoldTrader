@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import type { CalendarPage, EconomicEvent, EventDetail, NewsResponse } from '@/types/news.generated';
 import { parseCalendar, parseEvent, parseNews } from './contracts';
@@ -46,7 +46,7 @@ function getQuickRange(tab: QuickDateTab, customDate?: string) {
   return { start: undefined, end: undefined };
 }
 
-export function CalendarWorkspace() {
+export function CalendarWorkspace({ initialEventId = null }: { initialEventId?: string | null }) {
   // Quick date tab & custom date
   const [quickTab, setQuickTab] = useState<QuickDateTab>('THIS_WEEK');
   const [customDate, setCustomDate] = useState<string>('');
@@ -64,6 +64,8 @@ export function CalendarWorkspace() {
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState<boolean>(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [eventLinkNotice, setEventLinkNotice] = useState('');
+  const eventLinkResolved = useRef(false);
 
   // Loading, refreshing, and errors
   const [loadingCalendar, setLoadingCalendar] = useState<boolean>(true);
@@ -207,6 +209,24 @@ export function CalendarWorkspace() {
 
   const currentCalendarEvents = currentCalendar?.events;
 
+  useEffect(() => {
+    eventLinkResolved.current = false;
+  }, [initialEventId]);
+
+  useEffect(() => {
+    if (!initialEventId || eventLinkResolved.current || loadingCalendar || !currentCalendarEvents) return;
+    const timer = window.setTimeout(() => {
+      eventLinkResolved.current = true;
+      if (currentCalendarEvents.some((event) => event.id === initialEventId)) {
+        setEventLinkNotice('');
+        void openEvent(initialEventId);
+      } else {
+        setEventLinkNotice('ไม่พบ Event ที่ระบุในช่วงปฏิทิน authoritative ปัจจุบัน; ไม่ได้สร้างข้อมูลทดแทน');
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [initialEventId, loadingCalendar, currentCalendarEvents, openEvent]);
+
   // Group events by Bangkok Date for readable timeline
   const groupedEvents = useMemo(() => {
     if (!currentCalendarEvents) return [];
@@ -232,6 +252,7 @@ export function CalendarWorkspace() {
 
   return (
     <div className="calendar-workspace news-panel space-y-6">
+      {eventLinkNotice && <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">{eventLinkNotice}</div>}
       {/* 1. SECTION A — CALENDAR COMMAND HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
         <div>

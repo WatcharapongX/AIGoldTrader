@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   CandlestickSeries,
@@ -23,6 +23,7 @@ import { parseKillSwitch, parseRiskDecisions } from '@/features/risk/contracts';
 import type { AIAnalysisResult } from '@/types/ai.generated';
 import { instant, parseCandles, parseStatus, parseSymbols, providerLabel, timeframes } from '@/features/chart/contracts';
 import { MarketConnection, type ConnectionState } from '@/features/chart/transport';
+import { parseUiPreferences, UI_PREFERENCES_KEY } from '@/features/settings/contracts';
 
 function chartPoint(candle: Candle) {
   return {
@@ -180,6 +181,11 @@ export function MarketAnalysisView({
             <span>←</span>
             <span>กลับไป Market Overview</span>
           </Link>
+          {selectedCandidateId && (
+            <Link href={`/signals?candidate=${encodeURIComponent(selectedCandidateId)}`} className="px-3 py-1.5 bg-amber-500/10 text-amber-300 text-xs font-medium rounded-md border border-amber-500/30">
+              Candidate ต้นทาง →
+            </Link>
+          )}
           <div className="market-mode">◈ {providerLabel(provider)}</div>
           <span className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded-md border border-emerald-500/20 font-mono">
             PAPER · EXECUTION DISABLED
@@ -379,10 +385,18 @@ export function MarketAnalysisView({
   );
 }
 
-export function MarketAnalysisScreen() {
+export function MarketAnalysisScreen({
+  initialCandidateId = null,
+  initialSymbol = null,
+  initialTimeframe = null,
+}: {
+  initialCandidateId?: string | null;
+  initialSymbol?: string | null;
+  initialTimeframe?: string | null;
+}) {
   const [symbols, setSymbols] = useState<SymbolInfo[]>([]);
-  const [symbol, setSymbol] = useState('XAUUSD');
-  const [timeframe, setTimeframe] = useState<Timeframe>('M5');
+  const [symbol, setSymbol] = useState(initialSymbol || 'XAUUSD');
+  const [timeframe, setTimeframe] = useState<Timeframe>((initialTimeframe as Timeframe) || 'M15');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [status, setStatus] = useState<ConnectionState>('CONNECTING');
   const [provider, setProvider] = useState<MarketDataStatus | null>(null);
@@ -395,9 +409,11 @@ export function MarketAnalysisScreen() {
   // Upstream Strategy & Risk state
   const [candidates, setCandidates] = useState<SetupCandidate[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>('');
+  const [candidateLinkNotice, setCandidateLinkNotice] = useState('');
+  const [symbolLinkNotice, setSymbolLinkNotice] = useState('');
   const [account, setAccount] = useState<AccountSnapshotData | null>(null);
   const [killSwitch, setKillSwitch] = useState<KillSwitchData | null>(null);
-  const [riskDecision, setRiskDecision] = useState<RiskDecisionData | null>(null);
+  const [riskDecisions, setRiskDecisions] = useState<RiskDecisionData[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatusResponse | null>(null);
 
   // AI Advisory evaluation state (transient local state)
@@ -412,6 +428,28 @@ export function MarketAnalysisScreen() {
   const latest = useRef<Quote | null>(null);
   const staleSeconds = useRef(5);
   const connectionState = useRef<ConnectionState>('CONNECTING');
+  const riskDecision = useMemo(
+    () => riskDecisions.find((decision) => decision.candidate_id === selectedCandidateId) || null,
+    [riskDecisions, selectedCandidateId],
+  );
+
+  useEffect(() => {
+    if (initialTimeframe) return;
+    const timer = window.setTimeout(() => {
+      try {
+        const stored = localStorage.getItem(UI_PREFERENCES_KEY);
+        if (stored) setTimeframe(parseUiPreferences(JSON.parse(stored)).default_timeframe);
+      } catch {}
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [initialTimeframe]);
+
+  const bindCandidates = useCallback((list: SetupCandidate[]) => {
+    setCandidates(list);
+    const requested = initialCandidateId ? list.find((candidate) => candidate.id === initialCandidateId) : null;
+    setSelectedCandidateId(requested?.id || list[0]?.id || '');
+    setCandidateLinkNotice(initialCandidateId && !requested ? 'ไม่พบ Candidate ที่ระบุในข้อมูล authoritative; แสดงรายการล่าสุดแทน' : '');
+  }, [initialCandidateId]);
 
   const [bind] = useState(() => (c: IChartApi, s: ISeriesApi<'Candlestick'>) => {
     chart.current = c;
@@ -457,32 +495,29 @@ export function MarketAnalysisScreen() {
           signal: abort.signal,
         })) as SetupCandidate[];
         if (active && Array.isArray(list) && list.length > 0) {
-          setCandidates(list);
-          setSelectedCandidateId((prev) => prev || list[0].id);
+          bindCandidates(list);
         } else {
           // Fallback to /strategy/context
           const strat = (await api.get('/strategy/context', { signal: abort.signal })) as StrategyResponse;
           if (active && strat.evaluation?.candidates?.length) {
-            setCandidates(strat.evaluation.candidates);
-            setSelectedCandidateId((prev) => prev || strat.evaluation.candidates[0].id);
+            bindCandidates(strat.evaluation.candidates);
           }
         }
       } catch {
         try {
           const strat = (await api.get('/strategy/context', { signal: abort.signal })) as StrategyResponse;
           if (active && strat.evaluation?.candidates?.length) {
-            setCandidates(strat.evaluation.candidates);
-            setSelectedCandidateId((prev) => prev || strat.evaluation.candidates[0].id);
+            bindCandidates(strat.evaluation.candidates);
           }
         } catch {}
       }
 
       // Risk Decisions
       try {
-        const rawDecisions = await api.get('/risk/decisions?limit=10', { signal: abort.signal });
+        const rawDecisions = await api.get('/risk/decisions?limit=50', { signal: abort.signal });
         const parsed = parseRiskDecisions(rawDecisions);
-        if (active && parsed.length > 0) {
-          setRiskDecision(parsed[0]);
+        if (active) {
+          setRiskDecisions(parsed);
         }
       } catch {}
     };
@@ -493,7 +528,7 @@ export function MarketAnalysisScreen() {
       active = false;
       abort.abort();
     };
-  }, [retry]);
+  }, [retry, bindCandidates]);
 
   // 2. Fetch Candlestick & Quote Market Feed
   useEffect(() => {
@@ -559,6 +594,11 @@ export function MarketAnalysisScreen() {
           const list = parseSymbols(await api.get('/symbols', { signal: abort.signal }));
           if (!active) return;
           setSymbols(list);
+          if (initialSymbol && !list.some((item) => item.name === symbol)) {
+            setSymbolLinkNotice(`ไม่พบ Symbol ${initialSymbol} ในแหล่งข้อมูล authoritative; กลับไปใช้ XAUUSD`);
+            setSymbol('XAUUSD');
+            return;
+          }
           if (list.some((item) => item.name === symbol)) {
             const page = parseCandles(
               await api.get(
@@ -634,7 +674,7 @@ export function MarketAnalysisScreen() {
       connection?.stop();
       clearInterval(freshness);
     };
-  }, [symbol, timeframe, retry]);
+  }, [symbol, timeframe, retry, initialSymbol]);
 
   // Digits update
   const selected = symbols.find((item) => item.name === symbol);
@@ -653,7 +693,10 @@ export function MarketAnalysisScreen() {
   // 3. AI Evaluation Trigger
   const handleEvaluateAI = async () => {
     const candidate = candidates.find((c) => c.id === selectedCandidateId) || candidates[0];
-    if (!candidate) return;
+    if (!candidate || !riskDecision || killSwitch?.state !== 'INACTIVE') {
+      setAiError('AI evaluation ถูกระงับ: ต้องมี Risk Decision ของ Candidate เดียวกันและ Kill Switch ต้องยืนยันเป็น INACTIVE');
+      return;
+    }
 
     setIsEvaluating(true);
     setAiError(null);
@@ -676,7 +719,7 @@ export function MarketAnalysisScreen() {
   };
 
   return (
-    <MarketAnalysisView
+    <>{(candidateLinkNotice || symbolLinkNotice) && <div role="alert" className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">{candidateLinkNotice || symbolLinkNotice}</div>}<MarketAnalysisView
       symbols={symbols}
       symbol={symbol}
       setSymbol={setSymbol}
@@ -703,6 +746,6 @@ export function MarketAnalysisScreen() {
       evaluatedCandidateId={evaluatedCandidateId}
       aiError={aiError}
       onEvaluateAI={handleEvaluateAI}
-    />
+    /></>
   );
 }

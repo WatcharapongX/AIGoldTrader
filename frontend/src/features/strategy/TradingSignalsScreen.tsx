@@ -23,13 +23,13 @@ import type {
   TraderProfile,
 } from '@/types/strategy.generated';
 
-export function TradingSignalsScreen() {
+export function TradingSignalsScreen({ initialCandidateId = null }: { initialCandidateId?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('M5');
   const [provider, setProvider] = useState<MarketDataStatus | null>(null);
   const [primitive] = useState(() => new AnalysisPrimitive());
   const [revision, setRevision] = useState('initial');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(true);
 
   // Strategy & Candidate Data
   const [strategyResponse, setStrategyResponse] = useState<StrategyResponse | null>(null);
@@ -41,6 +41,8 @@ export function TradingSignalsScreen() {
 
   // Selected candidate state (persists across reloads)
   const [selectedId, setSelectedId] = useState<string>('');
+  const [candidateLinkPending, setCandidateLinkPending] = useState(Boolean(initialCandidateId));
+  const [candidateLinkNotice, setCandidateLinkNotice] = useState('');
 
   // Filters
   const [activeTab, setActiveTab] = useState<CandidateTab>('CURRENT');
@@ -136,8 +138,35 @@ export function TradingSignalsScreen() {
   }, [refreshTrigger]);
 
   // Determine current active pool of candidates based on tab
-  const currentCandidates = strategyResponse?.evaluation?.candidates || [];
+  const currentCandidates = useMemo(() => strategyResponse?.evaluation?.candidates || [], [strategyResponse]);
   const baseCandidates = activeTab === 'CURRENT' ? currentCandidates : historyCandidates;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setCandidateLinkPending(Boolean(initialCandidateId)), 0);
+    return () => window.clearTimeout(timer);
+  }, [initialCandidateId]);
+
+  useEffect(() => {
+    if (!candidateLinkPending || !initialCandidateId || isRefreshing) return;
+    const timer = window.setTimeout(() => {
+      const current = currentCandidates.find((candidate) => candidate.id === initialCandidateId);
+      const historical = historyCandidates.find((candidate) => candidate.id === initialCandidateId);
+      if (current || historical) {
+        setActiveTab(current ? 'CURRENT' : 'HISTORY');
+        setStateFilter('ALL');
+        setStrategyFilter('ALL');
+        setProfileFilter('ALL');
+        setDirectionFilter('ALL');
+        setSearchQuery('');
+        setSelectedId(initialCandidateId);
+        setCandidateLinkNotice('');
+      } else {
+        setCandidateLinkNotice('ไม่พบ Candidate ที่ระบุในข้อมูล authoritative; ไม่ได้สร้างข้อมูลทดแทน');
+      }
+      setCandidateLinkPending(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [candidateLinkPending, initialCandidateId, isRefreshing, currentCandidates, historyCandidates]);
 
   // Filtered candidate list
   const filteredCandidates = useMemo(() => {
@@ -179,6 +208,7 @@ export function TradingSignalsScreen() {
 
   return (
     <div className="trading-workspace space-y-6">
+      {candidateLinkNotice && <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">{candidateLinkNotice}</div>}
       {/* Header with Market Overview Link and Paper Mode Badge */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
         <div>

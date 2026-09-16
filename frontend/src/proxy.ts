@@ -35,7 +35,7 @@ export function proxy(request: NextRequest) {
   // Unauthenticated user trying to access protected route → redirect to login
   if (!hasToken && !isPublicPath) {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("redirect", pathname);
+    loginUrl.searchParams.set("redirect", pathname + (request.nextUrl.search || ""));
     return NextResponse.redirect(loginUrl);
   }
 

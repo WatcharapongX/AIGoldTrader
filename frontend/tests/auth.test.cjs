@@ -94,10 +94,11 @@ test('proxy permits login recovery with stale cookies and protects dashboard', (
   const { proxy } = load('proxy.ts', { URL }, {
     'next/server': { NextResponse: { next: () => 'next', redirect: url => url } },
   });
-  const request = (pathname, token) => ({ nextUrl: { pathname }, url: `http://localhost${pathname}`,
+  const request = (pathname, token, search = '') => ({ nextUrl: { pathname, search }, url: `http://localhost${pathname}${search}`,
     cookies: { get: () => token ? { value: token } : undefined }, headers: new Headers() });
   assert.equal(proxy(request('/login', 'expired')), 'next');
   assert.equal(proxy(request('/dashboard')).pathname, '/login');
+  assert.equal(proxy(request('/signals', undefined, '?candidate=candidate-1')).searchParams.get('redirect'), '/signals?candidate=candidate-1');
 });
 
 test('proxy exposes only the named login illustration without opening protected assets', () => {

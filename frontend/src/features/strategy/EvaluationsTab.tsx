@@ -245,7 +245,9 @@ export function EvaluationsTab({
                         return (
                           <tr key={c.id} className="hover:bg-white/5 transition-colors">
                             <td className="p-2.5 font-bold text-white">
-                              {strat?.name || c.strategy_id}
+                              <Link href={`/signals?candidate=${encodeURIComponent(c.id)}`} className="text-amber-200 hover:underline">
+                                {strat?.name || c.strategy_id}
+                              </Link>
                               <span className="text-[10px] text-gray-400 block font-normal">
                                 {c.strategy_id}
                               </span>

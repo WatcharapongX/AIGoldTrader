@@ -16,7 +16,7 @@ test('MarketOverviewScreen is decoupled and focuses on market pulse and global s
   assert.match(code, /FAIL-CLOSED POLICY/);
   assert.match(code, /US Dollar Index \(DXY\)/);
   assert.match(code, /US 10Y Yield/);
-  assert.match(code, /href="\/analysis"/);
+  assert.match(code, /href={`\/analysis\?symbol=\$\{encodeURIComponent\(symbol\)\}&timeframe=\$\{encodeURIComponent\(timeframe\)\}`}|href="\/analysis"/);
   assert.match(code, /href="\/signals"/);
   assert.match(code, /href="\/calendar"/);
 

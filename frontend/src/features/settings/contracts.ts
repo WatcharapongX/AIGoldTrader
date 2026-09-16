@@ -221,6 +221,7 @@ export function parseKillSwitch(value: unknown): KillSwitchStatus {
   const d=record(value); return { state:text(d.state), reason_th:text(d.reason_th) };
 }
 
+export const UI_PREFERENCES_KEY = 'aigoldtrader.ui-preferences.v1';
 export interface UiPreferences { language: 'th'; timezone: 'Asia/Bangkok' | 'UTC'; density: 'comfortable' | 'compact'; default_timeframe: 'M5' | 'M15' | 'H1' }
 export const DEFAULT_UI_PREFERENCES: UiPreferences = { language:'th', timezone:'Asia/Bangkok', density:'comfortable', default_timeframe:'M15' };
 export function parseUiPreferences(value: unknown): UiPreferences {

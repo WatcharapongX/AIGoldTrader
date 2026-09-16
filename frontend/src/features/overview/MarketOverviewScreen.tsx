@@ -20,6 +20,7 @@ import {
   providerLabel,
   timeframes,
 } from '@/features/chart/contracts';
+import { parseUiPreferences, UI_PREFERENCES_KEY } from '@/features/settings/contracts';
 import { MarketConnection, type ConnectionState } from '@/features/chart/transport';
 import { DataProvenanceLine } from '@/components/data-provenance';
 import { AnalysisPrimitive, defaultLayers, type Layers } from '@/features/analysis/primitive';
@@ -130,6 +131,15 @@ export function MarketOverviewScreen() {
   const latest = useRef<Quote | null>(null);
   const staleSeconds = useRef(5);
   const connectionState = useRef<ConnectionState>('CONNECTING');
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const stored = localStorage.getItem(UI_PREFERENCES_KEY);
+        if (stored) setTimeframe(parseUiPreferences(JSON.parse(stored)).default_timeframe);
+      } catch {}
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const [primitive] = useState(() => new AnalysisPrimitive());
 
@@ -802,7 +812,7 @@ export function MarketOverviewView({
             <h2 className="text-sm font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2">
               <span>📐</span> โครงสร้างราคาและแนวโน้ม (Market Structure Summary)
             </h2>
-            <Link href="/analysis" className="text-amber-400 text-xs hover:underline">
+            <Link href={`/analysis?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`} className="text-amber-400 text-xs hover:underline">
               ห้องวิเคราะห์เต็ม (Analysis Desk) →
             </Link>
           </div>
@@ -994,7 +1004,7 @@ export function MarketOverviewView({
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="/analysis"
+              href={`/analysis?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`}
               className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs rounded-lg transition-colors shadow-lg shadow-amber-500/10 flex items-center gap-1.5"
             >
               <span>📐</span>

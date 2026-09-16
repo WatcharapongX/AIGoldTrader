@@ -29,6 +29,7 @@ export function SignalSummaryHeader({
   ).length;
 
   const isKillActive = killSwitch?.state === 'ACTIVE';
+  const isKillUnknown = !killSwitch || killSwitch.state === 'UNKNOWN';
 
   return (
     <section
@@ -61,10 +62,12 @@ export function SignalSummaryHeader({
             className={`px-2.5 py-1 rounded font-mono font-bold border ${
               isKillActive
                 ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
+                : isKillUnknown
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                 : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
             }`}
           >
-            KILL SWITCH: {isKillActive ? 'ACTIVE (BLOCKED)' : 'NORMAL (CLEAR)'}
+            KILL SWITCH: {isKillActive ? 'ACTIVE (BLOCKED)' : isKillUnknown ? 'UNKNOWN (UNAVAILABLE)' : 'INACTIVE (CLEAR)'}
           </div>
           <div className="px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold font-mono">
             PAPER · EXECUTION DISABLED

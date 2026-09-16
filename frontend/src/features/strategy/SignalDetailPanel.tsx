@@ -85,6 +85,7 @@ export function SignalDetailPanel({
   const matchedRiskDecision = riskDecisions.find((d) => d.candidate_id === candidate.id) || null;
 
   const isKillActive = killSwitch?.state === 'ACTIVE';
+  const isKillUnknown = !killSwitch || killSwitch.state === 'UNKNOWN';
   const isPlanExpired = candidate.status === 'EXPIRED';
 
   return (
@@ -384,13 +385,15 @@ export function SignalDetailPanel({
                 className={`font-mono font-bold text-xs px-2 py-0.5 rounded uppercase ${
                   isKillActive
                     ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse'
+                    : isKillUnknown
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                     : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                 }`}
               >
-                {isKillActive ? 'ACTIVE (BLOCKED)' : 'NORMAL (CLEAR)'}
+                {isKillActive ? 'ACTIVE (BLOCKED)' : isKillUnknown ? 'UNKNOWN (UNAVAILABLE)' : 'INACTIVE (CLEAR)'}
               </span>
               <span className="text-gray-300 text-[11px]">
-                {isKillActive ? 'การส่งคำสั่งถูกระงับทั่วระบบ' : 'ระบบปกติ 24 ชม.'}
+                {isKillActive ? 'การส่งคำสั่งถูกระงับทั่วระบบ' : isKillUnknown ? 'ยังยืนยันสถานะความปลอดภัยไม่ได้' : 'ยืนยันว่าปิดอยู่'}
               </span>
             </div>
             {isKillActive && (

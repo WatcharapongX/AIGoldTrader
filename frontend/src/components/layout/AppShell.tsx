@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import { TradingStatus, useRuntimeStatus } from './RuntimeStatus';
 import { Sidebar } from './Sidebar';
 import { usePathname, useRouter } from 'next/navigation';
+import { DEFAULT_UI_PREFERENCES, parseUiPreferences, UI_PREFERENCES_KEY, type UiPreferences } from '@/features/settings/contracts';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -12,6 +13,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { hydrate, isAuthenticated } = useAuthStore();
   const [checked, setChecked] = useState(false);
   const [currentDateTime, setCurrentDateTime] = useState('');
+  const [preferences, setPreferences] = useState<UiPreferences>(DEFAULT_UI_PREFERENCES);
   const runtime = useRuntimeStatus(checked && isAuthenticated);
 
   // Hydration & Auth Check
@@ -36,25 +38,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Clock
   useEffect(() => {
+    const loadPreferences = () => {
+      try {
+        const stored = localStorage.getItem(UI_PREFERENCES_KEY);
+        setPreferences(stored ? parseUiPreferences(JSON.parse(stored)) : { ...DEFAULT_UI_PREFERENCES });
+      } catch { setPreferences({ ...DEFAULT_UI_PREFERENCES }); }
+    };
+    loadPreferences();
+    window.addEventListener('ui-preferences:changed', loadPreferences);
+    return () => window.removeEventListener('ui-preferences:changed', loadPreferences);
+  }, []);
+
+  useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      
-      const dayName = days[now.getDay()];
-      const day = String(now.getDate()).padStart(2, '0');
-      const monthName = months[now.getMonth()];
-      const year = now.getFullYear();
-      const hours = String(now.getHours()).padStart(2, '0');
-      const minutes = String(now.getMinutes()).padStart(2, '0');
-      
-      setCurrentDateTime(`${dayName}, ${day} ${monthName} ${year} ${hours}:${minutes}`);
+      setCurrentDateTime(now.toLocaleString('en-GB', { timeZone: preferences.timezone, weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }));
     };
-    
     updateTime();
     const interval = setInterval(updateTime, 1000 * 60);
     return () => clearInterval(interval);
-  }, []);
+  }, [preferences.timezone]);
 
   if (!checked || !isAuthenticated) return <p className="p-6 text-gray-400">Checking session…</p>;
   
@@ -79,8 +82,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Right Side */}
           <div className="flex items-center space-x-2 text-sm text-gray-400">
             <div className="hidden md:flex items-center gap-1.5">
-              <span className="text-base" role="img" aria-label="Thailand">🇹🇭</span>
-              <span>Bangkok, Thailand</span>
+              <span className="text-base" role="img" aria-label="Display timezone">🕒</span>
+              <span>{preferences.timezone}</span>
             </div>
             
             <div className="hidden md:block w-px h-4 bg-gray-700/50"></div>
@@ -106,7 +109,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 min-w-0 overflow-auto p-3 md:p-6 relative">
+        <main className={`flex-1 min-w-0 overflow-auto relative ${preferences.density === 'compact' ? 'p-2 md:p-3' : 'p-3 md:p-6'}`} data-density={preferences.density}>
           {children}
         </main>
       </div>

@@ -35,6 +35,7 @@ export function StrategyAnalysisContext({
   const selectedCandidate = candidates.find((c) => c.id === selectedCandidateId) || candidates[0];
   const hasCandidates = candidates.length > 0;
   const isKillActive = killSwitch?.state === 'ACTIVE';
+  const isKillUnknown = !killSwitch || killSwitch.state === 'UNKNOWN';
   const isRiskBlocked = riskDecision?.decision === 'BLOCKED';
 
   // Zero-call gate condition
@@ -47,6 +48,12 @@ export function StrategyAnalysisContext({
   } else if (isKillActive) {
     canEvaluate = false;
     disabledReason = `Kill Switch ทำงานอยู่ (${killSwitch?.reason_th || 'ACTIVE'}) — ระงับการวิเคราะห์ AI`;
+  } else if (isKillUnknown) {
+    canEvaluate = false;
+    disabledReason = 'Kill Switch ยังยืนยันสถานะไม่ได้ (UNKNOWN) — ระงับการวิเคราะห์ AI แบบ fail-closed';
+  } else if (!riskDecision) {
+    canEvaluate = false;
+    disabledReason = 'ยังไม่มี Risk Decision ที่ผูกกับ Candidate นี้โดยตรง';
   } else if (isRiskBlocked) {
     canEvaluate = false;
     disabledReason = 'Risk Engine สั่งบล็อก Candidate นี้ (BLOCKED)';
@@ -103,13 +110,15 @@ export function StrategyAnalysisContext({
               className={`font-mono font-bold text-xs px-2 py-0.5 rounded uppercase ${
                 isRiskBlocked
                   ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                  : !riskDecision
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                   : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
               }`}
             >
-              {riskDecision?.decision || 'CHECKING…'}
+              {riskDecision?.decision || 'NOT EVALUATED'}
             </span>
             <small className="text-gray-400">
-              {riskDecision?.decision === 'APPROVED' ? 'ผ่านเกณฑ์ความเสี่ยง' : isRiskBlocked ? 'ถูกบล็อก' : 'สถานะปกติ'}
+              {riskDecision?.decision === 'APPROVED' ? 'ผ่านเกณฑ์ความเสี่ยง' : isRiskBlocked ? 'ถูกบล็อก' : riskDecision ? 'ปรับลดตามนโยบาย' : 'ไม่มีข้อมูลของ Candidate นี้'}
             </small>
           </div>
         </div>
@@ -122,13 +131,15 @@ export function StrategyAnalysisContext({
               className={`font-mono font-bold text-xs px-2 py-0.5 rounded uppercase ${
                 isKillActive
                   ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse'
+                  : isKillUnknown
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                   : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
               }`}
             >
-              {isKillActive ? 'ACTIVE (ล็อก)' : 'NORMAL (พร้อม)'}
+              {isKillActive ? 'ACTIVE (ล็อก)' : isKillUnknown ? 'UNKNOWN (ไม่พร้อม)' : 'INACTIVE (พร้อม)'}
             </span>
             <small className="text-gray-400">
-              {isKillActive ? 'สวิตช์ฉุกเฉินเปิดอยู่' : 'ระบบปกติ 24 ชม.'}
+              {isKillActive ? 'สวิตช์ฉุกเฉินเปิดอยู่' : isKillUnknown ? 'ยืนยันสถานะไม่ได้' : 'ยืนยันว่าปิดอยู่'}
             </small>
           </div>
         </div>

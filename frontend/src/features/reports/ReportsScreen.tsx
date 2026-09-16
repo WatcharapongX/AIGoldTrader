@@ -364,6 +364,14 @@ const STATUS_STYLE: Record<ReportStatus, string> = {
 function StatusBadge({ status }: { status: ReportStatus }) {
   return <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold tracking-wide ${STATUS_STYLE[status]}`}>{status}</span>;
 }
+function rowDrilldown(report: ReportId, row: ExportRow): string | null {
+  const candidate = typeof row.candidate_id === 'string' ? row.candidate_id : report === 'candidates' && typeof row.id === 'string' ? row.id : null;
+  if ((report === 'candidates' || report === 'risk') && candidate) return `/signals?candidate=${encodeURIComponent(candidate)}`;
+  const event = report === 'calendar' && typeof row.id === 'string' ? row.id : null;
+  if (event) return `/calendar?event=${encodeURIComponent(event)}`;
+  if (report === 'macro') return '/scanner';
+  return null;
+}
 
 export function ReportsScreen() {
   const [selected, setSelected] = useState<ReportId>('system');
@@ -501,7 +509,7 @@ export function ReportsScreen() {
             <div className="hidden max-w-full overflow-auto rounded-lg border border-slate-700/60 lg:block">
               <table className="w-full min-w-max border-collapse text-left text-xs">
                 <thead className="sticky top-0 bg-slate-900 text-[10px] uppercase tracking-wide text-slate-400"><tr>{state.data.columns.map((column) => <th key={column.key} className="border-b border-slate-700 px-3 py-3 font-medium">{column.label}</th>)}</tr></thead>
-                <tbody>{visibleRows.map((row, index) => <tr key={`${selected}-${index}`} className="border-b border-slate-800/80 align-top hover:bg-white/[0.02]">{state.data!.columns.map((column) => <td key={column.key} className="max-w-80 whitespace-pre-wrap break-words px-3 py-3 text-slate-300">{valueText(row[column.key])}</td>)}</tr>)}</tbody>
+                <tbody>{visibleRows.map((row, index) => <tr key={`${selected}-${index}`} className="border-b border-slate-800/80 align-top hover:bg-white/[0.02]">{state.data!.columns.map((column, columnIndex) => <td key={column.key} className="max-w-80 whitespace-pre-wrap break-words px-3 py-3 text-slate-300">{columnIndex === 0 && rowDrilldown(selected, row) ? <Link href={rowDrilldown(selected, row)!} className="text-amber-200 hover:underline">{valueText(row[column.key])}</Link> : valueText(row[column.key])}</td>)}</tr>)}</tbody>
               </table>
             </div>
             <div className="grid gap-3 lg:hidden">{visibleRows.map((row, index) => <article key={`${selected}-card-${index}`} className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-4">{state.data!.columns.map((column) => <div key={column.key} className="grid grid-cols-[minmax(90px,0.8fr)_minmax(0,1.4fr)] gap-3 border-b border-slate-800 py-2 last:border-0"><span className="text-[10px] uppercase text-slate-500">{column.label}</span><span className="break-words text-xs text-slate-200">{valueText(row[column.key])}</span></div>)}</article>)}</div>

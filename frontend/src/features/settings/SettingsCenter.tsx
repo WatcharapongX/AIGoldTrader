@@ -7,6 +7,7 @@ import { DataProvenanceLine, type DataCondition } from '@/components/data-proven
 import type { User } from '@/types';
 import {
   DEFAULT_UI_PREFERENCES,
+  UI_PREFERENCES_KEY,
   parseKillSwitch,
   parseMarketStatus,
   parseNewsStatus,
@@ -41,7 +42,6 @@ interface SettingsData {
 }
 
 const EMPTY: SettingsData = { configuration:null, system:null, market:null, news:null, risk:null, strategies:null, profiles:null, killSwitch:null, user:null };
-const PREF_KEY = 'aigoldtrader.ui-preferences.v1';
 const sections: { id: SectionId; label: string; icon: string }[] = [
   {id:'general',label:'General',icon:'◫'}, {id:'trading',label:'Trading & Safety',icon:'◆'},
   {id:'market',label:'Market Data',icon:'⌁'}, {id:'news',label:'News / Macro',icon:'▤'},
@@ -108,7 +108,7 @@ export function SettingsCenter() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      try { const stored=localStorage.getItem(PREF_KEY); if(stored) setPreferences(parseUiPreferences(JSON.parse(stored))); }
+      try { const stored=localStorage.getItem(UI_PREFERENCES_KEY); if(stored) setPreferences(parseUiPreferences(JSON.parse(stored))); }
       catch { setPreferences({...DEFAULT_UI_PREFERENCES}); }
     }, 0);
     return () => window.clearTimeout(timer);
@@ -148,8 +148,8 @@ export function SettingsCenter() {
     return [...new Set(found)];
   },[data]);
 
-  const savePreferences=()=>{ localStorage.setItem(PREF_KEY,JSON.stringify(preferences)); setPreferenceNotice('บันทึก Local UI Preference ในเบราว์เซอร์นี้แล้ว'); };
-  const resetPreferences=()=>{ localStorage.removeItem(PREF_KEY); setPreferences({...DEFAULT_UI_PREFERENCES}); setPreferenceNotice('รีเซ็ตเฉพาะ Local UI Preference แล้ว'); };
+  const savePreferences=()=>{ localStorage.setItem(UI_PREFERENCES_KEY,JSON.stringify(preferences)); window.dispatchEvent(new Event('ui-preferences:changed')); setPreferenceNotice('บันทึก Local UI Preference ในเบราว์เซอร์นี้แล้ว'); };
+  const resetPreferences=()=>{ localStorage.removeItem(UI_PREFERENCES_KEY); setPreferences({...DEFAULT_UI_PREFERENCES}); window.dispatchEvent(new Event('ui-preferences:changed')); setPreferenceNotice('รีเซ็ตเฉพาะ Local UI Preference แล้ว'); };
   const config=data.configuration;
 
   return <main className="mx-auto max-w-[1600px] space-y-5 p-4 sm:p-6" data-testid="settings-center">

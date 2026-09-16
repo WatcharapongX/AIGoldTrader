@@ -18,7 +18,9 @@ export default function LoginPage() {
     clearError();
     const success = await login(email, password);
     if (success) {
-      router.push("/dashboard");
+      const requested = new URLSearchParams(window.location.search).get("redirect");
+      const safeRedirect = requested?.startsWith("/") && !requested.startsWith("//") ? requested : "/dashboard";
+      router.push(safeRedirect);
     }
   }
 
