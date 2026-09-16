@@ -96,6 +96,8 @@ test('outbound source links preserve encoded candidate, event, symbol, and timef
   assert.match(sources, /\/calendar\?event=\$\{encodeURIComponent/);
   assert.match(sources, /symbol=\$\{encodeURIComponent\(symbol\)\}/);
   assert.match(sources, /timeframe=\$\{encodeURIComponent\(timeframe\)\}/);
+  assert.match(read('src/features/news/CalendarWorkspace.tsx'), /href="\/scanner"/);
+  assert.match(read('src/features/analytics/PerformanceScreen.tsx'), /href="\/signals"/);
 });
 
 test('local display preferences are consumed by shell and both chart workspaces', () => {

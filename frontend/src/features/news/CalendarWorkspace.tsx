@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import type { CalendarPage, EconomicEvent, EventDetail, NewsResponse } from '@/types/news.generated';
 import { parseCalendar, parseEvent, parseNews } from './contracts';
@@ -272,6 +273,9 @@ export function CalendarWorkspace({ initialEventId = null }: { initialEventId?: 
 
         {/* Action badges & Clock */}
         <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+          <Link href="/scanner" className="px-3 py-1.5 rounded-lg bg-white/5 border border-gray-700 text-gray-300 hover:bg-white/10 hover:text-white">
+            News &amp; Sentiment →
+          </Link>
           <div className="px-3 py-1.5 rounded-lg bg-[#121c2e] border border-gray-800 text-gray-300 flex items-center gap-2">
             <span className="text-amber-400">🕒 BKK:</span>
             <span>{clockString || 'Asia/Bangkok · UTC+7'}</span>

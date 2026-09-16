@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import type { SetupCandidate, StrategyDefinition, StrategyResponse, TraderProfile } from '@/types/strategy.generated';
 import { parsePortfolioRisk, parseRiskDecisions, type PortfolioRiskData, type RiskDecisionData } from '@/features/risk/contracts';
@@ -235,6 +236,9 @@ export function PerformanceScreen() {
         onRefresh={handleRefresh}
         tradingMode={account?.trading_mode || 'UNAVAILABLE'}
       />
+      <div className="flex justify-end">
+        <Link href="/signals" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20">เปิด Candidate ต้นทางใน Trading Signals →</Link>
+      </div>
 
       {/* Filter Control Bar */}
       <div className="bg-[#0f172a] border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
