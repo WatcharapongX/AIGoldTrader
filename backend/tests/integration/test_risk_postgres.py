@@ -67,12 +67,12 @@ def test_risk_migration_idempotence_and_preservation(isolated_postgres):  # noqa
             id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
             decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
             approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
-            stop_distance, account_snapshot_id, policy_version, as_of, expires_at, payload,
+            stop_distance, account_id, account_snapshot_id, policy_version, as_of, expires_at, payload,
             dependency_fingerprint
         ) VALUES (
             'dec_test_pg_001', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
             'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
-            'snap_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}',
+            'default_paper_account', 'snap_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}',
             'fp_test_pg_001'
         )
         """
@@ -124,12 +124,12 @@ def test_mandatory_postgresql_concurrency_oversubscription_gate(isolated_postgre
                 id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
                 decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
                 approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
-                stop_distance, account_snapshot_id, policy_version, as_of, expires_at, payload,
+                stop_distance, account_id, account_snapshot_id, policy_version, as_of, expires_at, payload,
                 dependency_fingerprint
             ) VALUES (
                 %s, 'cand_conc', 'plan_conc', 'STRAT01', %s, 'XAUUSD', 'LONG',
                 'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
-                'snap_conc_001', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}',
+                'default_paper_account', 'snap_conc_001', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour', '{}',
                 %s
             )
             """,

@@ -49,8 +49,10 @@ from app.services.ai.domain import (
 )
 from app.services.analysis.domain import AnalysisSnapshot
 from app.services.news.domain import NewsStrategyContext
+from app.services.risk.account_resolver import resolve_canonical_account
 from app.services.risk.kill_switch import kill_switch_manager
 from app.services.strategy.domain import SetupCandidate, compute_trade_plan_fingerprint
+from app.services.strategy.lifecycle import resolve_candidate_current_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -129,20 +131,12 @@ class AIAnalysisInputAssembler:
         # -------------------------------------------------------------
         # 1. ACCOUNT AUTHORIZATION & LOOKUP
         # -------------------------------------------------------------
-        acc_row = None
-        try:
-            parsed_uuid = uuid.UUID(account_id)
-            acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
-        except (ValueError, TypeError):
-            acc_row = await session.scalar(select(Account).where(Account.name == account_id))
-
-        if acc_row is None:
-            raise NotFoundError(f"Account '{account_id}' not found")
-
-        if current_user.role != Role.ADMIN and str(acc_row.user_id) != str(current_user.id):
-            raise ForbiddenError("User is not authorized to access this account")
-
-        canonical_account_id = str(acc_row.id)
+        acc_row, canonical_account_id = await resolve_canonical_account(
+            session=session,
+            account_ref=account_id,
+            user=current_user,
+            is_admin=(current_user.role == Role.ADMIN),
+        )
 
         # -------------------------------------------------------------
         # 2. TRADE CANDIDATE & STRATEGY EVALUATION LOOKUP
@@ -508,6 +502,16 @@ class AIAnalysisInputAssembler:
                 or candidate_domain.symbol != symbol
             ):
                 raise ValueError("Candidate payload identity does not match its persisted record")
+
+            # Check authoritative candidate lifecycle state (AUD-P1-001)
+            lifecycle = await resolve_candidate_current_lifecycle(
+                session=session,
+                candidate_id=candidate_id,
+                profile_id=resolved_profile_id,
+            )
+            if lifecycle.is_terminal:
+                raise ValueError(f"Candidate lifecycle is terminal ({lifecycle.current_status})")
+
             strategy_context = AIStrategyContext(
                 availability="AVAILABLE",
                 candidate_id=candidate_domain.id,
@@ -519,7 +523,7 @@ class AIAnalysisInputAssembler:
                 score=candidate_domain.score,
                 detected_at=candidate_domain.detected_at,
                 confirmed_at=candidate_domain.confirmed_at,
-                status=candidate_domain.status,
+                status=lifecycle.current_status,
                 evidence=tuple(
                     AIStrategyEvidence.model_validate(item.model_dump()) for item in candidate_domain.evidence
                 ),

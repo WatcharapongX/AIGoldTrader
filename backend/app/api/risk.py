@@ -33,6 +33,7 @@ from app.services.risk.domain import (
     RiskEvaluationRequest,
     RiskPolicy,
 )
+from app.services.risk.account_resolver import resolve_canonical_account
 from app.services.risk.engine import risk_engine
 from app.services.risk.kill_switch import kill_switch_manager
 from app.services.risk.portfolio import portfolio_manager
@@ -45,6 +46,7 @@ from app.services.risk.repository import (
     persist_risk_decision,
 )
 from app.services.strategy.domain import SetupCandidate
+from app.services.strategy.lifecycle import resolve_candidate_current_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,10 @@ async def evaluate_risk(
     session: AsyncSession = Depends(get_session),
 ):
     """Command to evaluate a trade candidate/plan and create an atomic risk reservation."""
+    # AUD-P1-002: VIEWER role cannot invoke state-changing risk evaluation
+    if user.role == Role.VIEWER:
+        raise ForbiddenError("VIEWER role cannot execute risk evaluation")
+
     settings = get_settings()
     # In PAPER mode, caller as_of is strictly ignored in favor of server UTC clock (SOL-P5-P1-007)
     if settings.trading_mode == "PAPER":
@@ -81,45 +87,31 @@ async def evaluate_risk(
         if body.requested_risk_pct <= Decimal("0") or not body.requested_risk_pct.is_finite():
             raise ValidationError("Requested risk percentage must be a positive finite number")
 
-    # 0. Authorize user for account first before touching any state (P2-035)
-    acc_row = None
-    try:
-        parsed_uuid = uuid.UUID(body.account_id)
-        acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
-    except (ValueError, TypeError):
-        acc_row = await session.scalar(select(Account).where(Account.name == body.account_id))
+    # 0. Authorize user for account and resolve canonical UUID (AUD-P1-004)
+    acc_row, canonical_account_id = await resolve_canonical_account(
+        session=session,
+        account_ref=body.account_id,
+        user=user,
+        is_admin=(user.role == Role.ADMIN),
+    )
 
-    if acc_row is None:
-        raise NotFoundError(f"Account '{body.account_id}' not found")
-
-    if user.role != Role.ADMIN and str(acc_row.user_id) != str(user.id):
-        raise ForbiddenError("User is not authorized to access this account")
-
-    # Transaction-level advisory lock on account to serialize concurrent evaluations (SOL-P5-P1-031)
+    # Transaction-level advisory lock on canonical account to serialize concurrent evaluations (SOL-P5-P1-031, AUD-P1-004)
     if session.get_bind().dialect.name == "postgresql":
         from sqlalchemy import text
 
         await session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-            {"lock_key": f"risk_account_{body.account_id}"},
+            {"lock_key": f"risk_account_{canonical_account_id}"},
         )
 
-    # 1. Fetch candidate record with strict candidate_id AND profile_id (SOL-P5-P1-006)
-    candidate_row = (
-        await session.scalars(
-            select(TradeCandidateRecord)
-            .where(
-                TradeCandidateRecord.id == body.candidate_id,
-                TradeCandidateRecord.profile_id == body.profile_id,
-            )
-            .limit(1)
-        )
-    ).first()
-
-    if candidate_row is None:
-        raise NotFoundError("Trade candidate not found for the specified profile")
-
-    candidate = SetupCandidate.model_validate(candidate_row.payload)
+    # 1. Fetch candidate record and resolve authoritative lifecycle state (AUD-P1-001)
+    lifecycle = await resolve_candidate_current_lifecycle(
+        session=session,
+        candidate_id=body.candidate_id,
+        profile_id=body.profile_id,
+        for_update=True,
+    )
+    candidate = lifecycle.candidate
     if candidate.plan is None:
         raise ValidationError("Trade candidate does not contain a trade plan")
 
@@ -154,13 +146,15 @@ async def evaluate_risk(
         now=now,
         max_age_seconds=policy.symbol_spec_freshness_seconds,
     )
-    if settings.trading_mode == "PAPER" and body.account_id == "default_paper_account":
+    if settings.trading_mode == "PAPER" and (
+        body.account_id == "default_paper_account" or canonical_account_id == str(acc_row.id)
+    ):
         from app.services.risk.account_state import PaperAccountStateService
 
         try:
             await PaperAccountStateService.refresh_paper_account_snapshot(
                 session,
-                account_id=body.account_id,
+                account_id=canonical_account_id,
                 now=now,
                 max_observation_age_seconds=policy.account_freshness_seconds,
             )
@@ -169,7 +163,7 @@ async def evaluate_risk(
 
     account = await get_authoritative_account_snapshot(
         session=session,
-        account_id=body.account_id,
+        account_id=canonical_account_id,
         user_id=str(user.id),
         is_admin=(user.role == Role.ADMIN),
         now=now,
@@ -191,6 +185,8 @@ async def evaluate_risk(
         news_context=news,
         requested_risk_pct=body.requested_risk_pct,
         as_of=now,
+        candidate_lifecycle_status=lifecycle.current_status,
+        candidate_transition_count=lifecycle.transition_count,
     )
 
     from sqlalchemy.exc import IntegrityError
@@ -206,7 +202,7 @@ async def evaluate_risk(
 
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-                {"lock_key": f"risk_account_{body.account_id}"},
+                {"lock_key": f"risk_account_{canonical_account_id}"},
             )
         existing = await find_existing_decision(
             session=session,
@@ -255,11 +251,29 @@ async def evaluate_risk(
 async def get_decisions(
     limit: int = Query(50, ge=1, le=200),
     symbol: str | None = Query(None, max_length=20),
+    account_id: str | None = Query(None, max_length=64),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Read-only list of recent risk decisions."""
-    return await list_recent_decisions(session, limit=limit, symbol=symbol)
+    """Read-only list of recent risk decisions with tenant isolation."""
+    account_ids = None
+    if user.role != Role.ADMIN:
+        owned_rows = (await session.scalars(select(Account.id).where(Account.user_id == user.id))).all()
+        owned_ids = [str(a) for a in owned_rows]
+        if not owned_ids:
+            return []
+        if account_id is not None:
+            _, req_canonical = await resolve_canonical_account(session, account_id, user)
+            if req_canonical not in owned_ids:
+                return []
+            account_ids = [req_canonical]
+        else:
+            account_ids = owned_ids
+    elif account_id is not None:
+        _, req_canonical = await resolve_canonical_account(session, account_id, user, is_admin=True)
+        account_ids = [req_canonical]
+
+    return await list_recent_decisions(session, limit=limit, symbol=symbol, account_ids=account_ids)
 
 
 @router.get("/decisions/{decision_id}", response_model=RiskDecision)
@@ -268,12 +282,19 @@ async def get_decision_by_id(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Read-only fetch of a single risk decision."""
+    """Read-only fetch of a single risk decision with tenant isolation."""
     from app.models.risk import RiskDecisionRecord
 
     row = await session.scalar(select(RiskDecisionRecord).where(RiskDecisionRecord.id == decision_id))
     if row is None:
         raise NotFoundError("Risk decision not found")
+
+    if user.role != Role.ADMIN:
+        owned_rows = (await session.scalars(select(Account.id).where(Account.user_id == user.id))).all()
+        owned_ids = {str(a) for a in owned_rows}
+        if str(row.account_id) not in owned_ids:
+            raise NotFoundError("Risk decision not found")
+
     return RiskDecision.model_validate(row.payload)
 
 

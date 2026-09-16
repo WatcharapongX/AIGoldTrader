@@ -15,6 +15,7 @@ from app.models.risk import (
     RiskPolicyRecord,
     SymbolSpecificationRecord,
 )
+from app.services.risk.account_resolver import resolve_canonical_account
 from app.services.risk.domain import (
     AccountSnapshot,
     RiskDecision,
@@ -172,29 +173,21 @@ async def get_authoritative_account_snapshot(
     Enforces User -> Account -> AccountSnapshot.
     No in-memory snapshot fabrication; missing account or snapshot fails closed (404/403).
     """
-    # 1. Look up authoritative Account record
-    acc_row = None
-    try:
-        parsed_uuid = uuid.UUID(account_id)
-        acc_row = await session.scalar(select(Account).where(Account.id == parsed_uuid))
-    except (ValueError, TypeError):
-        acc_row = await session.scalar(select(Account).where(Account.name == account_id))
+    # 1. Look up authoritative Account and verify authorization
+    acc_row, canonical_id = await resolve_canonical_account(
+        session=session,
+        account_ref=account_id,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
 
-    if acc_row is None:
-        raise NotFoundError(f"Account '{account_id}' not found")
-
-    # 2. Authorization check
-    if not is_admin and user_id != "system":
-        if str(acc_row.user_id) != str(user_id):
-            raise ForbiddenError("User is not authorized to access this account")
-
-    # 3. Look up authoritative AccountSnapshot record
+    # 2. Look up authoritative AccountSnapshot record
     row = (
         await session.scalars(
             select(AccountSnapshotRecord)
             .where(
-                (AccountSnapshotRecord.account_id == account_id)
-                | (AccountSnapshotRecord.account_id == str(acc_row.id))
+                (AccountSnapshotRecord.account_id == canonical_id)
+                | (AccountSnapshotRecord.account_id == account_id)
                 | (AccountSnapshotRecord.account_id == acc_row.name)
             )
             .order_by(AccountSnapshotRecord.as_of.desc())
@@ -205,7 +198,10 @@ async def get_authoritative_account_snapshot(
     if row is None:
         raise NotFoundError(f"No authoritative snapshot provisioned for account '{account_id}'")
 
-    return AccountSnapshot.model_validate(row.payload)
+    snap = AccountSnapshot.model_validate(row.payload)
+    if snap.account_id != canonical_id:
+        snap = snap.model_copy(update={"account_id": canonical_id})
+    return snap
 
 
 async def get_or_create_account_snapshot(
@@ -287,6 +283,7 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
         entry_upper=decision.entry_upper,
         stop_loss=decision.stop_loss,
         stop_distance=decision.stop_distance,
+        account_id=decision.account_id or "default_paper_account",
         account_snapshot_id=decision.account_snapshot_id,
         policy_version=decision.policy_version,
         as_of=decision.as_of,
@@ -354,10 +351,15 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
 
 
 async def list_recent_decisions(
-    session: AsyncSession, limit: int = 50, symbol: str | None = None
+    session: AsyncSession,
+    limit: int = 50,
+    symbol: str | None = None,
+    account_ids: list[str] | None = None,
 ) -> list[RiskDecision]:
     stmt = select(RiskDecisionRecord).order_by(RiskDecisionRecord.as_of.desc()).limit(limit)
     if symbol:
         stmt = stmt.where(RiskDecisionRecord.symbol == symbol)
+    if account_ids is not None:
+        stmt = stmt.where(RiskDecisionRecord.account_id.in_(account_ids))
     rows = (await session.scalars(stmt)).all()
     return [RiskDecision.model_validate(r.payload) for r in rows]

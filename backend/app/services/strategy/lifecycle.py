@@ -2,10 +2,87 @@
 
 import datetime as dt
 
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.errors import NotFoundError
+from app.models.strategy import CandidateTransitionRecord, TradeCandidateRecord
 from app.services.market_data.domain import SECONDS
 from app.services.strategy.domain import SetupCandidate, State, StrategyMarketContext, Transition, fingerprint
 
 TERMINAL = {"INVALIDATED", "EXPIRED", "SUPERSEDED"}
+
+
+class ResolvedCandidateLifecycle(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    candidate_id: str
+    current_status: State
+    is_terminal: bool
+    transition_count: int
+    latest_transition: Transition | None = None
+    reason_th: str = ""
+    candidate: SetupCandidate
+
+
+async def resolve_candidate_current_lifecycle(
+    session: AsyncSession,
+    candidate_id: str,
+    profile_id: str | None = None,
+    for_update: bool = False,
+) -> ResolvedCandidateLifecycle:
+    """Authoritative projection of candidate lifecycle state.
+
+    Enforces AUD-P1-001:
+    - Queries TradeCandidateRecord (optionally under row lock).
+    - Queries all CandidateTransitionRecords for candidate_id ordered by as_of ASC, id ASC.
+    - Authoritative status is the latest transition's to_status, or base candidate.status if no transitions.
+    - Evaluates terminal status: is_terminal = current_status in TERMINAL.
+    """
+    stmt = select(TradeCandidateRecord).where(TradeCandidateRecord.id == candidate_id)
+    if profile_id:
+        stmt = stmt.where(TradeCandidateRecord.profile_id == profile_id)
+    if for_update:
+        stmt = stmt.with_for_update()
+
+    cand_row = (await session.scalars(stmt.limit(1))).first()
+    if cand_row is None:
+        if profile_id:
+            raise NotFoundError("Trade candidate not found for the specified profile")
+        raise NotFoundError(f"Trade candidate '{candidate_id}' not found")
+
+    candidate = SetupCandidate.model_validate(cand_row.payload)
+
+    # Query all transitions for this candidate
+    trans_stmt = (
+        select(CandidateTransitionRecord)
+        .where(CandidateTransitionRecord.candidate_id == candidate_id)
+        .order_by(CandidateTransitionRecord.as_of.asc(), CandidateTransitionRecord.id.asc())
+    )
+    trans_rows = (await session.scalars(trans_stmt)).all()
+
+    current_status: State = candidate.status
+    latest_trans: Transition | None = None
+    reason_th = ""
+
+    if trans_rows:
+        latest_row = trans_rows[-1]
+        latest_trans = Transition.model_validate(latest_row.payload)
+        current_status = latest_trans.to_status
+        reason_th = latest_trans.reason_th or ""
+
+    is_term = current_status in TERMINAL
+
+    return ResolvedCandidateLifecycle(
+        candidate_id=candidate_id,
+        current_status=current_status,
+        is_terminal=is_term,
+        transition_count=len(trans_rows),
+        latest_transition=latest_trans,
+        reason_th=reason_th,
+        candidate=candidate,
+    )
 
 
 def transition(

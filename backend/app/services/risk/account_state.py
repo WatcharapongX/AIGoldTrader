@@ -46,7 +46,16 @@ class PaperAccountStateService:
         if acc_row is None:
             raise NotFoundError(f"Account '{account_id}' not found")
 
-        canonical_id = str(acc_row.id) if account_id == str(acc_row.id) else account_id
+        canonical_id = str(acc_row.id)
+
+        # Acquire advisory lock on account bootstrap to prevent first-row creation race (AUD-P1-004)
+        if session.get_bind().dialect.name == "postgresql":
+            from sqlalchemy import text
+
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": f"paper_account_init_{canonical_id}"},
+            )
 
         # 2. Query PaperAccountStateRecord under row lock if available
         state_row = await session.scalar(
@@ -60,6 +69,8 @@ class PaperAccountStateService:
             .execution_options(populate_existing=True)
         )
         if state_row is not None:
+            if state_row.account_id != canonical_id:
+                state_row.account_id = canonical_id
             return state_row
 
         # 3. Check for newest existing AccountSnapshotRecord to bootstrap state
@@ -153,10 +164,16 @@ class PaperAccountStateService:
 
         state_row = await session.scalar(
             select(PaperAccountStateRecord)
-            .where(PaperAccountStateRecord.account_id == canonical_id)
+            .where(
+                (PaperAccountStateRecord.account_id == canonical_id)
+                | (PaperAccountStateRecord.account_id == account_id)
+                | (PaperAccountStateRecord.account_id == acc_row.name)
+            )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
+        if state_row is not None and state_row.account_id != canonical_id:
+            state_row.account_id = canonical_id
         return state_row
 
     @staticmethod
@@ -191,9 +208,7 @@ class PaperAccountStateService:
         except (ValueError, TypeError):
             acc_row = await session.scalar(select(Account).where(Account.name == account_id))
 
-        canonical_id = str(acc_row.id) if (acc_row is not None and account_id == str(acc_row.id)) else account_id
-        if acc_row is None:
-            canonical_id = account_id
+        canonical_id = str(acc_row.id) if acc_row is not None else account_id
 
         # 2. Acquire row lock before comparing/updating state
         state = await session.scalar(
@@ -201,12 +216,15 @@ class PaperAccountStateService:
             .where(
                 (PaperAccountStateRecord.account_id == canonical_id)
                 | (PaperAccountStateRecord.account_id == account_id)
+                | (PaperAccountStateRecord.account_id == (acc_row.name if acc_row else account_id))
             )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
         if state is None:
             state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, effective_now)
+        elif acc_row is not None and state.account_id != canonical_id:
+            state.account_id = canonical_id
 
         has_economic_change = False
 
@@ -276,19 +294,23 @@ class PaperAccountStateService:
 
         observation_time = now or dt.datetime.now(dt.UTC)
         state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, observation_time)
+        canonical_id = str(state.account_id)
 
         # Update last_observed_at on observation
         state.last_observed_at = observation_time
 
         state_updated_at = _to_utc(state.state_updated_at) or observation_time
-        account_slug = str(account_id)[:8]
+        account_slug = canonical_id[:8]
 
         # Reuse is controlled by the caller's authority contract (normally RiskPolicy),
         # never by a hidden service-level safety TTL.
         latest_row = (
             await session.scalars(
                 select(AccountSnapshotRecord)
-                .where(AccountSnapshotRecord.account_id == account_id)
+                .where(
+                    (AccountSnapshotRecord.account_id == canonical_id)
+                    | (AccountSnapshotRecord.account_id == account_id)
+                )
                 .order_by(AccountSnapshotRecord.as_of.desc())
                 .limit(1)
             )
@@ -300,14 +322,17 @@ class PaperAccountStateService:
             if payload.get("state_version") == state.state_version:
                 age_sec = (observation_time - latest_as_of).total_seconds()
                 if age_sec <= max_observation_age_seconds:
-                    return AccountSnapshot.model_validate(latest_row.payload)
+                    res_snap = AccountSnapshot.model_validate(latest_row.payload)
+                    if res_snap.account_id != canonical_id:
+                        res_snap = res_snap.model_copy(update={"account_id": canonical_id})
+                    return res_snap
 
         # Unique observation ID ensuring no collision on forced observation or multiple observations
         snap_id = f"snap_paper_{account_slug}_{uuid.uuid4().hex[:16]}"
 
         snapshot = AccountSnapshot(
             id=snap_id,
-            account_id=account_id,
+            account_id=canonical_id,
             balance=Decimal(str(state.balance)),
             equity=Decimal(str(state.equity)),
             free_margin=Decimal(str(state.free_margin)),
@@ -331,7 +356,7 @@ class PaperAccountStateService:
 
         record = AccountSnapshotRecord(
             id=snapshot.id,
-            account_id=account_id,
+            account_id=canonical_id,
             balance=snapshot.balance,
             equity=snapshot.equity,
             free_margin=snapshot.free_margin,

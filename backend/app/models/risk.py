@@ -100,6 +100,7 @@ class RiskDecisionRecord(Base):
     entry_upper: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
     stop_loss: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
     stop_distance: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
+    account_id: Mapped[str] = mapped_column(String(64), default="default_paper_account", nullable=False)
     account_snapshot_id: Mapped[str] = mapped_column(String(64), nullable=False)
     policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     dependency_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -107,6 +108,7 @@ class RiskDecisionRecord(Base):
     expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False)
     __table_args__ = (
+        Index("ix_risk_decision_account_as_of", "account_id", "as_of"),
         Index("ix_risk_decision_candidate", "candidate_id", "profile_id"),
         Index("ix_risk_decision_as_of", "symbol", "as_of"),
         Index("ix_risk_decision_fingerprint", "candidate_id", "profile_id", "dependency_fingerprint"),

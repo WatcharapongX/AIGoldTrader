@@ -46,6 +46,8 @@ class RiskEngine:
         news_context: NewsStrategyContext | None = None,
         requested_risk_pct: Decimal | None = None,
         as_of: dt.datetime | None = None,
+        candidate_lifecycle_status: str | None = None,
+        candidate_transition_count: int = 0,
     ) -> RiskDecision:
         now = as_of or dt.datetime.now(dt.UTC)
         reasons_th: list[str] = []
@@ -309,6 +311,8 @@ class RiskEngine:
             quote_is_stale=quote_is_stale,
             plan_is_expired=plan_is_expired,
             cooldown_active=cooldown_active,
+            candidate_lifecycle_status=candidate_lifecycle_status,
+            candidate_transition_count=candidate_transition_count,
         )
         decision_id = f"dec_{fingerprint[:24]}"
 
@@ -347,6 +351,13 @@ class RiskEngine:
             return existing_decision
 
         # 8. Check gate conditions
+        # Candidate Lifecycle Terminal Check (AUD-P1-001)
+        effective_cand_status = candidate_lifecycle_status or getattr(candidate, "status", "")
+        if effective_cand_status in {"INVALIDATED", "EXPIRED", "SUPERSEDED"}:
+            blocked_reasons_th.append(
+                f"สถานะ Trade Candidate อยู่ในสถานะสิ้นสุด ({effective_cand_status}) ไม่สามารถประเมินความเสี่ยงได้"
+            )
+
         # Account Health & Freshness
         if (now - account.as_of).total_seconds() > policy.account_freshness_seconds:
             age_sec = (now - account.as_of).total_seconds()
@@ -564,6 +575,7 @@ class RiskEngine:
             stop_distance=final_sizing.stop_distance,
             portfolio_exposure_before=budget_check.portfolio_exposure_before,
             portfolio_exposure_after=budget_check.portfolio_exposure_after,
+            account_id=account.account_id,
             account_snapshot_id=account.id,
             symbol_specification_id=spec.id,
             policy_version=policy.version,
@@ -625,6 +637,7 @@ class RiskEngine:
             stop_distance=stop_distance,
             portfolio_exposure_before=account.open_risk_pct,
             portfolio_exposure_after=account.open_risk_pct,
+            account_id=account.account_id,
             account_snapshot_id=account.id,
             symbol_specification_id=spec.id,
             policy_version=policy.version,

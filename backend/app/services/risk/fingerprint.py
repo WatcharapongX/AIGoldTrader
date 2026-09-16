@@ -61,6 +61,8 @@ def compute_risk_dependency_fingerprint(
     quote_is_stale: bool = False,
     plan_is_expired: bool = False,
     cooldown_active: bool = False,
+    candidate_lifecycle_status: str | None = None,
+    candidate_transition_count: int = 0,
 ) -> str:
     """Computes a canonical SHA-256 fingerprint representing the exact semantic safety state.
 
@@ -192,6 +194,8 @@ def compute_risk_dependency_fingerprint(
             "strategy_version": candidate.strategy_version,
             "symbol": candidate.symbol,
             "profile_id": profile_id,
+            "lifecycle_status": candidate_lifecycle_status or getattr(candidate, "status", ""),
+            "transition_count": candidate_transition_count,
         },
         "plan": plan_payload,
         "account": account_payload,
