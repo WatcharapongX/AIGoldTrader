@@ -187,6 +187,11 @@ class Settings(BaseSettings):
     def redis_url(self) -> str:
         return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
+    @property
+    def ai_provider_api_key_configured(self) -> bool:
+        """Safe internal readiness flag; the credential value never leaves the server."""
+        return bool(self.ai_provider_api_key)
+
 
 @lru_cache
 def get_settings() -> Settings:
