@@ -344,7 +344,7 @@ class AIAnalysisInputAssembler:
             .where(
                 RiskDecisionRecord.candidate_id == candidate_id,
                 RiskDecisionRecord.profile_id == resolved_profile_id,
-                RiskDecisionRecord.account_id == canonical_account_id,
+                RiskDecisionRecord.account_id == acc_row.id,
             )
             .order_by(RiskDecisionRecord.as_of.desc())
             .limit(1)

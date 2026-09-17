@@ -38,10 +38,10 @@ def isolated_postgres(monkeypatch):
     local_config = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
     raw_url = os.environ.get("TEST_DATABASE_URL", local_config.get("TEST_DATABASE_URL"))
     if not raw_url:
-        pytest.skip("BLOCKED BY LOCAL POSTGRESQL: TEST_DATABASE_URL is not configured")
+        pytest.fail("BLOCKED BY LOCAL POSTGRESQL: TEST_DATABASE_URL is not configured; silent skipping disallowed")
     disposable = os.environ.get("TEST_DATABASE_DISPOSABLE", local_config.get("TEST_DATABASE_DISPOSABLE"))
     if disposable != "true":
-        pytest.skip("Set TEST_DATABASE_DISPOSABLE=true only for a disposable test database")
+        pytest.fail("Set TEST_DATABASE_DISPOSABLE=true only for a disposable test database; silent skipping disallowed")
 
     monkeypatch.delenv("DATABASE_URL_OVERRIDE", raising=False)
     monkeypatch.setenv("DATABASE_URL", raw_url)
@@ -275,7 +275,13 @@ def _verify_schema(conn, schema, expected):
     revision = conn.execute(
         sql.SQL("SELECT version_num FROM {}.alembic_version").format(sql.Identifier(schema))
     ).fetchone()
-    assert revision in (("0011_phase5_final_acceptance",), ("0012_phase5_reconciliation",))
+    assert revision in (
+        ("0011_phase5_final_acceptance",),
+        ("0012_phase5_reconciliation",),
+        ("0013_batch_a_risk_authority",),
+        ("0014_batch_a2_account_authority",),
+        ("0015_batch_a3_risk_account_fk",),
+    )
     indexes = {
         row[0]: row[1]
         for row in conn.execute(
@@ -301,6 +307,7 @@ def _verify_schema(conn, schema, expected):
         "trade_candidates",
         "candidate_transitions",
         "risk_reservations",
+        "risk_decisions",
     }
 
 

@@ -26,8 +26,12 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import os
+import subprocess
+import sys
 import uuid
 from decimal import Decimal
+from pathlib import Path
 
 import psycopg.errors
 import pytest
@@ -39,6 +43,7 @@ from app.core.errors import ForbiddenError, ValidationError
 from app.core.event_loop import new_event_loop
 from app.db.session import dispose_engine, get_session_factory
 from app.models import User
+from app.models.risk import RiskDecisionRecord
 from app.models.strategy import StrategyEvaluationRecord, TradeCandidateRecord
 from app.scripts.normalize_0012_accounts import normalize_0012_database
 from app.services.ai.assembler import AIAnalysisInputAssembler
@@ -46,10 +51,16 @@ from app.services.market_data.domain import Quote
 from app.services.news.domain import NewsConfig
 from app.services.news.engine import build_context as build_news_context
 from app.services.risk.account_resolver import resolve_canonical_account
-from app.services.risk.domain import AccountSnapshot, KillSwitchState, RiskPolicy, default_gold_spec
+from app.services.risk.domain import (
+    AccountSnapshot,
+    KillSwitchState,
+    RiskDecision,
+    RiskPolicy,
+    default_gold_spec,
+)
 from app.services.risk.engine import risk_engine
 from app.services.risk.fingerprint import compute_risk_dependency_fingerprint
-from app.services.risk.repository import persist_risk_decision
+from app.services.risk.repository import hydrate_risk_decision, persist_risk_decision
 from app.services.strategy.domain import (
     Evidence,
     SetupCandidate,
@@ -193,16 +204,16 @@ def test_0012_normalizer_alias_and_uuid_same_account_safe_upgrade(isolated_postg
     snap_acc = conn.execute("SELECT account_id FROM account_snapshots WHERE id = 'snap_norm_01'").fetchone()[0]
     assert snap_acc == acc_id
 
-    # 3. Now run alembic upgrade head (runs 0013 and 0014)
+    # 3. Now run alembic upgrade head (runs 0013, 0014, and 0015)
     _alembic("upgrade", "head")
 
-    # Verify migration completed to 0014 head
+    # Verify migration completed to 0015 head
     current_rev = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert current_rev == "0014_batch_a2_account_authority"
+    assert current_rev == "0015_batch_a3_risk_account_fk"
 
     # Verify decision got reconciled to canonical UUID
     dec_acc = conn.execute("SELECT account_id FROM risk_decisions WHERE id = 'dec_norm_01'").fetchone()[0]
-    assert dec_acc == acc_id
+    assert str(dec_acc) == acc_id
 
 
 def test_0012_normalizer_true_conflict_aborts_without_mutation(isolated_postgres):  # noqa: F811
@@ -321,12 +332,12 @@ def test_0012_normalizer_duplicate_alias_across_tenants_aborts(isolated_postgres
 
 
 # =============================================================================
-# 2. 0014 MIGRATION INVARIANTS & DATABASE TRIGGER
+# 2. 0015 MIGRATION INVARIANTS, REAL FOREIGN KEY & PAYLOAD CHECK CONSTRAINT
 # =============================================================================
 
 
-def test_0014_migration_and_database_invariants(isolated_postgres):  # noqa: F811
-    """BATCHA1-NEW-P2-002: Strongest safe 0014 database invariant: UUID regex constraint and FK trigger."""
+def test_0015_migration_and_database_invariants(isolated_postgres):  # noqa: F811
+    """BATCHA2-NEW-P1-001: Native UUID column type and real Foreign Key constraint."""
     conn, schema = isolated_postgres
     conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
     _alembic("upgrade", "head")
@@ -348,8 +359,8 @@ def test_0014_migration_and_database_invariants(isolated_postgres):  # noqa: F81
         {"acc": acc_id, "u": u_id},
     )
 
-    # 1. Non-UUID 36-char string must fail the regex check constraint
-    with pytest.raises(psycopg.errors.CheckViolation):
+    # 1. Non-UUID string must fail native PostgreSQL UUID type validation
+    with pytest.raises((psycopg.errors.InvalidTextRepresentation, psycopg.errors.DataError)):
         conn.execute(
             """
             INSERT INTO risk_decisions (
@@ -362,14 +373,14 @@ def test_0014_migration_and_database_invariants(isolated_postgres):  # noqa: F81
                 'dec_bad_uuid_01', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
                 'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
                 'this-is-a-36-char-arbitrary-string!', 'snap_01', 'risk-policy-1.0.0',
-                NOW(), NOW() + interval '1 hour', '{}', 'fp_bad_01'
+                NOW(), NOW() + interval '1 hour', '{"account_id": "00000000-0000-0000-0000-000000000001"}', 'fp_bad_01'
             )
             """
         )
 
-    # 2. Valid UUID that does NOT exist in accounts table must fail the database trigger
+    # 2. Valid UUID that does NOT exist in accounts table must fail real foreign key constraint
     fake_acc = str(uuid.uuid4())
-    with pytest.raises(psycopg.errors.RaiseException, match="Foreign key violation: account_id"):
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
         conn.execute(
             """
             INSERT INTO risk_decisions (
@@ -382,10 +393,10 @@ def test_0014_migration_and_database_invariants(isolated_postgres):  # noqa: F81
                 'dec_bad_fk_01', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
                 'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
                 %(fake_acc)s, 'snap_01', 'risk-policy-1.0.0',
-                NOW(), NOW() + interval '1 hour', '{}', 'fp_bad_02'
+                NOW(), NOW() + interval '1 hour', %(payload)s, 'fp_bad_02'
             )
             """,
-            {"fake_acc": fake_acc},
+            {"fake_acc": fake_acc, "payload": json.dumps({"account_id": fake_acc})},
         )
 
     # 3. Valid canonical UUID corresponding to real account succeeds
@@ -407,6 +418,364 @@ def test_0014_migration_and_database_invariants(isolated_postgres):  # noqa: F81
         {"acc": acc_id, "payload": json.dumps({"account_id": acc_id})},
     )
     assert conn.execute("SELECT count(*) FROM risk_decisions WHERE id = 'dec_good_01'").fetchone()[0] == 1
+
+
+def test_0015_account_delete_safety_restrict(isolated_postgres):  # noqa: F811
+    """BATCHA2-NEW-P1-001: Deleting an account referenced by RiskDecision is rejected (ON DELETE RESTRICT)."""
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+    _alembic("upgrade", "head")
+
+    u_id = str(uuid.uuid4())
+    acc_a = str(uuid.uuid4())
+    acc_b = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES (%(u)s, 'del_test@example.com', 'h', 'TRADER', true, NOW(), NOW())
+        """,
+        {"u": u_id},
+    )
+    conn.execute(
+        """
+        INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, is_active, created_at, updated_at)
+        VALUES
+            (%(acc_a)s, %(u)s, 'Account Protected', 'PAPER', 10000.0, true, NOW(), NOW()),
+            (%(acc_b)s, %(u)s, 'Account Disposable', 'PAPER', 10000.0, true, NOW(), NOW())
+        """,
+        {"acc_a": acc_a, "acc_b": acc_b, "u": u_id},
+    )
+
+    # Insert risk decision referencing Account A
+    conn.execute(
+        """
+        INSERT INTO risk_decisions (
+            id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
+            decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
+            approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
+            stop_distance, account_id, account_snapshot_id, policy_version, as_of, expires_at, payload,
+            dependency_fingerprint
+        ) VALUES (
+            'dec_del_protect', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
+            'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
+            %(acc)s, 'snap_01', 'risk-policy-1.0.0',
+            NOW(), NOW() + interval '1 hour', %(payload)s, 'fp_del_protect'
+        )
+        """,
+        {"acc": acc_a, "payload": json.dumps({"account_id": acc_a})},
+    )
+
+    # 1. Attempting to delete Account A MUST be rejected by Foreign Key constraint
+    with pytest.raises((psycopg.errors.ForeignKeyViolation, psycopg.errors.RestrictViolation)):
+        conn.execute("DELETE FROM accounts WHERE id = %(acc)s", {"acc": acc_a})
+
+    # Both Account A and RiskDecision must remain intact
+    assert conn.execute("SELECT count(*) FROM accounts WHERE id = %(acc)s", {"acc": acc_a}).fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM risk_decisions WHERE id = 'dec_del_protect'").fetchone()[0] == 1
+
+    # 2. Deleting Account B (which has no dependent risk decisions) succeeds
+    conn.execute("DELETE FROM accounts WHERE id = %(acc)s", {"acc": acc_b})
+    assert conn.execute("SELECT count(*) FROM accounts WHERE id = %(acc)s", {"acc": acc_b}).fetchone()[0] == 0
+
+
+def test_0015_payload_account_id_check_constraint_matrix(isolated_postgres):  # noqa: F811
+    """BATCHA2-NEW-P2-001: ck_risk_decision_payload_account_id enforces payload and relational sync."""
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+    _alembic("upgrade", "head")
+
+    u_id = str(uuid.uuid4())
+    acc_id = str(uuid.uuid4())
+    other_acc_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES (%(u)s, 'chk_test@example.com', 'h', 'TRADER', true, NOW(), NOW())
+        """,
+        {"u": u_id},
+    )
+    conn.execute(
+        """
+        INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, is_active, created_at, updated_at)
+        VALUES
+            (%(acc)s, %(u)s, 'Check Account 1', 'PAPER', 10000.0, true, NOW(), NOW()),
+            (%(other)s, %(u)s, 'Check Account 2', 'PAPER', 10000.0, true, NOW(), NOW())
+        """,
+        {"acc": acc_id, "other": other_acc_id, "u": u_id},
+    )
+
+    # 1. Missing account_id key in payload -> fails CheckViolation
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute(
+            """
+            INSERT INTO risk_decisions (
+                id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
+                decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
+                approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
+                stop_distance, account_id, account_snapshot_id, policy_version, as_of, expires_at, payload,
+                dependency_fingerprint
+            ) VALUES (
+                'dec_chk_01', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
+                'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
+                %(acc)s, 'snap_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour',
+                '{"other_key": "val"}', 'fp_chk_01'
+            )
+            """,
+            {"acc": acc_id},
+        )
+
+    # 2. Mismatched account_id in payload -> fails CheckViolation
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute(
+            """
+            INSERT INTO risk_decisions (
+                id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
+                decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
+                approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
+                stop_distance, account_id, account_snapshot_id, policy_version, as_of, expires_at, payload,
+                dependency_fingerprint
+            ) VALUES (
+                'dec_chk_02', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
+                'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
+                %(acc)s, 'snap_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour',
+                %(payload)s, 'fp_chk_02'
+            )
+            """,
+            {"acc": acc_id, "payload": json.dumps({"account_id": other_acc_id})},
+        )
+
+    # 3. Valid insert with matching payload succeeds
+    conn.execute(
+        """
+        INSERT INTO risk_decisions (
+            id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
+            decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
+            approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
+            stop_distance, account_id, account_snapshot_id, policy_version, as_of, expires_at, payload,
+            dependency_fingerprint
+        ) VALUES (
+            'dec_chk_03', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
+            'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
+            %(acc)s, 'snap_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour',
+            %(payload)s, 'fp_chk_03'
+        )
+        """,
+        {"acc": acc_id, "payload": json.dumps({"account_id": acc_id})},
+    )
+
+    # 4. Direct DB UPDATE altering payload account_id -> fails CheckViolation
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute(
+            """
+            UPDATE risk_decisions
+            SET payload = %(bad_payload)s
+            WHERE id = 'dec_chk_03'
+            """,
+            {"bad_payload": json.dumps({"account_id": other_acc_id})},
+        )
+
+    # 5. Direct DB UPDATE removing account_id from payload -> fails CheckViolation
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute(
+            """
+            UPDATE risk_decisions
+            SET payload = '{}'
+            WHERE id = 'dec_chk_03'
+            """
+        )
+
+
+def test_0015_authoritative_hydration(isolated_postgres):  # noqa: F811
+    """BATCHA2-NEW-P2-001: hydrate_risk_decision extracts relational account_id into domain model."""
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+    _alembic("upgrade", "head")
+
+    u_id = str(uuid.uuid4())
+    acc_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES (%(u)s, 'hyd_test@example.com', 'h', 'TRADER', true, NOW(), NOW())
+        """,
+        {"u": u_id},
+    )
+    conn.execute(
+        """
+        INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, is_active, created_at, updated_at)
+        VALUES (%(acc)s, %(u)s, 'Hydrate Account', 'PAPER', 10000.0, true, NOW(), NOW())
+        """,
+        {"acc": acc_id, "u": u_id},
+    )
+
+    now = dt.datetime.now(dt.UTC)
+    conn.execute(
+        """
+        INSERT INTO risk_decisions (
+            id, candidate_id, plan_id, strategy_id, profile_id, symbol, direction,
+            decision, requested_risk_pct, approved_risk_pct, requested_risk_amount,
+            approved_risk_amount, position_size, entry_lower, entry_upper, stop_loss,
+            stop_distance, account_id, account_snapshot_id, policy_version, as_of, expires_at, payload,
+            dependency_fingerprint
+        ) VALUES (
+            'dec_hyd_01', 'cand_01', 'plan_01', 'STRAT01', 'day_trader', 'XAUUSD', 'LONG',
+            'APPROVED', 1.0, 1.0, 100.0, 100.0, 0.14, 2500.0, 2502.0, 2495.0, 7.0,
+            %(acc)s, 'snap_01', 'risk-policy-1.0.0', NOW(), NOW() + interval '1 hour',
+            %(payload)s, 'fp_hyd_01'
+        )
+        """,
+        {
+            "acc": acc_id,
+            "payload": json.dumps({
+                "id": "dec_hyd_01",
+                "candidate_id": "cand_01",
+                "plan_id": "plan_01",
+                "strategy_id": "STRAT01",
+                "strategy_version": "1.0.0",
+                "profile_id": "day_trader",
+                "symbol": "XAUUSD",
+                "direction": "LONG",
+                "decision": "APPROVED",
+                "requested_risk_pct": "1.0",
+                "approved_risk_pct": "1.0",
+                "requested_risk_amount": "100.0",
+                "approved_risk_amount": "100.0",
+                "position_size": "0.14",
+                "entry_lower": "2500.0",
+                "entry_upper": "2502.0",
+                "stop_loss": "2495.0",
+                "stop_distance": "7.0",
+                "portfolio_exposure_before": "0.0",
+                "portfolio_exposure_after": "1.0",
+                "account_id": acc_id,
+                "account_snapshot_id": "snap_01",
+                "symbol_specification_id": "sym_spec_01",
+                "policy_version": "risk-policy-1.0.0",
+                "as_of": now.isoformat(),
+                "expires_at": (now + dt.timedelta(hours=1)).isoformat(),
+                "dependency_fingerprint": "fp_hyd_01",
+            }),
+        },
+    )
+
+    loop = new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    async def run_hydration_check():
+        factory = get_session_factory()
+        async with factory() as session:
+            await session.execute(text(f'SET search_path TO "{schema}"'))
+            rec = await session.get(RiskDecisionRecord, "dec_hyd_01")
+            assert rec is not None
+
+            # Test authoritative hydration helper
+            hydrated = hydrate_risk_decision(rec)
+            assert isinstance(hydrated, RiskDecision)
+            assert hydrated.id == "dec_hyd_01"
+            assert hydrated.account_id == acc_id
+            assert hydrated.decision == "APPROVED"
+
+    try:
+        loop.run_until_complete(run_hydration_check())
+    finally:
+        loop.run_until_complete(dispose_engine())
+        loop.close()
+
+
+def test_0012_normalizer_exact_revision_guard(isolated_postgres):  # noqa: F811
+    """BATCHA2-NEW-P2-002: Normalizer allows 0012, skips 0013/0014/0015, aborts on 0011/base/corrupt."""
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+
+    # 1. At 0012: normalizer runs and succeeds
+    _alembic("upgrade", "0012_phase5_reconciliation")
+    res_0012 = normalize_0012_database(conn)
+    assert res_0012["status"] in {"SUCCESS", "CLEAN"}
+
+    # 2. At 0013: normalizer skips
+    _alembic("upgrade", "0013_batch_a_risk_authority")
+    res_0013 = normalize_0012_database(conn)
+    assert res_0013["status"] == "SKIPPED"
+    assert "0013" in res_0013["reason"]
+
+    # 3. At 0014: normalizer skips
+    _alembic("upgrade", "0014_batch_a2_account_authority")
+    res_0014 = normalize_0012_database(conn)
+    assert res_0014["status"] == "SKIPPED"
+    assert "0014" in res_0014["reason"]
+
+    # 4. At 0015: normalizer skips
+    _alembic("upgrade", "0015_batch_a3_risk_account_fk")
+    res_0015 = normalize_0012_database(conn)
+    assert res_0015["status"] == "SKIPPED"
+    assert "0015" in res_0015["reason"]
+
+    # 5. When version table has an unexpected/earlier revision (e.g. 0011): aborts
+    conn.execute("UPDATE alembic_version SET version_num = '0011_economic_actual_coverage'")
+    with pytest.raises(RuntimeError, match="unsupported database revision '0011_economic_actual_coverage'"):
+        normalize_0012_database(conn)
+
+    # 6. When version table is empty: aborts
+    conn.execute("DELETE FROM alembic_version")
+    with pytest.raises(RuntimeError, match="alembic_version table is empty"):
+        normalize_0012_database(conn)
+
+
+def test_safe_db_upgrade_cli_e2e(isolated_postgres):  # noqa: F811
+    """BATCHA2-NEW-P2-002: Standalone python -m app.scripts.safe_db_upgrade runs safely end-to-end."""
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+    _alembic("upgrade", "0012_phase5_reconciliation")
+
+    u_id = str(uuid.uuid4())
+    acc_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES (%(u)s, 'cli_test@example.com', 'h', 'TRADER', true, NOW(), NOW())
+        """,
+        {"u": u_id},
+    )
+    conn.execute(
+        """
+        INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, is_active, created_at, updated_at)
+        VALUES (%(acc)s, %(u)s, 'CLI Upgrade Account', 'PAPER', 10000.0, true, NOW(), NOW())
+        """,
+        {"acc": acc_id, "u": u_id},
+    )
+    conn.execute(
+        """
+        INSERT INTO account_snapshots (
+            id, account_id, balance, equity, free_margin, daily_realized_pnl, weekly_realized_pnl,
+            peak_equity, open_risk_pct, reserved_risk_pct, consecutive_losses, trading_mode, source, as_of, payload
+        ) VALUES (
+            'snap_cli_01', 'CLI Upgrade Account', 10000.0, 10000.0, 10000.0, 0.0, 0.0,
+            10000.0, 0.0, 0.0, 0, 'PAPER', 'TEST', NOW(), '{}'
+        )
+        """
+    )
+
+    # Run safe_db_upgrade via subprocess with the isolated schema
+    backend_dir = Path(__file__).resolve().parents[2]
+    proc = subprocess.run(
+        [sys.executable, "-m", "app.scripts.safe_db_upgrade"],
+        cwd=backend_dir,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    combined_output = proc.stdout + proc.stderr
+    assert proc.returncode == 0, f"safe_db_upgrade failed: {combined_output}"
+    assert "Safe database upgrade completed successfully" in combined_output
+
+    # Verify migration completed to 0015
+    current_rev = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    assert current_rev == "0015_batch_a3_risk_account_fk"
+
+    # Verify snapshot was normalized to canonical UUID
+    snap_acc = conn.execute("SELECT account_id FROM account_snapshots WHERE id = 'snap_cli_01'").fetchone()[0]
+    assert snap_acc == acc_id
 
 
 # =============================================================================

@@ -3,7 +3,9 @@ immutable decisions, reservations, and kill switch records.
 """
 
 import datetime as dt
+import uuid
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -16,9 +18,9 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
-from app.db.base import Base
+from app.db.base import Base, Uuid
 
 PAYLOAD = JSON().with_variant(JSONB(), "postgresql")
 
@@ -100,13 +102,25 @@ class RiskDecisionRecord(Base):
     entry_upper: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
     stop_loss: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
     stop_distance: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
-    account_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("accounts.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     account_snapshot_id: Mapped[str] = mapped_column(String(64), nullable=False)
     policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     dependency_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     as_of: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload: Mapped[dict] = mapped_column(PAYLOAD, nullable=False)
+
+    @validates("account_id")
+    def _validate_account_id(self, key: str, value: Any) -> uuid.UUID | None:
+        if value is None or value == "None":
+            return None
+        if isinstance(value, str):
+            return uuid.UUID(value)
+        return value
     __table_args__ = (
         Index("ix_risk_decision_account_as_of", "account_id", "as_of"),
         Index("ix_risk_decision_candidate", "candidate_id", "profile_id"),

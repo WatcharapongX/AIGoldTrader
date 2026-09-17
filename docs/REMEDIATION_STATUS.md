@@ -1,9 +1,9 @@
-# Post-Freeze Remediation Status: Batch A, Batch A.1 & Batch A.2
+# Post-Freeze Remediation Status: Batch A, Batch A.1, Batch A.2 & Batch A.3
 
 ## Executive Summary
-This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, and **Correction Batch A.2** (Canonical Account Authority Hardening) of the post-freeze audit findings for **AIGoldTrader**.
+This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), and **Correction Batch A.3** (Referential Integrity Closure) of the post-freeze audit findings for **AIGoldTrader**.
 
-All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004), corrective findings assigned to Batch A.1 (BATCHA-P1-001 through BATCHA-P1-003, BATCHA-P2-001, BATCHA-P3-001), and hardening findings assigned to Batch A.2 (BATCHA1-NEW-P1-001, BATCHA1-NEW-P2-001, BATCHA1-NEW-P2-002, BATCHA1-NEW-P3-001) have been remediated, verified against PostgreSQL 18 and SQLite runtimes, and integrated into the continuous test suite. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004), corrective findings assigned to Batch A.1 (BATCHA-P1-001 through BATCHA-P1-003, BATCHA-P2-001, BATCHA-P3-001), hardening findings assigned to Batch A.2 (BATCHA1-NEW-P1-001, BATCHA1-NEW-P2-001, BATCHA1-NEW-P2-002, BATCHA1-NEW-P3-001), and final referential integrity findings assigned to Batch A.3 (BATCHA2-NEW-P1-001, BATCHA2-NEW-P2-001, BATCHA2-NEW-P2-002) have been remediated, verified against PostgreSQL 18.6 and SQLite runtimes, and integrated into the continuous test suite. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
 
 ---
 
@@ -132,16 +132,55 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
 
 ---
 
+## Remediated Audit Findings: Batch A.3 (Referential Integrity Closure)
+
+### 1. BATCHA2-NEW-P1-001: Native UUID & Real Foreign Key Referential Integrity
+- **Defect**: `risk_decisions.account_id` was stored as `VARCHAR(64)` and referential integrity relied on a temporary 0014 trigger (`trg_risk_decision_account_fk`) and regex check constraint (`ck_risk_decision_account_id_strict_uuid`), which was not delete-safe (did not prevent orphaned decisions upon account deletion).
+- **Remediation**:
+  - In `backend/app/models/risk.py`: Converted `risk_decisions.account_id` from `VARCHAR(64)` to native `Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False)`.
+  - Added `@validates("account_id")` on `RiskDecisionRecord` to coerce input string UUIDs seamlessly into `uuid.UUID`.
+  - In `backend/app/db/base.py`: Enhanced generic `Uuid` mapping with `GUID(TypeDecorator[uuid.UUID])` ensuring transparent string coercion on SQLite test environments while compiling to native PostgreSQL `UUID`.
+  - Created migration `0015_batch_a3_risk_account_fk.py`:
+    1. Preflight validation verifying UUID syntax, existence in `accounts(id)`, and payload equality.
+    2. Drops 0014 workaround trigger `trg_risk_decision_account_fk` and function `check_risk_decision_account_exists()`.
+    3. Drops 0014 check constraint `ck_risk_decision_account_id_strict_uuid`.
+    4. Alters `account_id` type to native `UUID USING account_id::uuid`.
+    5. Adds real Foreign Key `fk_risk_decisions_account_id_accounts` referencing `accounts(id)` with `ON DELETE RESTRICT`.
+  - Tested on real PostgreSQL: deleting an account referenced by a `RiskDecision` is rejected by the database with `RestrictViolation` / `ForeignKeyViolation`. Both Account and Decision records are preserved.
+
+### 2. BATCHA2-NEW-P2-001: Continuous Database-Level Payload Equality & Authoritative Hydration
+- **Defect**: `RiskDecision.account_id` in the serialized JSON payload could desynchronize from the relational column. `GET /risk/decisions/{id}` validated raw `row.payload` rather than authoritatively hydrating from relational columns.
+- **Remediation**:
+  - In `backend/alembic/versions/0015_batch_a3_risk_account_fk.py`: Added PostgreSQL database check constraint `ck_risk_decision_payload_account_id` checking `(payload ? 'account_id') AND ((payload ->> 'account_id')::uuid = account_id)`. Direct DB inserts/updates with mismatched, missing, or altered payload account IDs are rejected with `CheckViolation`.
+  - In `backend/app/services/risk/repository.py`:
+    - Created single authoritative `hydrate_risk_decision(record: RiskDecisionRecord) -> RiskDecision` enforcing that `record.account_id` always supersedes any serialized payload value.
+    - Updated `find_existing_decision()`, `persist_risk_decision()`, and `list_recent_decisions()` to use `hydrate_risk_decision()`.
+    - `persist_risk_decision()` wraps unique constraint collision checks in `session.begin_nested()` (savepoint) to prevent outer transaction abort on PostgreSQL.
+  - In `backend/app/api/risk.py`: Replaced raw `RiskDecision.model_validate(row.payload)` in `get_decision_by_id()` with `hydrate_risk_decision(row)`.
+  - In `backend/app/services/ai/assembler.py`: Scoped decision queries using UUID-safe comparison `RiskDecisionRecord.account_id == acc_row.id`.
+
+### 3. BATCHA2-NEW-P2-002: Exact Revision Guard for 0012 Normalizer & Canonical Safe DB Upgrade Entrypoint
+- **Defect**: The 0012 normalizer lacked exact revision guards for future revisions (0013, 0014, 0015) and there was no transactional CLI wrapper orchestrating normalization before Alembic migrations.
+- **Remediation**:
+  - In `backend/app/scripts/normalize_0012_accounts.py`: Implemented exact revision guard: strictly allows revision `0012`, skips `0013/0014/0015`, and aborts on `0011`, base, missing, or unexpected revisions.
+  - Created standalone CLI tool `backend/app/scripts/safe_db_upgrade.py` (`python -m app.scripts.safe_db_upgrade`):
+    - Inspects current revision; if 0012, runs `normalize_0012_database` inside a dedicated transaction; aborts and rolls back on error before Alembic is touched.
+    - Executes Alembic upgrade to head (`0015_batch_a3_risk_account_fk`).
+    - Masks credentials in all log outputs.
+  - Updated documentation (`README.md`, `docs/18-devops.md`) to establish `safe_db_upgrade` as the canonical migration command.
+
+---
+
 ## Verification Matrix
 
 | Suite / Gate | Test Scope | Result | Details |
 |---|---|---|---|
 | **Batch A Remediation Unit Suite** | AUD-P1-001 through AUD-P1-004 | **PASS** | 7 tests passed (`tests/test_batch_a_remediation.py`) |
-| **Batch A.2 PostgreSQL Integration** | Safe migration normalizer, 0014 invariants, lifecycle races, RBAC & tenant isolation | **PASS** | 9 tests passed in 23.9s (`tests/integration/test_batch_a1_postgres.py`) |
-| **PostgreSQL 18 Integration** | Risk concurrency, multi-account, migration 0014 | **PASS** | 8 tests passed in 58.1s (`tests/integration/test_risk_postgres.py`) |
-| **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle | **PASS** | 4 tests passed (`tests/test_foundation_gate.py`) |
-| **Full Backend Unit Suite** | Complete backend test suite | **PASS** | 788 passed, 0 failed in 235s (`pytest --ignore=tests/integration -q`) |
-| **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 8.4s (`npm test -- --run`) |
+| **Batch A.3 PostgreSQL Integration** | Safe migration normalizer, 0015 invariants, real FK restrict, payload check constraint, hydration, lifecycle races, RBAC & tenant isolation | **PASS** | 14 tests passed in 53.0s (`tests/integration/test_batch_a1_postgres.py`) |
+| **PostgreSQL 18 Concurrency Integration** | Risk concurrency, multi-account, migration 0015 | **PASS** | 8 tests passed in 63.5s (`tests/integration/test_risk_postgres.py`) |
+| **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle (up to 0015) | **PASS** | 12 tests passed in 97.3s (`tests/integration/test_postgres.py`) |
+| **Full Backend Unit Suite** | Complete backend test suite | **PASS** | 788 passed, 0 failed in 294s (`pytest --ignore=tests/integration -q`) |
+| **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 9.5s (`npm test -- --run`) |
 | **Frontend Typecheck** | TypeScript static typing | **PASS** | 0 errors (`npm run typecheck`) |
 | **Frontend ESLint** | Linter rules & code hygiene | **PASS** | 0 errors (`npm run lint`) |
 | **Next.js Production Build** | Production compiler & asset optimization | **PASS** | 20 routes compiled cleanly with Turbopack (`npm run build`) |
@@ -152,4 +191,4 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
 ## Governance & Freeze Integrity
 - **Freeze Baseline SHA**: `4835051b7870b293a9036a85d5c7226b1ba70af1`
 - **Documentation**: [docs/FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md) remains unaltered and authoritative.
-- **Scope Compliance**: Strictly restricted to Batch A, Batch A.1, and Batch A.2 findings. No Batch B findings touched.
+- **Scope Compliance**: Strictly restricted to Batch A, Batch A.1, Batch A.2, and Batch A.3 findings. No Batch B findings touched.

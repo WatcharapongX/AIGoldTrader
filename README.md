@@ -66,7 +66,7 @@ TASK-020 passed with native PostgreSQL 18.6 migration/rollback/auth/audit, real 
 
 ## Phase 2 Trading screen (provisional)
 
-After the existing database setup, run python -m alembic upgrade head from backend, then start the
+After the existing database setup, run python -m app.scripts.safe_db_upgrade from backend, then start the
 native backend/frontend as above. Log in and open /trading. XAUUSD historical candles, realtime
 Bid/Ask/Spread, nine timeframes, reconnect and status are available with clearly labeled SIMULATED DATA.
 No broker or order execution is implemented. Native PostgreSQL remains sufficient; Redis/Docker/WSL

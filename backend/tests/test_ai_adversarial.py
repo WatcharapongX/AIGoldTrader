@@ -772,6 +772,7 @@ async def test_33_assembler_account_mismatch_fails_closed(db_session):
     admin = await create_user(session, email="admin_mismatch@test.com", password="password123", role=Role.ADMIN)
 
     acc_a = Account(
+        id=uuid.uuid4(),
         name="acc_mismatch_a",
         user_id=admin.id,
         trading_mode=TradingMode.PAPER,
@@ -780,6 +781,7 @@ async def test_33_assembler_account_mismatch_fails_closed(db_session):
         is_active=True,
     )
     acc_b = Account(
+        id=uuid.uuid4(),
         name="acc_mismatch_b",
         user_id=admin.id,
         trading_mode=TradingMode.PAPER,

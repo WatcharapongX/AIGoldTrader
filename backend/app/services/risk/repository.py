@@ -215,6 +215,15 @@ async def get_or_create_account_snapshot(
     )
 
 
+def hydrate_risk_decision(record: RiskDecisionRecord) -> RiskDecision:
+    """Authoritative hydration of RiskDecision domain model from database record.
+    Enforces relational authority: record.account_id always supersedes serialized payload.
+    """
+    payload = dict(record.payload) if record.payload else {}
+    payload["account_id"] = str(record.account_id)
+    return RiskDecision.model_validate(payload)
+
+
 async def find_existing_decision(
     session: AsyncSession,
     candidate_id: str,
@@ -240,9 +249,7 @@ async def find_existing_decision(
 
     row = (await session.scalars(stmt.limit(1))).first()
     if row:
-        payload = dict(row.payload) if row.payload else {}
-        payload["account_id"] = str(row.account_id)
-        return RiskDecision.model_validate(payload)
+        return hydrate_risk_decision(row)
     return None
 
 
@@ -261,9 +268,7 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
                 params=None,
                 orig=Exception("PK_COLLISION_MISMATCH"),
             )
-        payload = dict(existing.payload) if existing.payload else {}
-        payload["account_id"] = str(existing.account_id)
-        return RiskDecision.model_validate(payload)
+        return hydrate_risk_decision(existing)
 
     if not decision.account_id:
         raise ValidationError("RiskDecision requires an account_id")
@@ -306,52 +311,20 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
         entry_upper=decision.entry_upper,
         stop_loss=decision.stop_loss,
         stop_distance=decision.stop_distance,
-        account_id=canonical_account_id,
+        account_id=parsed_account_uuid,
         account_snapshot_id=decision.account_snapshot_id,
         policy_version=decision.policy_version,
+        dependency_fingerprint=decision.dependency_fingerprint,
         as_of=decision.as_of,
         expires_at=decision.expires_at,
-        dependency_fingerprint=decision.dependency_fingerprint or "default_fingerprint",
         payload=decision_payload,
     )
+
     try:
         async with session.begin_nested():
             session.add(record)
             await session.flush()
     except IntegrityError as exc:
-        diag = getattr(getattr(exc, "orig", None), "diag", None)
-        constraint_name = getattr(diag, "constraint_name", None) or ""
-        exc_str = str(exc).lower()
-
-        is_expected_unique = (
-            "uq_risk_decision_deterministic" in constraint_name
-            or "uq_risk_reservation_decision" in constraint_name
-            or "ix_risk_reservation_active_candidate" in constraint_name
-            or "uq_risk_decision_deterministic" in exc_str
-            or "uq_risk_reservation_decision" in exc_str
-            or "ix_risk_reservation_active_candidate" in exc_str
-        )
-        is_pk_collision = "risk_decisions_pkey" in constraint_name or "primary key" in exc_str
-
-        existing = await session.get(RiskDecisionRecord, decision.id)
-        if existing is not None:
-            if (
-                existing.candidate_id != decision.candidate_id
-                or existing.profile_id != decision.profile_id
-                or existing.dependency_fingerprint != decision.dependency_fingerprint
-            ):
-                logger.error("Unrelated RiskDecision PK collision detected: failing closed")
-                raise exc
-            payload = dict(existing.payload) if existing.payload else {}
-            payload["account_id"] = str(existing.account_id)
-            return RiskDecision.model_validate(payload)
-
-        # Do not swallow unrelated integrity errors (e.g. FK, nullability, unrelated PK)
-        if not is_expected_unique and not is_pk_collision:
-            logger.error("Unexpected IntegrityError during persist_risk_decision: %s", exc)
-            raise exc
-
-        # For expected deterministic unique collision, fetch DB row and verify exact semantic identity
         stmt = (
             select(RiskDecisionRecord)
             .where(
@@ -369,14 +342,10 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
                 and row.profile_id == decision.profile_id
                 and row.dependency_fingerprint == decision.dependency_fingerprint
             ):
-                payload = dict(row.payload) if row.payload else {}
-                payload["account_id"] = str(row.account_id)
-                return RiskDecision.model_validate(payload)
+                return hydrate_risk_decision(row)
 
         raise exc
-    if decision.account_id != canonical_account_id:
-        return decision.model_copy(update={"account_id": canonical_account_id})
-    return decision
+    return hydrate_risk_decision(record)
 
 
 async def list_recent_decisions(
@@ -389,11 +358,10 @@ async def list_recent_decisions(
     if symbol:
         stmt = stmt.where(RiskDecisionRecord.symbol == symbol)
     if account_ids is not None:
-        stmt = stmt.where(RiskDecisionRecord.account_id.in_(account_ids))
+        parsed_uuids = [
+            uuid.UUID(str(a)) if not isinstance(a, uuid.UUID) else a
+            for a in account_ids
+        ]
+        stmt = stmt.where(RiskDecisionRecord.account_id.in_(parsed_uuids))
     rows = (await session.scalars(stmt)).all()
-    decisions = []
-    for r in rows:
-        payload = dict(r.payload) if r.payload else {}
-        payload["account_id"] = str(r.account_id)
-        decisions.append(RiskDecision.model_validate(payload))
-    return decisions
+    return [hydrate_risk_decision(r) for r in rows]

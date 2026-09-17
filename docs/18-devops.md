@@ -57,7 +57,7 @@ When your native PostgreSQL service and configured application database are read
 
 ~~~powershell
 Get-Service *postgres*
-.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m app.scripts.safe_db_upgrade
 .\.venv\Scripts\python.exe -m app.db.seed
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --no-proxy-headers --host 127.0.0.1 --port 8000 --reload --loop app.core.event_loop:new_event_loop
 ~~~
@@ -158,7 +158,7 @@ or added to source by this hardening work.
 
 ## Phase 2 local market feed (2026-09-09)
 
-Apply the new additive migration with python -m alembic upgrade head and verify alembic check.
+Apply migrations safely with python -m app.scripts.safe_db_upgrade and verify alembic check.
 Set MARKET_DATA_PROVIDER=simulated; retain PAPER, LIVE_AUTO_TRADING=false and Redis optional.
 Existing native Uvicorn launch options, including --no-proxy-headers, remain required.
 One DEV application instance owns the lazy replay worker; avoid multiple workers on the same dataset.

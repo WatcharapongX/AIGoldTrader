@@ -280,6 +280,7 @@ async def get_decision_by_id(
 ):
     """Read-only fetch of a single risk decision with tenant isolation."""
     from app.models.risk import RiskDecisionRecord
+    from app.services.risk.repository import hydrate_risk_decision
 
     row = await session.scalar(select(RiskDecisionRecord).where(RiskDecisionRecord.id == decision_id))
     if row is None:
@@ -291,7 +292,7 @@ async def get_decision_by_id(
         if str(row.account_id) not in owned_ids:
             raise NotFoundError("Risk decision not found")
 
-    return RiskDecision.model_validate(row.payload)
+    return hydrate_risk_decision(row)
 
 
 @router.get("/portfolio", response_model=PortfolioRiskSummary)

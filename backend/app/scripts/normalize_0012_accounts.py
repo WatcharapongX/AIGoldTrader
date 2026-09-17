@@ -78,19 +78,34 @@ def normalize_0012_database(conn: Any) -> dict[str, Any]:
     db = DBAdapter(conn)
 
     # 1. Check current alembic revision
-    current_revision = None
-    if db.table_exists("alembic_version"):
-        rows = db.execute("SELECT version_num FROM alembic_version")
-        if rows:
-            current_revision = str(rows[0][0])
+    if not db.table_exists("alembic_version"):
+        raise RuntimeError("Cannot normalize: alembic_version table is missing (base/uninitialized revision).")
 
-    if current_revision in ("0013_batch_a_risk_authority", "0014_batch_a2_account_authority"):
-        logger.info("Database revision is already %s; skipping 0012 normalization.", current_revision)
+    rows = db.execute("SELECT version_num FROM alembic_version")
+    if not rows:
+        raise RuntimeError("Cannot normalize: alembic_version table is empty (base revision).")
+
+    if len(rows) > 1:
+        raise RuntimeError(f"Cannot normalize: multiple alembic version rows detected: {[r[0] for r in rows]}.")
+
+    current_revision = str(rows[0][0]).strip()
+
+    # Known later revisions: 0013, 0014, 0015 -> SKIP safely
+    known_later_prefixes = ("0013", "0014", "0015")
+    if any(current_revision.startswith(p) for p in known_later_prefixes):
+        logger.info("Database revision is %s; skipping 0012 normalization.", current_revision)
         return {
             "status": "SKIPPED",
             "reason": f"Database already at or past revision {current_revision}",
             "normalized_aliases": 0,
         }
+
+    # Allowed revision: strictly 0012
+    if not current_revision.startswith("0012"):
+        raise RuntimeError(
+            f"Cannot normalize: unsupported database revision '{current_revision}'. "
+            "Normalizer is strictly designed for revision 0012."
+        )
 
     # 2. Collect all legacy string aliases across paper_account_states, account_snapshots, risk_reservations
     legacy_refs: set[str] = set()
