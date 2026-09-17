@@ -22,7 +22,11 @@ import psycopg
 from dotenv import dotenv_values
 from sqlalchemy.engine import make_url
 
-from app.scripts.normalize_0012_accounts import normalize_0012_database
+from app.scripts.normalize_0012_accounts import (
+    KNOWN_UPGRADED_REVISIONS,
+    REV_0012,
+    normalize_0012_database,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,7 +45,15 @@ def mask_url(url_str: str) -> str:
 
 
 def get_current_revision(conn: psycopg.Connection) -> str | None:
-    """Queries alembic_version table to determine current revision."""
+    """Queries alembic_version table to determine current revision.
+
+    Returns:
+        str: Exact non-empty revision string.
+        None: If alembic_version table does not exist or has no rows.
+
+    Raises:
+        RuntimeError: If multiple alembic version rows are detected.
+    """
     with conn.cursor() as cur:
         cur.execute("SELECT to_regclass('alembic_version');")
         res = cur.fetchone()
@@ -54,7 +66,25 @@ def get_current_revision(conn: psycopg.Connection) -> str | None:
             return None
         if len(rows) > 1:
             raise RuntimeError(f"Multiple alembic version rows detected: {[r[0] for r in rows]}")
-        return str(rows[0][0]).strip()
+        rev = str(rows[0][0]).strip()
+        if not rev:
+            return None
+        return rev
+
+
+def classify_revision_action(current_rev: str | None) -> str:
+    """Classifies a database revision to determine safe upgrade action.
+
+    Returns:
+        "NORMALIZE_THEN_UPGRADE": if current_rev == REV_0012
+        "UPGRADE_ONLY": if current_rev in KNOWN_UPGRADED_REVISIONS
+        "UNSUPPORTED": for all other revisions (including None, empty, unknown, corrupt, or future revisions)
+    """
+    if current_rev == REV_0012:
+        return "NORMALIZE_THEN_UPGRADE"
+    if current_rev in KNOWN_UPGRADED_REVISIONS:
+        return "UPGRADE_ONLY"
+    return "UNSUPPORTED"
 
 
 def run_safe_upgrade(db_url: str | None = None) -> int:
@@ -76,24 +106,28 @@ def run_safe_upgrade(db_url: str | None = None) -> int:
 
     try:
         with psycopg.connect(driver_less, autocommit=False) as conn:
-            current_rev = get_current_revision(conn)
-            logger.info("Current revision: %s", current_rev or "None (uninitialized)")
-
-            normalizer_required = False
-            if current_rev is None:
-                logger.error("Cannot upgrade: database has no alembic_version table. Run alembic stamp/init first.")
+            try:
+                current_rev = get_current_revision(conn)
+            except RuntimeError as rev_err:
+                logger.error("Failed to determine revision: %s. Failing closed.", rev_err)
                 return 1
 
-            if current_rev.startswith("0012"):
+            logger.info("Current revision: %s", current_rev or "None (uninitialized/empty)")
+
+            action = classify_revision_action(current_rev)
+            if action == "NORMALIZE_THEN_UPGRADE":
                 normalizer_required = True
-                logger.info("Normalizer required: YES (revision %s detected)", current_rev)
-            elif any(current_rev.startswith(p) for p in ("0013", "0014", "0015")):
+                logger.info("Normalizer required: YES (exact revision %s detected)", current_rev)
+            elif action == "UPGRADE_ONLY":
                 normalizer_required = False
                 logger.info("Normalizer required: NO (database already at or past %s)", current_rev)
             else:
                 logger.error(
-                    "Unsupported database revision '%s'. Normalizer supports 0012, skips >=0013. Failing closed.",
+                    "Unsupported database revision '%s'. "
+                    "Safe upgrade strictly supports exact '%s' (normalize) or exact %s (upgrade-only). Failing closed.",
                     current_rev,
+                    REV_0012,
+                    sorted(KNOWN_UPGRADED_REVISIONS),
                 )
                 return 1
 

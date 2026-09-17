@@ -1,9 +1,9 @@
-# Post-Freeze Remediation Status: Batch A, Batch A.1, Batch A.2 & Batch A.3
+# Post-Freeze Remediation Status: Batch A, Batch A.1, Batch A.2, Batch A.3 & Batch A.3.1
 
 ## Executive Summary
-This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), and **Correction Batch A.3** (Referential Integrity Closure) of the post-freeze audit findings for **AIGoldTrader**.
+This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), and **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening) of the post-freeze audit findings for **AIGoldTrader**.
 
-All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004), corrective findings assigned to Batch A.1 (BATCHA-P1-001 through BATCHA-P1-003, BATCHA-P2-001, BATCHA-P3-001), hardening findings assigned to Batch A.2 (BATCHA1-NEW-P1-001, BATCHA1-NEW-P2-001, BATCHA1-NEW-P2-002, BATCHA1-NEW-P3-001), and final referential integrity findings assigned to Batch A.3 (BATCHA2-NEW-P1-001, BATCHA2-NEW-P2-001, BATCHA2-NEW-P2-002) have been remediated, verified against PostgreSQL 18.6 and SQLite runtimes, and integrated into the continuous test suite. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004), corrective findings assigned to Batch A.1 (BATCHA-P1-001 through BATCHA-P1-003, BATCHA-P2-001, BATCHA-P3-001), hardening findings assigned to Batch A.2 (BATCHA1-NEW-P1-001, BATCHA1-NEW-P2-001, BATCHA1-NEW-P2-002, BATCHA1-NEW-P3-001), final referential integrity findings assigned to Batch A.3 (BATCHA2-NEW-P1-001, BATCHA2-NEW-P2-001, BATCHA2-NEW-P2-002), and exact revision guard hardening assigned to Batch A.3.1 (BATCHA3-P1) have been remediated, verified against PostgreSQL 18.6 and SQLite runtimes, and integrated into the continuous test suite. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
 
 ---
 
@@ -159,15 +159,24 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
   - In `backend/app/api/risk.py`: Replaced raw `RiskDecision.model_validate(row.payload)` in `get_decision_by_id()` with `hydrate_risk_decision(row)`.
   - In `backend/app/services/ai/assembler.py`: Scoped decision queries using UUID-safe comparison `RiskDecisionRecord.account_id == acc_row.id`.
 
-### 3. BATCHA2-NEW-P2-002: Exact Revision Guard for 0012 Normalizer & Canonical Safe DB Upgrade Entrypoint
-- **Defect**: The 0012 normalizer lacked exact revision guards for future revisions (0013, 0014, 0015) and there was no transactional CLI wrapper orchestrating normalization before Alembic migrations.
+### 3. BATCHA2-NEW-P2-002: Revision Guard for 0012 Normalizer & Canonical Safe DB Upgrade Entrypoint
+- **Defect**: The 0012 normalizer lacked revision guards for future revisions (0013, 0014, 0015) and there was no transactional CLI wrapper orchestrating normalization before Alembic migrations.
 - **Remediation**:
-  - In `backend/app/scripts/normalize_0012_accounts.py`: Implemented exact revision guard: strictly allows revision `0012`, skips `0013/0014/0015`, and aborts on `0011`, base, missing, or unexpected revisions.
+  - In `backend/app/scripts/normalize_0012_accounts.py`: Implemented revision guard to allow revision `0012`, skip `0013/0014/0015`, and abort on `0011`, base, missing, or unexpected revisions.
   - Created standalone CLI tool `backend/app/scripts/safe_db_upgrade.py` (`python -m app.scripts.safe_db_upgrade`):
     - Inspects current revision; if 0012, runs `normalize_0012_database` inside a dedicated transaction; aborts and rolls back on error before Alembic is touched.
     - Executes Alembic upgrade to head (`0015_batch_a3_risk_account_fk`).
     - Masks credentials in all log outputs.
   - Updated documentation (`README.md`, `docs/18-devops.md`) to establish `safe_db_upgrade` as the canonical migration command.
+
+### 4. BATCHA3-P1: Strict Exact-String Migration Revision Guard Hardening (Correction Batch A.3.1)
+- **Defect**: Revision guards in `normalize_0012_accounts.py` and `safe_db_upgrade.py` previously evaluated revisions using `startswith("0012")` and prefix tuples `("0013", "0014", "0015")`, which could permit false positives such as `0012_unknown`.
+- **Remediation**:
+  - Defined canonical exact revision constants: `REV_0012 = "0012_phase5_reconciliation"`, `REV_0013 = "0013_batch_a_risk_authority"`, `REV_0014 = "0014_batch_a2_account_authority"`, `REV_0015 = "0015_batch_a3_risk_account_fk"`.
+  - Replaced all prefix checks with strict exact-string equality checks.
+  - In `normalize_0012_database()`: Strictly allows exact `REV_0012`, skips exact `REV_0013/0014/0015`, and fails closed with `RuntimeError` on all unsupported revisions (`0012_unknown`, `0012_bad_revision`, `0013_unknown`, `0014_unknown`, `0015_unknown`, `0011...`, `0016+`, empty, missing, multiple rows).
+  - In `safe_db_upgrade.py`: Added `classify_revision_action()`. Requires normalizer on exact `REV_0012`, allows direct Alembic upgrade on exact `REV_0013/0014/0015`, and aborts with exit code 1 BEFORE normalizer and BEFORE Alembic subprocess on any unsupported revision, guaranteeing zero mutations.
+  - Added dedicated test suite `backend/tests/test_migration_revision_guards.py` (43 tests) and integration tests in `backend/tests/integration/test_batch_a1_postgres.py`.
 
 ---
 
@@ -176,11 +185,12 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
 | Suite / Gate | Test Scope | Result | Details |
 |---|---|---|---|
 | **Batch A Remediation Unit Suite** | AUD-P1-001 through AUD-P1-004 | **PASS** | 7 tests passed (`tests/test_batch_a_remediation.py`) |
-| **Batch A.3 PostgreSQL Integration** | Safe migration normalizer, 0015 invariants, real FK restrict, payload check constraint, hydration, lifecycle races, RBAC & tenant isolation | **PASS** | 14 tests passed in 53.0s (`tests/integration/test_batch_a1_postgres.py`) |
-| **PostgreSQL 18 Concurrency Integration** | Risk concurrency, multi-account, migration 0015 | **PASS** | 8 tests passed in 63.5s (`tests/integration/test_risk_postgres.py`) |
-| **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle (up to 0015) | **PASS** | 12 tests passed in 97.3s (`tests/integration/test_postgres.py`) |
-| **Full Backend Unit Suite** | Complete backend test suite | **PASS** | 788 passed, 0 failed in 294s (`pytest --ignore=tests/integration -q`) |
-| **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 9.5s (`npm test -- --run`) |
+| **Exact Revision Guard Unit Suite** | Strict canonical revisions (0012-0015), fail-closed on unknown/corrupt, zero-mutation guarantee | **PASS** | 43 tests passed in 0.81s (`tests/test_migration_revision_guards.py`) |
+| **Batch A.3 / A.3.1 PostgreSQL Integration** | Safe migration normalizer, exact revision guards, 0015 invariants, real FK restrict, payload check constraint, hydration, lifecycle races, RBAC & tenant isolation | **PASS** | 15 tests passed (`tests/integration/test_batch_a1_postgres.py`) |
+| **PostgreSQL 18 Concurrency Integration** | Risk concurrency, multi-account, migration 0015 | **PASS** | 8 tests passed (`tests/integration/test_risk_postgres.py`) |
+| **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle (up to 0015) | **PASS** | 12 tests passed (`tests/integration/test_postgres.py`) |
+| **Full Backend Unit Suite** | Complete backend test suite | **PASS** | 831 passed, 0 failed (`pytest --ignore=tests/integration -q`) |
+| **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 10.5s (`npm test -- --run`) |
 | **Frontend Typecheck** | TypeScript static typing | **PASS** | 0 errors (`npm run typecheck`) |
 | **Frontend ESLint** | Linter rules & code hygiene | **PASS** | 0 errors (`npm run lint`) |
 | **Next.js Production Build** | Production compiler & asset optimization | **PASS** | 20 routes compiled cleanly with Turbopack (`npm run build`) |

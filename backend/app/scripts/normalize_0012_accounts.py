@@ -27,6 +27,18 @@ import sqlalchemy as sa
 
 logger = logging.getLogger("normalize_0012_accounts")
 
+# Canonical Alembic migration revisions for Batch A chain
+REV_0012 = "0012_phase5_reconciliation"
+REV_0013 = "0013_batch_a_risk_authority"
+REV_0014 = "0014_batch_a2_account_authority"
+REV_0015 = "0015_batch_a3_risk_account_fk"
+
+KNOWN_UPGRADED_REVISIONS: frozenset[str] = frozenset({
+    REV_0013,
+    REV_0014,
+    REV_0015,
+})
+
 
 class DBAdapter:
     """Adapter supporting both SQLAlchemy Connection and raw DBAPI (e.g. psycopg) Connection."""
@@ -89,10 +101,11 @@ def normalize_0012_database(conn: Any) -> dict[str, Any]:
         raise RuntimeError(f"Cannot normalize: multiple alembic version rows detected: {[r[0] for r in rows]}.")
 
     current_revision = str(rows[0][0]).strip()
+    if not current_revision:
+        raise RuntimeError("Cannot normalize: alembic_version table contains empty revision string.")
 
-    # Known later revisions: 0013, 0014, 0015 -> SKIP safely
-    known_later_prefixes = ("0013", "0014", "0015")
-    if any(current_revision.startswith(p) for p in known_later_prefixes):
+    # Known later exact revisions: 0013, 0014, 0015 -> SKIP safely
+    if current_revision in KNOWN_UPGRADED_REVISIONS:
         logger.info("Database revision is %s; skipping 0012 normalization.", current_revision)
         return {
             "status": "SKIPPED",
@@ -100,11 +113,11 @@ def normalize_0012_database(conn: Any) -> dict[str, Any]:
             "normalized_aliases": 0,
         }
 
-    # Allowed revision: strictly 0012
-    if not current_revision.startswith("0012"):
+    # Allowed revision: strictly exact REV_0012
+    if current_revision != REV_0012:
         raise RuntimeError(
             f"Cannot normalize: unsupported database revision '{current_revision}'. "
-            "Normalizer is strictly designed for revision 0012."
+            f"Normalizer is strictly designed for revision '{REV_0012}'."
         )
 
     # 2. Collect all legacy string aliases across paper_account_states, account_snapshots, risk_reservations

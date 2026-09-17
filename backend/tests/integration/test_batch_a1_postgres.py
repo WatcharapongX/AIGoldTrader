@@ -720,6 +720,48 @@ def test_0012_normalizer_exact_revision_guard(isolated_postgres):  # noqa: F811
     with pytest.raises(RuntimeError, match="alembic_version table is empty"):
         normalize_0012_database(conn)
 
+    # 7. Exact revision guards: prefix-matching variations must fail closed
+    for bad_rev in ("0012_unknown", "0012_bad_revision", "0013_unknown", "0014_unknown", "0015_unknown", "0016_future"):
+        conn.execute("INSERT INTO alembic_version (version_num) VALUES (%(r)s)", {"r": bad_rev})
+        with pytest.raises(RuntimeError, match=f"unsupported database revision '{bad_rev}'"):
+            normalize_0012_database(conn)
+        conn.execute("DELETE FROM alembic_version")
+
+    # 8. Multiple version rows: aborts
+    conn.execute("INSERT INTO alembic_version (version_num) VALUES ('0012_phase5_reconciliation')")
+    conn.execute("INSERT INTO alembic_version (version_num) VALUES ('0013_batch_a_risk_authority')")
+    with pytest.raises(RuntimeError, match="multiple alembic version rows detected"):
+        normalize_0012_database(conn)
+
+
+def test_safe_db_upgrade_cli_unsupported_revision_fails_closed(isolated_postgres):  # noqa: F811
+    """BATCHA3-P1: safe_db_upgrade fails closed (rc=1, zero mutations, zero alembic) on unsupported revision."""
+    conn, schema = isolated_postgres
+    conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+    _alembic("upgrade", "0012_phase5_reconciliation")
+
+    # Tamper revision to unsupported prefix-like string
+    conn.execute("UPDATE alembic_version SET version_num = '0012_unknown'")
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    proc = subprocess.run(
+        [sys.executable, "-m", "app.scripts.safe_db_upgrade"],
+        cwd=backend_dir,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    combined_output = proc.stdout + proc.stderr
+    assert proc.returncode == 1, (
+        f"safe_db_upgrade should fail closed with rc=1, got {proc.returncode}: {combined_output}"
+    )
+    assert "Unsupported database revision '0012_unknown'" in combined_output
+
+    # Verify revision was NOT touched and no migration to 0013/0014/0015 occurred
+    current_rev = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    assert current_rev == "0012_unknown"
+
 
 def test_safe_db_upgrade_cli_e2e(isolated_postgres):  # noqa: F811
     """BATCHA2-NEW-P2-002: Standalone python -m app.scripts.safe_db_upgrade runs safely end-to-end."""
