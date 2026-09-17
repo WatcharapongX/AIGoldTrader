@@ -100,7 +100,7 @@ class RiskDecisionRecord(Base):
     entry_upper: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
     stop_loss: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
     stop_distance: Mapped[Decimal] = mapped_column(Numeric(18, 5), nullable=False)
-    account_id: Mapped[str] = mapped_column(String(64), default="default_paper_account", nullable=False)
+    account_id: Mapped[str] = mapped_column(String(64), nullable=False)
     account_snapshot_id: Mapped[str] = mapped_column(String(64), nullable=False)
     policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     dependency_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)

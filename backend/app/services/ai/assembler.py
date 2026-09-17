@@ -15,13 +15,12 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import Request
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
 from app.models import Role, User
 from app.models.risk import (
-    AccountSnapshotRecord,
     RiskDecisionRecord,
     RiskReservationRecord,
 )
@@ -342,17 +341,10 @@ class AIAnalysisInputAssembler:
         # -------------------------------------------------------------
         stmt = (
             select(RiskDecisionRecord)
-            .join(
-                AccountSnapshotRecord,
-                RiskDecisionRecord.account_snapshot_id == AccountSnapshotRecord.id,
-            )
             .where(
                 RiskDecisionRecord.candidate_id == candidate_id,
                 RiskDecisionRecord.profile_id == resolved_profile_id,
-                or_(
-                    AccountSnapshotRecord.account_id == canonical_account_id,
-                    AccountSnapshotRecord.account_id == acc_row.name,
-                ),
+                RiskDecisionRecord.account_id == canonical_account_id,
             )
             .order_by(RiskDecisionRecord.as_of.desc())
             .limit(1)
@@ -378,12 +370,7 @@ class AIAnalysisInputAssembler:
                 blocked_reasons_th=("ยังไม่ได้ผ่านการประเมินความเสี่ยงจาก Risk Engine",),
             )
         else:
-            snap = await session.get(AccountSnapshotRecord, decision_row.account_snapshot_id)
-            decision_account_id = snap.account_id if snap is not None else None
-
-            account_matched = decision_account_id is not None and (
-                decision_account_id == canonical_account_id or decision_account_id == acc_row.name
-            )
+            account_matched = (str(decision_row.account_id) == canonical_account_id)
 
             dec_as_of = _required_datetime(decision_row.as_of, "risk.as_of")
             dec_expires_at = _required_datetime(decision_row.expires_at, "risk.expires_at")

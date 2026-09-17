@@ -100,6 +100,7 @@ def test_ai_account_reservation_and_authoritative_api_postgres(isolated_postgres
                 entry_upper=candidate.plan.entry_upper,
                 stop_loss=candidate.plan.stop_loss,
                 stop_distance=Decimal("5.00"),
+                account_id=str(account_b.id),
                 account_snapshot_id=snapshot_b.id,
                 policy_version="risk-policy-1.0.0",
                 dependency_fingerprint="risk-dependency-postgres-b",

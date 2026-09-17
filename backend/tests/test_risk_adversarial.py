@@ -165,6 +165,20 @@ async def test_cached_approval_bypasses_safety_prevented(
 ):
     """SOL-P5-P1-001: Changing safety context (e.g. activating Kill Switch) must invalidate cached approval."""
     session, _ = db_session
+    from app.models.account import Account, TradingMode
+    acc_id = uuid.uuid4()
+    account_row = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_adv_cache_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account_row)
+    await session.flush()
+    account = test_account.model_copy(update={"account_id": str(acc_id)})
+
     calm_news = build_news_context(
         events=[],
         as_of=now_time,
@@ -182,7 +196,7 @@ async def test_cached_approval_bypasses_safety_prevented(
         session=session,
         candidate=test_candidate,
         plan=test_plan,
-        account=test_account,
+        account=account,
         policy=test_policy,
         spec=test_spec,
         quote=test_quote,
@@ -207,7 +221,7 @@ async def test_cached_approval_bypasses_safety_prevented(
         session=session,
         candidate=test_candidate,
         plan=test_plan,
-        account=test_account,
+        account=account,
         policy=test_policy,
         spec=test_spec,
         quote=test_quote,
@@ -274,6 +288,7 @@ async def test_deterministic_fingerprint_and_db_uniqueness(
         entry_upper=Decimal("2502.00"),
         stop_loss=Decimal("2495.00"),
         stop_distance=Decimal("7.00"),
+        account_id="00000000-0000-0000-0000-000000000001",
         account_snapshot_id="snap_01",
         policy_version="risk-policy-1.0.0",
         dependency_fingerprint=fp1,
@@ -303,6 +318,7 @@ async def test_deterministic_fingerprint_and_db_uniqueness(
         entry_upper=Decimal("2502.00"),
         stop_loss=Decimal("2495.00"),
         stop_distance=Decimal("7.00"),
+        account_id="00000000-0000-0000-0000-000000000001",
         account_snapshot_id="snap_01",
         policy_version="risk-policy-1.0.0",
         dependency_fingerprint=fp1,
@@ -521,9 +537,21 @@ async def test_blocked_decisions_create_zero_reservations(
 ):
     """SOL-P5-P1-008: Blocked decisions must create exactly 0 risk reservations."""
     session, _ = db_session
+    from app.models.account import Account, TradingMode
+    acc_id = uuid.uuid4()
+    account_row = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_adv_loss_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account_row)
+    await session.flush()
 
     # Trigger daily loss block
-    loss_acc = test_account.model_copy(update={"daily_realized_pnl": Decimal("-400.00")})
+    loss_acc = test_account.model_copy(update={"account_id": str(acc_id), "daily_realized_pnl": Decimal("-400.00")})
     dec = await risk_engine.evaluate_candidate(
         session=session,
         candidate=test_candidate,
@@ -1318,13 +1346,27 @@ async def test_persistence_integrity_error_reraises(
     session, _ = db_session
     from unittest.mock import patch
 
+    from app.models.account import Account, TradingMode
     from app.services.risk.repository import persist_risk_decision
+
+    acc_id = uuid.uuid4()
+    account_row = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_adv_integ_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account_row)
+    await session.flush()
+    account = test_account.model_copy(update={"account_id": str(acc_id)})
 
     dec = await risk_engine.evaluate_candidate(
         session=session,
         candidate=test_candidate,
         plan=test_plan,
-        account=test_account,
+        account=account,
         policy=test_policy,
         spec=test_spec,
         quote=test_quote,
@@ -1964,9 +2006,23 @@ async def test_cached_approval_reconciles_missing_current_reservation(
 ):
     """R4-P1-039: cached approval is returned only with exact current coverage."""
     session, _ = db_session
+    from app.models.account import Account, TradingMode
+    acc_id = uuid.uuid4()
+    account_row = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_adv_reconcile_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account_row)
+    await session.flush()
+    account = test_account.model_copy(update={"account_id": str(acc_id)})
+
     policy = test_policy.model_copy(update={"news_risk_enabled": False})
     decision = await risk_engine.evaluate_candidate(
-        session, test_candidate, test_plan, test_account, policy, test_spec, test_quote, as_of=now_time
+        session, test_candidate, test_plan, account, policy, test_spec, test_quote, as_of=now_time
     )
     await persist_risk_decision(session, decision)
     await session.flush()
@@ -1983,13 +2039,13 @@ async def test_cached_approval_reconciles_missing_current_reservation(
     await session.flush()
 
     cached = await risk_engine.evaluate_candidate(
-        session, test_candidate, test_plan, test_account, policy, test_spec, test_quote, as_of=now_time
+        session, test_candidate, test_plan, account, policy, test_spec, test_quote, as_of=now_time
     )
     assert cached.id == decision.id
     current = (
         await session.scalars(
             select(RiskReservationRecord).where(
-                RiskReservationRecord.account_id == test_account.account_id,
+                RiskReservationRecord.account_id == account.account_id,
                 RiskReservationRecord.candidate_id == test_candidate.id,
                 RiskReservationRecord.status == "ACTIVE",
                 RiskReservationRecord.reserved_until > now_time,
@@ -2009,8 +2065,22 @@ async def test_cached_blocked_recurrence_releases_newer_reservation(
 ):
     """R4-P1-040: cached BLOCKED cannot coexist with a newer active reservation."""
     session, _ = db_session
+    from app.models.account import Account, TradingMode
+    acc_id = uuid.uuid4()
+    account_row = Account(
+        id=acc_id,
+        user_id=uuid.uuid4(),
+        name=f"test_adv_recur_{acc_id.hex[:6]}",
+        trading_mode=TradingMode.PAPER,
+        starting_balance=Decimal("10000.00"),
+        is_active=True,
+    )
+    session.add(account_row)
+    await session.flush()
+    account = test_account.model_copy(update={"account_id": str(acc_id)})
+
     policy = test_policy.model_copy(update={"news_risk_enabled": False})
-    stale_account = test_account.model_copy(update={"as_of": now_time - dt.timedelta(minutes=10)})
+    stale_account = account.model_copy(update={"as_of": now_time - dt.timedelta(minutes=10)})
     blocked = await risk_engine.evaluate_candidate(
         session, test_candidate, test_plan, stale_account, policy, test_spec, test_quote, as_of=now_time
     )
@@ -2018,7 +2088,7 @@ async def test_cached_blocked_recurrence_releases_newer_reservation(
     await persist_risk_decision(session, blocked)
 
     approved = await risk_engine.evaluate_candidate(
-        session, test_candidate, test_plan, test_account, policy, test_spec, test_quote, as_of=now_time
+        session, test_candidate, test_plan, account, policy, test_spec, test_quote, as_of=now_time
     )
     assert approved.decision == "APPROVED"
     await persist_risk_decision(session, approved)
@@ -2031,7 +2101,7 @@ async def test_cached_blocked_recurrence_releases_newer_reservation(
     active = (
         await session.scalars(
             select(RiskReservationRecord).where(
-                RiskReservationRecord.account_id == test_account.account_id,
+                RiskReservationRecord.account_id == account.account_id,
                 RiskReservationRecord.candidate_id == test_candidate.id,
                 RiskReservationRecord.status == "ACTIVE",
             )

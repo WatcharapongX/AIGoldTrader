@@ -60,6 +60,24 @@ def test_risk_migration_idempotence_and_preservation(isolated_postgres):  # noqa
         "paper_account_states",
     }.issubset(tables)
 
+    # Seed user and account to satisfy account authority & foreign key trigger (AUD-P1-004, BATCHA1-NEW-P2-002)
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES ('00000000-0000-0000-0000-000000000001', 'pg_test@example.com', 'hash', 'TRADER', true, NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING;
+        INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, is_active, created_at, updated_at)
+        VALUES
+            ('00000000-0000-0000-0000-000000000001',
+             '00000000-0000-0000-0000-000000000001',
+             'Paper Account', 'PAPER', 10000.00, true, NOW(), NOW()),
+            ('00000000-0000-0000-0000-000000000003',
+             '00000000-0000-0000-0000-000000000001',
+             'Paper Account 3', 'PAPER', 10000.00, true, NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING;
+        """
+    )
+
     # Insert a dummy risk decision
     conn.execute(
         """
@@ -116,6 +134,19 @@ def test_mandatory_postgresql_concurrency_oversubscription_gate(isolated_postgre
         open_risk_pct=Decimal("0.0000"),
         reserved_risk_pct=Decimal("0.0000"),
         as_of=now,
+    )
+
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES ('00000000-0000-0000-0000-000000000002', 'u2@example.com', 'h', 'TRADER', true, NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING;
+        INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, is_active, created_at, updated_at)
+        VALUES ('00000000-0000-0000-0000-000000000002',
+                '00000000-0000-0000-0000-000000000002',
+                'Paper Account 2', 'PAPER', 10000.0, true, NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING;
+        """
     )
 
     # Pre-insert risk_decisions rows to satisfy foreign key constraints for concurrent reservations
@@ -223,6 +254,19 @@ def test_duplicate_concurrency_idempotency_gate(isolated_postgres):  # noqa: F81
         open_risk_pct=Decimal("0.0000"),
         reserved_risk_pct=Decimal("0.0000"),
         as_of=now,
+    )
+
+    conn.execute(
+        """
+        INSERT INTO users (id, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES ('00000000-0000-0000-0000-000000000003', 'u3@example.com', 'h', 'TRADER', true, NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING;
+        INSERT INTO accounts (id, user_id, name, trading_mode, starting_balance, is_active, created_at, updated_at)
+        VALUES ('00000000-0000-0000-0000-000000000003',
+                '00000000-0000-0000-0000-000000000003',
+                'Paper Account 3', 'PAPER', 10000.0, true, NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING;
+        """
     )
     spec = default_gold_spec(source="simulated", observed_at=now)
     quote = Quote(

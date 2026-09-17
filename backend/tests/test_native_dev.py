@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -144,10 +145,12 @@ def test_windows_db_loop_supports_io_watchers():
 
 
 def test_postgresql_offline_migration_handles_percent_encoded_password():
+    backend_dir = Path(__file__).resolve().parent.parent
     env = {**os.environ, "DATABASE_URL": "postgresql://dev:p%40ss%25word@localhost:5544/testdb"}
     env.pop("DATABASE_URL_OVERRIDE", None)
     result = subprocess.run(  # noqa: S603 — offline SQL only, never connects
-        [sys.executable, "-m", "alembic", "upgrade", "head", "--sql"],
+        [sys.executable, "-m", "alembic", "-c", str(backend_dir / "alembic.ini"), "upgrade", "head", "--sql"],
+        cwd=str(backend_dir),
         env=env,
         capture_output=True,
         text=True,

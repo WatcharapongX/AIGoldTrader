@@ -10,6 +10,7 @@ Freshness separates state_updated_at from observation time (no timestamp launder
 import datetime as dt
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,28 +51,18 @@ class PaperAccountStateService:
         # 2. Query PaperAccountStateRecord under row lock if available
         state_row = await session.scalar(
             select(PaperAccountStateRecord)
-            .where(
-                (PaperAccountStateRecord.account_id == canonical_id)
-                | (PaperAccountStateRecord.account_id == account_id)
-                | (PaperAccountStateRecord.account_id == acc_row.name)
-            )
+            .where(PaperAccountStateRecord.account_id == canonical_id)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
         if state_row is not None:
-            if state_row.account_id != canonical_id:
-                state_row.account_id = canonical_id
             return state_row
 
         # 3. Check for newest existing AccountSnapshotRecord to bootstrap state
         latest_snap = (
             await session.scalars(
                 select(AccountSnapshotRecord)
-                .where(
-                    (AccountSnapshotRecord.account_id == account_id)
-                    | (AccountSnapshotRecord.account_id == str(acc_row.id))
-                    | (AccountSnapshotRecord.account_id == acc_row.name)
-                )
+                .where(AccountSnapshotRecord.account_id == canonical_id)
                 .order_by(AccountSnapshotRecord.as_of.desc())
                 .limit(1)
             )
@@ -113,7 +104,7 @@ class PaperAccountStateService:
 
         # 4. Atomic insert to eliminate concurrent initial-row creation race
         is_postgres = session.get_bind().dialect.name == "postgresql"
-        values_dict = {
+        values_dict: dict[str, Any] = {
             "account_id": canonical_id,
             "state_version": state_ver,
             "balance": bal,
@@ -154,16 +145,10 @@ class PaperAccountStateService:
 
         state_row = await session.scalar(
             select(PaperAccountStateRecord)
-            .where(
-                (PaperAccountStateRecord.account_id == canonical_id)
-                | (PaperAccountStateRecord.account_id == account_id)
-                | (PaperAccountStateRecord.account_id == acc_row.name)
-            )
+            .where(PaperAccountStateRecord.account_id == canonical_id)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if state_row is not None and state_row.account_id != canonical_id:
-            state_row.account_id = canonical_id
         return state_row
 
     @staticmethod
@@ -197,18 +182,12 @@ class PaperAccountStateService:
         # 2. Acquire row lock before comparing/updating state
         state = await session.scalar(
             select(PaperAccountStateRecord)
-            .where(
-                (PaperAccountStateRecord.account_id == canonical_id)
-                | (PaperAccountStateRecord.account_id == account_id)
-                | (PaperAccountStateRecord.account_id == (acc_row.name if acc_row else account_id))
-            )
+            .where(PaperAccountStateRecord.account_id == canonical_id)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
         if state is None:
             state = await PaperAccountStateService.get_or_create_paper_state(session, account_id, effective_now)
-        elif acc_row is not None and state.account_id != canonical_id:
-            state.account_id = canonical_id
 
         has_economic_change = False
 
@@ -291,10 +270,7 @@ class PaperAccountStateService:
         latest_row = (
             await session.scalars(
                 select(AccountSnapshotRecord)
-                .where(
-                    (AccountSnapshotRecord.account_id == canonical_id)
-                    | (AccountSnapshotRecord.account_id == account_id)
-                )
+                .where(AccountSnapshotRecord.account_id == canonical_id)
                 .order_by(AccountSnapshotRecord.as_of.desc())
                 .limit(1)
             )

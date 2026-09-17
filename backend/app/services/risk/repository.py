@@ -1,5 +1,6 @@
 import datetime as dt
 import logging
+import uuid
 from typing import Any
 
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
+from app.models.account import Account
 from app.models.risk import (
     AccountSnapshotRecord,
     RiskDecisionRecord,
@@ -183,11 +185,7 @@ async def get_authoritative_account_snapshot(
     row = (
         await session.scalars(
             select(AccountSnapshotRecord)
-            .where(
-                (AccountSnapshotRecord.account_id == canonical_id)
-                | (AccountSnapshotRecord.account_id == account_id)
-                | (AccountSnapshotRecord.account_id == acc_row.name)
-            )
+            .where(AccountSnapshotRecord.account_id == canonical_id)
             .order_by(AccountSnapshotRecord.as_of.desc())
             .limit(1)
         )
@@ -242,7 +240,9 @@ async def find_existing_decision(
 
     row = (await session.scalars(stmt.limit(1))).first()
     if row:
-        return RiskDecision.model_validate(row.payload)
+        payload = dict(row.payload) if row.payload else {}
+        payload["account_id"] = str(row.account_id)
+        return RiskDecision.model_validate(payload)
     return None
 
 
@@ -261,10 +261,32 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
                 params=None,
                 orig=Exception("PK_COLLISION_MISMATCH"),
             )
-        return RiskDecision.model_validate(existing.payload)
+        payload = dict(existing.payload) if existing.payload else {}
+        payload["account_id"] = str(existing.account_id)
+        return RiskDecision.model_validate(payload)
 
     if not decision.account_id:
         raise ValidationError("RiskDecision requires an account_id")
+
+    # Strict UUID validation at persistence boundary (BATCHA1-NEW-P2-002, Section 17)
+    try:
+        parsed_account_uuid = uuid.UUID(str(decision.account_id))
+    except (ValueError, TypeError):
+        raise ValidationError(
+            f"RiskDecision account_id '{decision.account_id}' is not a valid canonical UUID"
+        ) from None
+    canonical_account_id = str(parsed_account_uuid)
+
+    # Strict account existence verification (Section 18)
+    acc_exists = await session.scalar(
+        select(Account.id).where(Account.id == parsed_account_uuid).limit(1)
+    )
+    if acc_exists is None:
+        raise ValidationError(f"RiskDecision account_id '{canonical_account_id}' does not exist in accounts")
+
+    # Relational/payload consistency (Section 21)
+    decision_payload = decision.model_dump(mode="json")
+    decision_payload["account_id"] = canonical_account_id
 
     record = RiskDecisionRecord(
         id=decision.id,
@@ -284,13 +306,13 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
         entry_upper=decision.entry_upper,
         stop_loss=decision.stop_loss,
         stop_distance=decision.stop_distance,
-        account_id=decision.account_id,
+        account_id=canonical_account_id,
         account_snapshot_id=decision.account_snapshot_id,
         policy_version=decision.policy_version,
         as_of=decision.as_of,
         expires_at=decision.expires_at,
         dependency_fingerprint=decision.dependency_fingerprint or "default_fingerprint",
-        payload=decision.model_dump(mode="json"),
+        payload=decision_payload,
     )
     try:
         async with session.begin_nested():
@@ -320,7 +342,9 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
             ):
                 logger.error("Unrelated RiskDecision PK collision detected: failing closed")
                 raise exc
-            return RiskDecision.model_validate(existing.payload)
+            payload = dict(existing.payload) if existing.payload else {}
+            payload["account_id"] = str(existing.account_id)
+            return RiskDecision.model_validate(payload)
 
         # Do not swallow unrelated integrity errors (e.g. FK, nullability, unrelated PK)
         if not is_expected_unique and not is_pk_collision:
@@ -345,9 +369,13 @@ async def persist_risk_decision(session: AsyncSession, decision: RiskDecision) -
                 and row.profile_id == decision.profile_id
                 and row.dependency_fingerprint == decision.dependency_fingerprint
             ):
-                return RiskDecision.model_validate(row.payload)
+                payload = dict(row.payload) if row.payload else {}
+                payload["account_id"] = str(row.account_id)
+                return RiskDecision.model_validate(payload)
 
         raise exc
+    if decision.account_id != canonical_account_id:
+        return decision.model_copy(update={"account_id": canonical_account_id})
     return decision
 
 
@@ -363,4 +391,9 @@ async def list_recent_decisions(
     if account_ids is not None:
         stmt = stmt.where(RiskDecisionRecord.account_id.in_(account_ids))
     rows = (await session.scalars(stmt)).all()
-    return [RiskDecision.model_validate(r.payload) for r in rows]
+    decisions = []
+    for r in rows:
+        payload = dict(r.payload) if r.payload else {}
+        payload["account_id"] = str(r.account_id)
+        decisions.append(RiskDecision.model_validate(payload))
+    return decisions

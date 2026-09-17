@@ -1,9 +1,9 @@
-# Post-Freeze Remediation Status: Batch A & Batch A.1
+# Post-Freeze Remediation Status: Batch A, Batch A.1 & Batch A.2
 
 ## Executive Summary
-This document records the formal remediation status for **Correction Batch A** and **Correction Batch A.1** of the post-freeze audit findings for **AIGoldTrader**.
+This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, and **Correction Batch A.2** (Canonical Account Authority Hardening) of the post-freeze audit findings for **AIGoldTrader**.
 
-All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004) and corrective findings assigned to Batch A.1 (BATCHA-P1-001 through BATCHA-P1-003, BATCHA-P2-001, BATCHA-P3-001) have been remediated, verified against PostgreSQL 18 and SQLite runtimes, and integrated into the continuous test suite. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004), corrective findings assigned to Batch A.1 (BATCHA-P1-001 through BATCHA-P1-003, BATCHA-P2-001, BATCHA-P3-001), and hardening findings assigned to Batch A.2 (BATCHA1-NEW-P1-001, BATCHA1-NEW-P2-001, BATCHA1-NEW-P2-002, BATCHA1-NEW-P3-001) have been remediated, verified against PostgreSQL 18 and SQLite runtimes, and integrated into the continuous test suite. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
 
 ---
 
@@ -96,16 +96,52 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
 
 ---
 
+## Remediated Audit Findings: Batch A.2 (Canonical Account Authority Hardening)
+
+### 1. BATCHA1-NEW-P1-001: Canonical Account Authority Post-Resolution Hardening
+- **Defect**: Downstream components (`account_state.py`, `repository.py`, and `assembler.py`) exhibited query fallbacks to raw unparsed input names or `acc_row.name` rather than strictly utilizing the resolved canonical UUID.
+- **Remediation**:
+  - In `backend/app/services/risk/account_state.py`: All state queries strictly use canonical UUID `canonical_id = str(acc_row.id)`. Removed legacy fallback lookups.
+  - In `backend/app/services/risk/repository.py`: `get_authoritative_account_snapshot()` and `persist_risk_decision()` strictly bind to canonical account UUID.
+  - In `backend/app/services/ai/assembler.py`: Query filters on `AccountRecord.id == canonical_account_id` without joining or falling back to raw name strings.
+
+### 2. BATCHA1-NEW-P2-001: Pre-Upgrade 0012 Account Reconciliation Normalizer
+- **Defect**: Databases at migration `0012` where an alias snapshot and a UUID reservation referenced the same physical account could trigger false-positive conflict aborts during upgrade without an external normalizer.
+- **Remediation**:
+  - Created standalone idempotent pre-upgrade script `backend/app/scripts/normalize_0012_accounts.py`.
+  - Normalizer supports both SQLAlchemy `Connection` and raw DBAPI / `psycopg` connections via `DBAdapter`.
+  - Resolves snapshot alias and reservation UUID for the same account to the canonical `Account.id` before migration.
+  - Safely aborts with rollback on true cross-account conflicts or duplicate aliases across tenants.
+  - Preserved deployed migration `0013_batch_a_risk_authority.py` completely immutable.
+
+### 3. BATCHA1-NEW-P2-002: Strict UUID & Foreign Key Invariants on Risk Decisions
+- **Defect**: `RiskDecision.account_id` lacked strict UUID validation at the service boundary and relational database foreign-key enforcement to `accounts(id)`.
+- **Remediation**:
+  - In `backend/app/services/risk/domain.py`: `RiskDecision.account_id` is mandatory non-nullable string without default.
+  - In `backend/app/models/risk.py`: Removed default paper account from `RiskDecisionRecord.account_id`.
+  - In `backend/app/services/risk/repository.py`: `persist_risk_decision()` strictly parses `uuid.UUID(str(decision.account_id))` and verifies existence against authoritative `accounts` store; synchronizes relational `account_id` with `payload["account_id"]`.
+  - Created migration `0014_batch_a2_account_authority.py` adding:
+    1. Check constraint `ck_risk_decision_account_id_strict_uuid` enforcing regex format `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`.
+    2. PostgreSQL trigger `trg_risk_decision_account_fk` (`AFTER INSERT OR UPDATE`) executing function `check_risk_decision_account_exists()` to enforce referential integrity to `accounts(id)`.
+  - Applied migration `0014` to operational database `ai_trading` after full pre-migration `pg_dump` backup.
+
+### 4. BATCHA1-NEW-P3-001: Type Annotation Completeness
+- **Defect**: Missing explicit type annotation on `values_dict` in `account_state.py`.
+- **Remediation**:
+  - Added explicit annotation `values_dict: dict[str, Any]` in `PaperAccountStateService.refresh_paper_account_snapshot()`.
+
+---
+
 ## Verification Matrix
 
 | Suite / Gate | Test Scope | Result | Details |
 |---|---|---|---|
-| **Batch A Remediation Unit Suite** | AUD-P1-001 through AUD-P1-004 | **PASS** | 7 tests passed in 1.36s (`tests/test_batch_a_remediation.py`) |
-| **Batch A.1 PostgreSQL Integration** | Safe migration matrix (Cases 1-8), rollback atomicity, lifecycle concurrency race, ADMIN ambiguity rejection | **PASS** | 7 tests passed in 32.10s (`tests/integration/test_batch_a1_postgres.py`) |
-| **PostgreSQL 18 Integration** | Risk concurrency, multi-account, migration 0013 | **PASS** | 8 tests passed in 50.40s (`tests/integration/test_risk_postgres.py`) |
-| **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle | **PASS** | 4 tests passed in 13.73s (`tests/test_foundation_gate.py`) |
-| **Full Backend Unit Suite** | Complete backend test suite | **PASS** | 788 passed, 0 failed in 240s (`pytest --ignore=tests/integration -q`) |
-| **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 7.88s (`npm test -- --run`) |
+| **Batch A Remediation Unit Suite** | AUD-P1-001 through AUD-P1-004 | **PASS** | 7 tests passed (`tests/test_batch_a_remediation.py`) |
+| **Batch A.2 PostgreSQL Integration** | Safe migration normalizer, 0014 invariants, lifecycle races, RBAC & tenant isolation | **PASS** | 9 tests passed in 23.9s (`tests/integration/test_batch_a1_postgres.py`) |
+| **PostgreSQL 18 Integration** | Risk concurrency, multi-account, migration 0014 | **PASS** | 8 tests passed in 58.1s (`tests/integration/test_risk_postgres.py`) |
+| **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle | **PASS** | 4 tests passed (`tests/test_foundation_gate.py`) |
+| **Full Backend Unit Suite** | Complete backend test suite | **PASS** | 788 passed, 0 failed in 235s (`pytest --ignore=tests/integration -q`) |
+| **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 8.4s (`npm test -- --run`) |
 | **Frontend Typecheck** | TypeScript static typing | **PASS** | 0 errors (`npm run typecheck`) |
 | **Frontend ESLint** | Linter rules & code hygiene | **PASS** | 0 errors (`npm run lint`) |
 | **Next.js Production Build** | Production compiler & asset optimization | **PASS** | 20 routes compiled cleanly with Turbopack (`npm run build`) |
@@ -116,4 +152,4 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
 ## Governance & Freeze Integrity
 - **Freeze Baseline SHA**: `4835051b7870b293a9036a85d5c7226b1ba70af1`
 - **Documentation**: [docs/FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md) remains unaltered and authoritative.
-- **Scope Compliance**: Strictly restricted to Batch A and Batch A.1 findings. No Batch B findings touched.
+- **Scope Compliance**: Strictly restricted to Batch A, Batch A.1, and Batch A.2 findings. No Batch B findings touched.

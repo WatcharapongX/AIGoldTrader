@@ -545,6 +545,7 @@ async def test_22_token_budget_exceeded_handled_safely(base_ai_input):
 async def test_23_ai_service_down_does_not_affect_risk_decision(base_ai_input):
     risk_dec = RiskDecision(
         id="dec_safe_01",
+        account_id="00000000-0000-0000-0000-000000000001",
         evaluation_intent_id="intent_01",
         candidate_id="cand_01",
         plan_id="plan_01",
@@ -834,6 +835,7 @@ async def test_33_assembler_account_mismatch_fails_closed(db_session):
         entry_upper=Decimal("2501.00"),
         stop_loss=Decimal("2495.00"),
         stop_distance=Decimal("5.00"),
+        account_id=str(acc_a.id),
         account_snapshot_id="snap_a",
         policy_version="risk-policy-1.0.0",
         dependency_fingerprint="fp_dec",
@@ -965,6 +967,7 @@ async def test_35_assembler_expired_risk_decision_fails_closed(db_session):
         entry_upper=Decimal("2501.00"),
         stop_loss=Decimal("2495.00"),
         stop_distance=Decimal("5.00"),
+        account_id=str(acc_id),
         account_snapshot_id="snap_exp",
         policy_version="risk-policy-1.0.0",
         dependency_fingerprint="fp_exp",
@@ -1046,6 +1049,7 @@ async def test_36_assembler_released_reservation_fails_closed(db_session):
         entry_upper=Decimal("2501.00"),
         stop_loss=Decimal("2495.00"),
         stop_distance=Decimal("5.00"),
+        account_id=str(acc_id),
         account_snapshot_id="snap_rel",
         policy_version="risk-policy-1.0.0",
         dependency_fingerprint="fp_rel",

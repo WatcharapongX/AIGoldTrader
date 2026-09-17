@@ -287,7 +287,7 @@ class RiskDecision(BaseModel):
     stop_distance: Decimal = Field(ge=0)
     portfolio_exposure_before: Decimal = Field(ge=0)
     portfolio_exposure_after: Decimal = Field(ge=0)
-    account_id: str = ""
+    account_id: str
     account_snapshot_id: str
     symbol_specification_id: str
     policy_version: str

@@ -157,7 +157,10 @@ def client(db_session, fake_redis) -> TestClient:
 async def admin_user(db_session) -> User:
     session, _ = db_session
     user = await create_user(session, email="admin@example.com", password="admin-pass-123", role=Role.ADMIN)
+    from sqlalchemy import select
+
     from app.models.account import Account, TradingMode
+    from app.models.risk import AccountSnapshotRecord
 
     acc = Account(
         name="default_paper_account",
@@ -168,6 +171,20 @@ async def admin_user(db_session) -> User:
         is_active=True,
     )
     session.add(acc)
+    await session.flush()
+
+    snap = (
+        await session.scalars(
+            select(AccountSnapshotRecord).where(AccountSnapshotRecord.account_id == "default_paper_account")
+        )
+    ).first()
+    if snap:
+        snap.account_id = str(acc.id)
+        if snap.payload:
+            payload = dict(snap.payload)
+            payload["account_id"] = str(acc.id)
+            snap.payload = payload
+
     await session.commit()
     return user
 
