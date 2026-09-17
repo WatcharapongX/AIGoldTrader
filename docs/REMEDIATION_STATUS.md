@@ -1,9 +1,9 @@
-# Post-Freeze Remediation Status: Batch A, Batch A.1, Batch A.2, Batch A.3 & Batch A.3.1
+# Post-Freeze Remediation Status: Batch A, Batch A.1, Batch A.2, Batch A.3, Batch A.3.1 & Batch A.3.2
 
 ## Executive Summary
-This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), and **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening) of the post-freeze audit findings for **AIGoldTrader**.
+This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening), and **Correction Batch A.3.2** (Database Config Compatibility & Cross-Domain Fixture Alignment) of the post-freeze audit findings for **AIGoldTrader**.
 
-All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004), corrective findings assigned to Batch A.1 (BATCHA-P1-001 through BATCHA-P1-003, BATCHA-P2-001, BATCHA-P3-001), hardening findings assigned to Batch A.2 (BATCHA1-NEW-P1-001, BATCHA1-NEW-P2-001, BATCHA1-NEW-P2-002, BATCHA1-NEW-P3-001), final referential integrity findings assigned to Batch A.3 (BATCHA2-NEW-P1-001, BATCHA2-NEW-P2-001, BATCHA2-NEW-P2-002), and exact revision guard hardening assigned to Batch A.3.1 (BATCHA3-P1) have been remediated, verified against PostgreSQL 18.6 and SQLite runtimes, and integrated into the continuous test suite. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004), corrective findings assigned to Batch A.1 (BATCHA-P1-001 through BATCHA-P1-003, BATCHA-P2-001, BATCHA-P3-001), hardening findings assigned to Batch A.2 (BATCHA1-NEW-P1-001, BATCHA1-NEW-P2-001, BATCHA1-NEW-P2-002, BATCHA1-NEW-P3-001), referential integrity findings assigned to Batch A.3 (BATCHA2-NEW-P1-001, BATCHA2-NEW-P2-001, BATCHA2-NEW-P2-002), exact revision guard hardening assigned to Batch A.3.1 (BATCHA3-P1), and database config compatibility closure assigned to Batch A.3.2 (BATCHA3.1-NEW-P2-001) have been remediated, verified against PostgreSQL 18.6 and SQLite runtimes, and integrated into the continuous test suite. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
 
 ---
 
@@ -178,6 +178,15 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
   - In `safe_db_upgrade.py`: Added `classify_revision_action()`. Requires normalizer on exact `REV_0012`, allows direct Alembic upgrade on exact `REV_0013/0014/0015`, and aborts with exit code 1 BEFORE normalizer and BEFORE Alembic subprocess on any unsupported revision, guaranteeing zero mutations.
   - Added dedicated test suite `backend/tests/test_migration_revision_guards.py` (43 tests) and integration tests in `backend/tests/integration/test_batch_a1_postgres.py`.
 
+### 5. BATCHA3.1-NEW-P2-001: Database Configuration Compatibility Alignment & AI Test Fixture Invariant Closure (Correction Batch A.3.2)
+- **Defect**:
+  1. `safe_db_upgrade.py` resolved database connections strictly by checking `DATABASE_URL`, ignoring application `Settings.database_url` authority which supports complete `POSTGRES_*` parameters. When `DATABASE_URL` was absent in operational environments with complete `POSTGRES_*`, `safe_db_upgrade` failed closed with exit code 1.
+  2. Cross-domain AI PostgreSQL fixture created `RiskDecisionRecord` payload without `account_id`, violating the database check constraint `ck_risk_decision_payload_account_id`.
+- **Remediation**:
+  1. In `backend/app/scripts/safe_db_upgrade.py`: Replaced isolated `dotenv_values` check with `resolve_upgrade_database_url()` using application `Settings` authority. Supports explicit `--db-url` override, normal `Settings.database_url` (supporting both `DATABASE_URL` and complete `POSTGRES_*`), and fails closed if `DATABASE_URL_OVERRIDE` is unexpectedly configured in an operational context. Never prints or logs secrets.
+  2. In `backend/tests/test_ai_authoritative_api.py` and `backend/tests/integration/test_ai_safety_postgres.py`: Updated test fixtures so `RiskDecisionRecord.account_id` and `payload["account_id"]` contain the same canonical existing Account UUID. Production database constraints remained 100% strict and unaltered.
+  3. Added comprehensive configuration matrix test suite `backend/tests/test_safe_db_upgrade_config.py` (14 tests) verifying cases A through G.
+
 ---
 
 ## Verification Matrix
@@ -186,15 +195,18 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
 |---|---|---|---|
 | **Batch A Remediation Unit Suite** | AUD-P1-001 through AUD-P1-004 | **PASS** | 7 tests passed (`tests/test_batch_a_remediation.py`) |
 | **Exact Revision Guard Unit Suite** | Strict canonical revisions (0012-0015), fail-closed on unknown/corrupt, zero-mutation guarantee | **PASS** | 43 tests passed in 0.81s (`tests/test_migration_revision_guards.py`) |
+| **Database Config Matrix Unit Suite** | Cases A-G: DATABASE_URL, POSTGRES_*, precedence, partial config, override isolation, --db-url | **PASS** | 14 tests passed in 0.38s (`tests/test_safe_db_upgrade_config.py`) |
 | **Batch A.3 / A.3.1 PostgreSQL Integration** | Safe migration normalizer, exact revision guards, 0015 invariants, real FK restrict, payload check constraint, hydration, lifecycle races, RBAC & tenant isolation | **PASS** | 15 tests passed (`tests/integration/test_batch_a1_postgres.py`) |
 | **PostgreSQL 18 Concurrency Integration** | Risk concurrency, multi-account, migration 0015 | **PASS** | 8 tests passed (`tests/integration/test_risk_postgres.py`) |
 | **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle (up to 0015) | **PASS** | 12 tests passed (`tests/integration/test_postgres.py`) |
-| **Full Backend Unit Suite** | Complete backend test suite | **PASS** | 831 passed, 0 failed (`pytest --ignore=tests/integration -q`) |
-| **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 10.5s (`npm test -- --run`) |
+| **Cross-Domain AI PostgreSQL Suite** | Phase 6.1 AI account reservation, payload account_id check constraint, authoritative API | **PASS** | 5 tests passed (`test_ai_safety_postgres.py`, `test_analysis_postgres.py`, `test_evaluation_identity_postgres.py`) |
+| **Full Backend Unit Suite** | Complete backend test suite | **PASS** | 845 passed, 0 failed (`pytest --ignore=tests/integration -q`) |
+| **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 7.7s (`npm test -- --run`) |
 | **Frontend Typecheck** | TypeScript static typing | **PASS** | 0 errors (`npm run typecheck`) |
 | **Frontend ESLint** | Linter rules & code hygiene | **PASS** | 0 errors (`npm run lint`) |
 | **Next.js Production Build** | Production compiler & asset optimization | **PASS** | 20 routes compiled cleanly with Turbopack (`npm run build`) |
 | **Operational Service Health** | PM2 runtime health & readiness | **PASS** | `/healthz` (200 OK), `/readyz` (200 OK, database: true) |
+| **Operational Safe DB Upgrade** | Canonical CLI upgrade command in live POSTGRES_*-only environment | **PASS** | Exit code 0, 0015_batch_a3_risk_account_fk head verified |
 
 ---
 

@@ -16,12 +16,13 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import psycopg
-from dotenv import dotenv_values
 from sqlalchemy.engine import make_url
 
+from app.core.config import Settings
 from app.scripts.normalize_0012_accounts import (
     KNOWN_UPGRADED_REVISIONS,
     REV_0012,
@@ -42,6 +43,42 @@ def mask_url(url_str: str) -> str:
         return u.render_as_string(hide_password=True)
     except Exception:
         return re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", url_str)
+
+
+def resolve_upgrade_database_url(
+    explicit_db_url: str | None = None,
+    settings_factory: Callable[[], Settings] | None = None,
+) -> str:
+    """Resolves the database URL for safe upgrade following application Settings authority.
+
+    Resolution order:
+    1. Explicit db_url parameter (e.g. from --db-url CLI flag).
+    2. Normal application Settings resolution (supporting DATABASE_URL or complete POSTGRES_*).
+
+    Invariants:
+    - Fails closed if DATABASE_URL_OVERRIDE is present during normal operational resolution.
+    - Fails closed if neither DATABASE_URL nor complete POSTGRES_* is available.
+    - Fails closed if POSTGRES_* is incomplete.
+    - Deterministically loads backend/.env if it exists.
+    - Environment variables override .env values per normal application semantics.
+    """
+    if explicit_db_url and explicit_db_url.strip():
+        return explicit_db_url.strip()
+
+    if settings_factory is not None:
+        settings = settings_factory()
+    else:
+        backend_dir = Path(__file__).resolve().parents[2]
+        env_file = backend_dir / ".env"
+        settings = Settings(_env_file=env_file if env_file.exists() else None)  # type: ignore[call-arg]
+
+    if settings.database_url_override:
+        raise ValueError(
+            "DATABASE_URL_OVERRIDE is reserved for isolated testing and cannot be used "
+            "for operational safe_db_upgrade. Use explicit --db-url if testing."
+        )
+
+    return settings.database_url
 
 
 def get_current_revision(conn: psycopg.Connection) -> str | None:
@@ -87,21 +124,24 @@ def classify_revision_action(current_rev: str | None) -> str:
     return "UNSUPPORTED"
 
 
-def run_safe_upgrade(db_url: str | None = None) -> int:
+def run_safe_upgrade(
+    db_url: str | None = None,
+    settings_factory: Callable[[], Settings] | None = None,
+) -> int:
     """Executes the safe upgrade workflow."""
-    if not db_url:
-        backend_dir = Path(__file__).resolve().parents[2]
-        env_config = dotenv_values(backend_dir / ".env")
-        db_url = os.environ.get("DATABASE_URL") or env_config.get("DATABASE_URL")
-
-    if not db_url:
-        logger.error("DATABASE_URL is not set and could not be discovered from .env")
+    try:
+        resolved_url = resolve_upgrade_database_url(db_url, settings_factory=settings_factory)
+    except ValueError as cfg_err:
+        logger.error("Database configuration error: %s. Failing closed.", cfg_err)
+        return 1
+    except Exception as err:
+        logger.error("Failed to resolve database configuration: %s. Failing closed.", err)
         return 1
 
-    masked = mask_url(db_url)
+    masked = mask_url(resolved_url)
     logger.info("Starting safe database upgrade against %s", masked)
 
-    url_obj = make_url(db_url)
+    url_obj = make_url(resolved_url)
     driver_less = url_obj.set(drivername="postgresql").render_as_string(hide_password=False)
 
     try:
@@ -151,7 +191,7 @@ def run_safe_upgrade(db_url: str | None = None) -> int:
     alembic_ini = backend_dir / "alembic.ini"
     logger.info("Alembic upgrade starting to head using config %s ...", alembic_ini.name)
 
-    env = {**os.environ, "DATABASE_URL": db_url}
+    env = {**os.environ, "DATABASE_URL": resolved_url}
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "alembic", "-c", str(alembic_ini), "upgrade", "head"],
         cwd=str(backend_dir),

@@ -308,7 +308,10 @@ async def seed_authoritative_chain(session, account_id: str, now: dt.datetime, s
         dependency_fingerprint=f"risk-dependency-{suffix}",
         as_of=now,
         expires_at=now + dt.timedelta(minutes=15),
-        payload={"trade_plan_fingerprint": compute_trade_plan_fingerprint(candidate, candidate.plan)},
+        payload={
+            "account_id": account_id,
+            "trade_plan_fingerprint": compute_trade_plan_fingerprint(candidate, candidate.plan),
+        },
     )
     reservation = RiskReservationRecord(
         id=f"reservation-{suffix}",
@@ -474,7 +477,7 @@ async def test_account_bound_query_selects_older_correct_decision_before_limit(
         dependency_fingerprint="risk-dependency-newer-b",
         as_of=now + dt.timedelta(milliseconds=500),
         expires_at=now + dt.timedelta(minutes=15),
-        payload={},
+        payload={"account_id": str(account_b.id)},
     )
     reservation_b = RiskReservationRecord(
         id="reservation-newer-b",

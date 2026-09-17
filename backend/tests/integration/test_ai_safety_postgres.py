@@ -106,7 +106,7 @@ def test_ai_account_reservation_and_authoritative_api_postgres(isolated_postgres
                 dependency_fingerprint="risk-dependency-postgres-b",
                 as_of=now + dt.timedelta(seconds=1),
                 expires_at=now + dt.timedelta(minutes=15),
-                payload={},
+                payload={"account_id": str(account_b.id)},
             )
             reservation_b = RiskReservationRecord(
                 id="reservation-postgres-b",
