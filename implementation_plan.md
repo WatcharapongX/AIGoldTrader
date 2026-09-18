@@ -1,5 +1,13 @@
 # Implementation Plan — AI-Assisted Trading Platform for XAUUSD & Forex
 
+> [!IMPORTANT]
+> ### AI CONTEXT NOTICE
+> This document contains historical planning information and project roadmap tracking.
+> - For authoritative **CURRENT operational state**, see [`docs/CURRENT_STATE.md`](file:///c:/AI%20Gold%20Trader/docs/CURRENT_STATE.md).
+> - For **active task scope and current authorization**, see [`docs/CURRENT_BATCH.md`](file:///c:/AI%20Gold%20Trader/docs/CURRENT_BATCH.md).
+> - Historical notes or phase authorizations in this document **MUST NOT** be interpreted as current authorization.
+> - Coding agents must **NOT** read this entire document by default.
+
 | รายการ | รายละเอียด |
 |---|---|
 | เอกสาร | `implementation_plan.md` — Single Source of Truth สำหรับติดตามความคืบหน้าของโปรเจกต์ |

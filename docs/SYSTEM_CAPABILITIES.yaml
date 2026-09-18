@@ -1,0 +1,73 @@
+# Machine-Readable Capability Registry — AIGoldTrader
+# Authoritative baseline for AI coding agents and automated inspection.
+
+version: "1.0"
+last_verified: "2026-09-18"
+repository: "WatcharapongX/AIGoldTrader"
+branch: "main"
+
+trading_safety:
+  trading_mode: PAPER
+  live_auto_trading: false
+  broker_execution: false
+  authority_order:
+    - kill_switch
+    - risk_engine
+    - strategy_engine
+    - ai_advisory
+    - human_operator
+
+capabilities:
+  market_data:
+    status: implemented
+    details: "Real-time quotes, M1-W1 candle aggregation, multi-provider abstraction"
+
+  market_structure:
+    status: implemented
+    details: "Swing points, BOS, CHoCH, MSS, order blocks, FVGs"
+
+  smc_ict:
+    status: implemented
+    details: "Confluence scoring, liquidity analysis, multi-timeframe bias"
+
+  strategy_engine:
+    status: implemented
+    details: "STRAT01-STRAT06, 7 trader profiles, 8 canonical candidate states"
+
+  risk_engine:
+    status: implemented
+    details: "Portfolio risk reservations, gross exposure checks, fail-closed kill switch"
+
+  ai_agents:
+    status: implemented
+    analytical_agents: 6
+    meta_controller: true
+    authority: advisory_only
+
+  external_ai:
+    status: hardening
+    details: "Provider abstraction exists, fail-closed offline fallback, fixture mode default"
+
+  browser_auth:
+    status: implemented_pending_verification
+    details: "HttpOnly refresh cookie, memory-only access token, Web Locks, requestEpoch 401 gate, global startup storage cutover (Batches B1-B3.3)"
+
+  backtesting:
+    status: not_implemented
+    details: "Strategy Lab provides evaluation snapshots only; walk-forward backtest engine is absent"
+
+  paper_trading:
+    status: not_implemented
+    details: "Simulation execution engine absent; TRADING_MODE=PAPER is safety simulation flag only"
+
+  oms_execution:
+    status: not_implemented
+    details: "Order management system not implemented"
+
+  position_management:
+    status: not_implemented
+    details: "Live position tracking and reconciliation not implemented"
+
+  broker_execution:
+    status: not_implemented
+    details: "Broker adapters and MT5 order routing absent; order_send absent"

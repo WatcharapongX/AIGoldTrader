@@ -1,5 +1,12 @@
 # Post-Freeze Remediation Status: Batch A through Batch B3
 
+> [!NOTE]
+> ### AI CONTEXT NOTICE
+> This document is detailed **Tier 3 Audit Evidence** recording the complete technical implementation and forensic evidence of Batches A through B3.3.
+> - For authoritative **CURRENT operational state**, see [`docs/CURRENT_STATE.md`](file:///c:/AI%20Gold%20Trader/docs/CURRENT_STATE.md).
+> - For **active task scope**, see [`docs/CURRENT_BATCH.md`](file:///c:/AI%20Gold%20Trader/docs/CURRENT_BATCH.md).
+> - Coding agents must **NOT** read this entire file by default during routine development tasks; read only when conducting formal security audits or gate verification.
+
 ## Executive Summary
 This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening), **Correction Batch A.3.2** (Database Config Compatibility & Cross-Domain Fixture Alignment), **Batch B1** (Atomic Refresh Rotation and Session Families), **Batch B2** (Secure Refresh Cookie and Browser Auth Contract), **Correction Batch B2.1** (Refresh Cookie Contract Closure), and **Batch B3** (Memory-Only Access Token, Auth Coordinator, Multi-Tab Web Locks/BroadcastChannel, and First-Frame WebSocket Authentication) of the post-freeze audit findings for **AIGoldTrader**.
 

@@ -1,5 +1,12 @@
 # AIGoldTrader — Feature Freeze Baseline (FC-12)
 
+> [!NOTE]
+> ### AI CONTEXT NOTICE
+> This document records the historical functional completion freeze baseline (FC-12 as of 2026-09-16).
+> - For authoritative **CURRENT operational state**, see [`docs/CURRENT_STATE.md`](file:///c:/AI%20Gold%20Trader/docs/CURRENT_STATE.md).
+> - For **active task scope**, see [`docs/CURRENT_BATCH.md`](file:///c:/AI%20Gold%20Trader/docs/CURRENT_BATCH.md).
+> - This file is **Tier 3 Audit Evidence**; coding agents must **NOT** read this file by default unless performing freeze verification or regression audits.
+
 - **Freeze Date**: 2026-09-16
 - **Starting Baseline HEAD**: `56839e1c3b09a1849e76ee243dc15ce5f851dcaf`
 - **Feature Freeze Status**: **FROZEN & VERIFIED**
