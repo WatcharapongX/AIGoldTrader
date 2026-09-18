@@ -65,6 +65,16 @@ All confirmed findings assigned through Batch B1 remain closed (**AUD-P1-005** r
   - **Realistic Multi-Tab Test Suite**: Created isolated multi-tab test harness in `frontend/tests/b3-auth-coordinator.test.cjs` with independent module memory per tab and shared cookie/locks/channel simulation. Added 17 deterministic tests covering Web Locks cold bootstrap, fallback race recovery, session-changed fanout, stale token discard, second-401 canonical invalidation, and WebSocket 4401 exhaustion.
 - **Audit Status**: **AUD-P2-002: READY FOR FINAL INDEPENDENT VERIFICATION**.
 
+### 5. BATCH B3.2: Global Legacy Auth Storage Cutover (Correction Batch B3.2)
+- **Defects Addressed**:
+  - Legacy persistent tokens (`access_token`, `refresh_token`) could persist in browser `localStorage` or `sessionStorage` when users directly landed on `/login` without triggering `AppShell.hydrate()` or `AuthCoordinator.bootstrap()`.
+- **Remediation**:
+  - **Global Application Entry Sanitation**: Created `frontend/src/components/auth/AuthStorageSanitizer.tsx` and mounted it in `frontend/src/app/layout.tsx` (preserving root layout as a Server Component). Purges legacy `access_token` and `refresh_token` from both `localStorage` and `sessionStorage` on every route entry (`/login`, `/dashboard`, deep links) unconditionally without reading, decoding, migrating, or transmitting them.
+  - **Memory Token Safety**: Global sanitizer does not call `clearSession()`, `clearAccessToken()`, or `advanceSessionEpoch()`, ensuring active in-memory tokens and session epochs are preserved across client-side page navigations.
+  - **Test Coverage**: Added `frontend/tests/b3-2-storage-cutover.test.cjs` with 7 deterministic tests verifying direct `/login` entry purge, zero legacy token reads, zero network transmission, memory token preservation during navigation, and login/bootstrap regressions.
+  - **B3/B3.1 Invariants Preserved**: Web Locks, BroadcastChannel, memory-only token manager, and WebSocket first-frame contracts remain completely unchanged.
+- **Audit Status**: **AUD-P2-002: READY FOR FINAL INDEPENDENT VERIFICATION**.
+
 ---
 
 ## Remediated Audit Findings: Batch B1
