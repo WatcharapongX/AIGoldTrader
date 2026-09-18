@@ -1,9 +1,26 @@
-# Post-Freeze Remediation Status: Batch A, Batch A.1, Batch A.2, Batch A.3, Batch A.3.1 & Batch A.3.2
+# Post-Freeze Remediation Status: Batch A through Batch B1
 
 ## Executive Summary
-This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening), and **Correction Batch A.3.2** (Database Config Compatibility & Cross-Domain Fixture Alignment) of the post-freeze audit findings for **AIGoldTrader**.
+This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening), **Correction Batch A.3.2** (Database Config Compatibility & Cross-Domain Fixture Alignment), and **Batch B1** (Atomic Refresh Rotation and Session Families) of the post-freeze audit findings for **AIGoldTrader**.
 
-All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004), corrective findings assigned to Batch A.1 (BATCHA-P1-001 through BATCHA-P1-003, BATCHA-P2-001, BATCHA-P3-001), hardening findings assigned to Batch A.2 (BATCHA1-NEW-P1-001, BATCHA1-NEW-P2-001, BATCHA1-NEW-P2-002, BATCHA1-NEW-P3-001), referential integrity findings assigned to Batch A.3 (BATCHA2-NEW-P1-001, BATCHA2-NEW-P2-001, BATCHA2-NEW-P2-002), exact revision guard hardening assigned to Batch A.3.1 (BATCHA3-P1), and database config compatibility closure assigned to Batch A.3.2 (BATCHA3.1-NEW-P2-001) have been remediated, verified against PostgreSQL 18.6 and SQLite runtimes, and integrated into the continuous test suite. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+All confirmed findings assigned through Batch A.3.2 remain closed. Batch B1 remediates **AUD-P1-005** in implementation commit `42569ede5b3cb1926bb1faa770cdc55626bd6515`. It was verified against PostgreSQL 18.6 and SQLite runtimes and integrated into the continuous test suite. **AUD-P2-002 remains OPEN** and is explicitly deferred to Batch B2/B3; B1 does not introduce browser-cookie, BFF/proxy, CSRF, CSP, or client-storage changes. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+
+---
+
+## Remediated Audit Findings: Batch B1
+
+### 1. AUD-P1-005: Atomic Refresh Rotation and Session-Family Replay Containment
+- **Defect**: Refresh-token rotation did not atomically consume a single-use session row, so concurrent requests could both pass validation and mint independent successors. The session model also lacked family identity and consumed-history state needed to contain replay.
+- **Implementation**: Commit `42569ede5b3cb1926bb1faa770cdc55626bd6515`.
+- **Remediation**:
+  - Added migration `0016_batch_b_refresh_families`, including `sessions.family_id`, `sessions.consumed_at`, a family index, backfill, and a one-time revocation of active legacy sessions. The cutover intentionally forces existing users to sign in again; downgrade never reactivates revoked sessions.
+  - Added a conditional, single-statement `UPDATE ... RETURNING` consume operation requiring an unconsumed, unrevoked, unexpired matching hash. Exactly one concurrent request can acquire the original session.
+  - Created each login as a new session family and each successful refresh successor in the same family. The database session row is authoritative for user identity, while current role is loaded from the current user record.
+  - Committed original consumption, successor creation, and `TOKEN_REFRESH` audit atomically. Any failure rolls the transaction back, so the original token can be retried once and no orphan successor survives.
+  - Classified replay using only the stored token hash: replay within the five-second grace window is rejected and audited without revoking the valid successor; later replay revokes every active session in the family and emits `REFRESH_REUSE` and `SESSION_REVOKED` audit events.
+  - JWT/session subject mismatch and missing or inactive users fail closed, terminate the active family, and return the same generic `401 Invalid refresh token` contract as malformed, unknown, expired, or revoked tokens.
+  - Preserved the existing JSON token-pair API contract and logout-all-active-sessions behavior while retaining consumed, expired, and revoked history.
+- **Scope Boundary**: **AUD-P2-002 remains OPEN for Batch B2/B3**. No cookie transport, local-storage, proxy/BFF, CSRF, or CSP work is included in B1.
 
 ---
 
@@ -193,14 +210,18 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
 
 | Suite / Gate | Test Scope | Result | Details |
 |---|---|---|---|
+| **Batch B1 Focused Unit Gate** | Login family metadata, atomic successor behavior, grace replay, late replay, rollback/retry, inactive user, current role, JWT/session mismatch, generic failure contract, revision guards | **PASS** | 61 passed, 0 failed |
+| **Batch B1 PostgreSQL Concurrency Gate** | 100 barrier-released two-client refresh races using independent sessions | **PASS** | 100/100 produced exactly one `200` and one `401`; one consumed original and one active same-family successor |
+| **Batch B1 PostgreSQL Replay / Rollback / Migration Gate** | 0015 to 0016 cutover and backfill, immediate replay, late family revocation, audit-failure rollback and retry | **PASS** | 3 tests passed (`tests/integration/test_batch_b1_postgres.py`) |
+| **Complete PostgreSQL Integration Gate** | All migration, foundation, Batch A, risk, AI, market storage, and Batch B1 integration tests | **PASS** | 49 passed, 0 failed against disposable database `aigoldtrader_batcha3_test`; operational database `ai_trading` was not used or modified |
 | **Batch A Remediation Unit Suite** | AUD-P1-001 through AUD-P1-004 | **PASS** | 7 tests passed (`tests/test_batch_a_remediation.py`) |
-| **Exact Revision Guard Unit Suite** | Strict canonical revisions (0012-0015), fail-closed on unknown/corrupt, zero-mutation guarantee | **PASS** | 43 tests passed in 0.81s (`tests/test_migration_revision_guards.py`) |
+| **Exact Revision Guard Unit Suite** | Strict canonical revisions (0012-0016), fail-closed on unknown/corrupt, zero-mutation guarantee | **PASS** | 45 tests passed (`tests/test_migration_revision_guards.py`) |
 | **Database Config Matrix Unit Suite** | Cases A-G: DATABASE_URL, POSTGRES_*, precedence, partial config, override isolation, --db-url | **PASS** | 14 tests passed in 0.38s (`tests/test_safe_db_upgrade_config.py`) |
 | **Batch A.3 / A.3.1 PostgreSQL Integration** | Safe migration normalizer, exact revision guards, 0015 invariants, real FK restrict, payload check constraint, hydration, lifecycle races, RBAC & tenant isolation | **PASS** | 15 tests passed (`tests/integration/test_batch_a1_postgres.py`) |
 | **PostgreSQL 18 Concurrency Integration** | Risk concurrency, multi-account, migration 0015 | **PASS** | 8 tests passed (`tests/integration/test_risk_postgres.py`) |
-| **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle (up to 0015) | **PASS** | 12 tests passed (`tests/integration/test_postgres.py`) |
+| **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle (up to 0016) | **PASS** | 12 tests passed (`tests/integration/test_postgres.py`) |
 | **Cross-Domain AI PostgreSQL Suite** | Phase 6.1 AI account reservation, payload account_id check constraint, authoritative API | **PASS** | 5 tests passed (`test_ai_safety_postgres.py`, `test_analysis_postgres.py`, `test_evaluation_identity_postgres.py`) |
-| **Full Backend Unit Suite** | Complete backend test suite | **PASS** | 845 passed, 0 failed (`pytest --ignore=tests/integration -q`) |
+| **Full Backend Unit Suite** | Complete backend test suite excluding explicitly marked live-external tests | **PASS** | 855 passed, 11 deselected, 0 failed (`pytest --ignore=tests/integration -q`) |
 | **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 7.7s (`npm test -- --run`) |
 | **Frontend Typecheck** | TypeScript static typing | **PASS** | 0 errors (`npm run typecheck`) |
 | **Frontend ESLint** | Linter rules & code hygiene | **PASS** | 0 errors (`npm run lint`) |
@@ -213,4 +234,8 @@ All confirmed audit findings assigned to Batch A (AUD-P1-001 through AUD-P1-004)
 ## Governance & Freeze Integrity
 - **Freeze Baseline SHA**: `4835051b7870b293a9036a85d5c7226b1ba70af1`
 - **Documentation**: [docs/FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md) remains unaltered and authoritative.
-- **Scope Compliance**: Strictly restricted to Batch A, Batch A.1, Batch A.2, and Batch A.3 findings. No Batch B findings touched.
+- **Batch A Status**: Remains **CLOSED**; Batch B1 did not alter its authority or trading-safety invariants.
+- **Batch B1 Status**: **AUD-P1-005 REMEDIATED** by implementation commit `42569ede5b3cb1926bb1faa770cdc55626bd6515` and migration `0016_batch_b_refresh_families`.
+- **Deferred Finding**: **AUD-P2-002 remains OPEN** for Batch B2/B3.
+- **Operational Safety**: Migration 0016 was verified only against the isolated disposable PostgreSQL test database. The operational database `ai_trading` was never targeted or modified during Batch B1 implementation.
+- **Scope Compliance**: Strictly restricted to Batch B1 atomic refresh rotation and session-family containment. No Batch B2, Batch B3, trading, execution, or broker-routing work was performed.
