@@ -1,4 +1,4 @@
-import type { User, TokenPair, HealthResponse, ReadyResponse } from '@/types';
+import type { User, AccessTokenResponse, HealthResponse, ReadyResponse } from '@/types';
 
 export class ApiContractError extends Error {}
 
@@ -46,15 +46,17 @@ function expiryInstant(value: string): number {
   const offset = (offsetHours * 60 + offsetMinutes) * (zone[0] === '-' ? -1 : 1);
   return date.getTime() - offset * 60_000;
 }
-export function parseTokenPair(value: unknown, now: number = Date.now()): TokenPair {
+export function parseAccessTokenResponse(value: unknown, now: number = Date.now()): AccessTokenResponse {
   const data = object(value);
   const expires_at = string(data.expires_at);
   if (data.token_type !== 'bearer' || expiryInstant(expires_at) <= now) return invalid();
   return {
-    access_token: token(data.access_token), refresh_token: token(data.refresh_token),
-    token_type: data.token_type, expires_at,
+    access_token: token(data.access_token),
+    token_type: data.token_type,
+    expires_at,
   };
 }
+export const parseTokenPair = parseAccessTokenResponse;
 export function parseHealth(value: unknown): HealthResponse {
   const data = object(value);
   if (data.status !== 'ok') return invalid();

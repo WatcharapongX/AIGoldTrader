@@ -1,9 +1,36 @@
-# Post-Freeze Remediation Status: Batch A through Batch B1
+# Post-Freeze Remediation Status: Batch A through Batch B2
 
 ## Executive Summary
-This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening), **Correction Batch A.3.2** (Database Config Compatibility & Cross-Domain Fixture Alignment), and **Batch B1** (Atomic Refresh Rotation and Session Families) of the post-freeze audit findings for **AIGoldTrader**.
+This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening), **Correction Batch A.3.2** (Database Config Compatibility & Cross-Domain Fixture Alignment), **Batch B1** (Atomic Refresh Rotation and Session Families), and **Batch B2** (Secure Refresh Cookie and Browser Auth Contract) of the post-freeze audit findings for **AIGoldTrader**.
 
-All confirmed findings assigned through Batch A.3.2 remain closed. Batch B1 remediates **AUD-P1-005** in implementation commit `42569ede5b3cb1926bb1faa770cdc55626bd6515`. It was verified against PostgreSQL 18.6 and SQLite runtimes and integrated into the continuous test suite. **AUD-P2-002 remains OPEN** and is explicitly deferred to Batch B2/B3; B1 does not introduce browser-cookie, BFF/proxy, CSRF, CSP, or client-storage changes. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+All confirmed findings assigned through Batch B1 remain closed. Batch B2 partially remediates **AUD-P2-002** (Browser-Safe Refresh Token Storage and Origin CSRF Contract). **AUD-P1-005** remains **CLOSED**. **AUD-P2-002** status is updated to **PARTIAL / OPEN** pending the final client-side in-memory token coordinator and tab synchronization scheduled for **Batch B3**. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+
+---
+
+## Remediated Audit Findings: Batch B2
+
+### 1. AUD-P2-002: Secure Refresh Cookie and Browser Auth Contract (Partial Remediation)
+- **Defect**: Refresh token was transmitted in JSON response bodies and request bodies, exposing it to client-side JavaScript storage (`localStorage`), XSS exfiltration, and cross-site request forgery without strict Origin binding.
+- **Implementation**: Batch B2 implementation.
+- **Remediation**:
+  - **HttpOnly Refresh Cookie Transport**:
+    - Refresh tokens are completely removed from JSON responses (`AccessTokenResponse` returns only `access_token`, `token_type: "bearer"`, `expires_at`).
+    - Refresh cookie is configured as host-only, `HttpOnly`, `SameSite=Strict`, `Path=/`, with no `Domain` attribute.
+    - Uses `__Host-aigold_refresh` with `Secure=True` in production/staging environments, and `aigold_refresh_dev` (plain HTTP compatible) in local development.
+  - **Strict Origin CSRF Validation**:
+    - Added `validate_auth_origin()` guarding all browser auth mutation endpoints (`POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`).
+    - Rejects missing `Origin` header or unapproved origin with `403 Forbidden` prior to executing any database query or session mutation.
+  - **Concurrency & Terminal Cookie Invariants**:
+    - Concurrent refresh race loser within the 5-second grace window receives `401 Unauthorized` without clearing the refresh cookie (preserves winner's freshly rotated cookie).
+    - Terminal failures (expired session, revoked token, late replay beyond 5s grace, inactive user, subject mismatch, logout) explicitly emit `Set-Cookie: ... Max-Age=0` clearing the cookie.
+  - **Same-Origin Relative /api Proxy**:
+    - Browser requests route through same-origin relative `/api` via Next.js proxy rewrite; eliminates browser reliance on direct cross-origin calls to `http://localhost:8000/api`.
+  - **Frontend Token Cleanup**:
+    - Removed `refresh_token` from client `localStorage`, `sessionStorage`, and `document.cookie`.
+    - Removed client-side cookie manipulation (`syncTokenCookie` eliminated).
+- **Scope Boundary / Transitional Debt**:
+  - `access_token` temporarily remains stored in browser `localStorage` as transitional debt until **Batch B3** introduces the in-memory token coordinator with Web Locks and BroadcastChannel tab synchronization.
+  - Finding **AUD-P2-002** remains **PARTIAL / OPEN** until Batch B3 closure.
 
 ---
 
@@ -210,32 +237,28 @@ All confirmed findings assigned through Batch A.3.2 remain closed. Batch B1 reme
 
 | Suite / Gate | Test Scope | Result | Details |
 |---|---|---|---|
+| **Batch B2 Refresh Cookie & Origin Suite** | Cookie attributes (`HttpOnly`, `SameSite=Strict`, `Path=/`, no domain), origin allowlist & normalization, origin rejection (403), loser cookie preservation (no `Max-Age=0`), terminal failure cookie clear (`Max-Age=0`) | **PASS** | 10 passed (`tests/test_batch_b2_cookies.py`) |
 | **Batch B1 Focused Unit Gate** | Login family metadata, atomic successor behavior, grace replay, late replay, rollback/retry, inactive user, current role, JWT/session mismatch, generic failure contract, revision guards | **PASS** | 61 passed, 0 failed |
-| **Batch B1 PostgreSQL Concurrency Gate** | 100 barrier-released two-client refresh races using independent sessions | **PASS** | 100/100 produced exactly one `200` and one `401`; one consumed original and one active same-family successor |
-| **Batch B1 PostgreSQL Replay / Rollback / Migration Gate** | 0015 to 0016 cutover and backfill, immediate replay, late family revocation, audit-failure rollback and retry | **PASS** | 3 tests passed (`tests/integration/test_batch_b1_postgres.py`) |
-| **Complete PostgreSQL Integration Gate** | All migration, foundation, Batch A, risk, AI, market storage, and Batch B1 integration tests | **PASS** | 49 passed, 0 failed against disposable database `aigoldtrader_batcha3_test`; operational database `ai_trading` was not used or modified |
-| **Batch A Remediation Unit Suite** | AUD-P1-001 through AUD-P1-004 | **PASS** | 7 tests passed (`tests/test_batch_a_remediation.py`) |
+| **Batch B1/B2 PostgreSQL Concurrency Gate** | 100 barrier-released two-client refresh races using independent sessions via HttpOnly cookie transport | **PASS** | 100/100 produced exactly one `200` and one `401`; winner rotated cookie, loser did NOT clear cookie; one consumed original and one active same-family successor |
+| **Batch B1/B2 PostgreSQL Replay / Rollback / Migration Gate** | 0015 to 0016 cutover and backfill, immediate replay (preserves cookie), late family revocation (clears cookie), audit-failure rollback and retry | **PASS** | 3 tests passed (`tests/integration/test_batch_b1_postgres.py`) |
+| **Complete PostgreSQL Integration Gate** | All migration, foundation, Batch A, risk, AI, market storage, and Batch B1/B2 integration tests | **PASS** | 49 passed, 0 failed against disposable database `aigoldtrader_batcha3_test`; operational database `ai_trading` was not used or modified |
 | **Exact Revision Guard Unit Suite** | Strict canonical revisions (0012-0016), fail-closed on unknown/corrupt, zero-mutation guarantee | **PASS** | 45 tests passed (`tests/test_migration_revision_guards.py`) |
 | **Database Config Matrix Unit Suite** | Cases A-G: DATABASE_URL, POSTGRES_*, precedence, partial config, override isolation, --db-url | **PASS** | 14 tests passed in 0.38s (`tests/test_safe_db_upgrade_config.py`) |
-| **Batch A.3 / A.3.1 PostgreSQL Integration** | Safe migration normalizer, exact revision guards, 0015 invariants, real FK restrict, payload check constraint, hydration, lifecycle races, RBAC & tenant isolation | **PASS** | 15 tests passed (`tests/integration/test_batch_a1_postgres.py`) |
-| **PostgreSQL 18 Concurrency Integration** | Risk concurrency, multi-account, migration 0015 | **PASS** | 8 tests passed (`tests/integration/test_risk_postgres.py`) |
-| **Foundation Gate** | Alembic upgrade/downgrade/upgrade cycle (up to 0016) | **PASS** | 12 tests passed (`tests/integration/test_postgres.py`) |
-| **Cross-Domain AI PostgreSQL Suite** | Phase 6.1 AI account reservation, payload account_id check constraint, authoritative API | **PASS** | 5 tests passed (`test_ai_safety_postgres.py`, `test_analysis_postgres.py`, `test_evaluation_identity_postgres.py`) |
-| **Full Backend Unit Suite** | Complete backend test suite excluding explicitly marked live-external tests | **PASS** | 855 passed, 11 deselected, 0 failed (`pytest --ignore=tests/integration -q`) |
-| **Frontend Vitest Suite** | Component, contract, truthfulness tests | **PASS** | 256 passed, 0 failed in 7.7s (`npm test -- --run`) |
+| **Full Backend Unit Suite** | Complete backend test suite excluding explicitly marked live-external tests | **PASS** | 856 passed, 0 failed (`pytest --ignore=tests/integration -q`) |
+| **Backend Static Quality Gates** | Ruff linting and Mypy type-checking on all auth modules and tests | **PASS** | All checks passed (`ruff check backend/`), 0 issues (`mypy`) |
+| **Frontend Test Suite** | Component, contract, truthfulness, cookie auth, AccessTokenResponse tests | **PASS** | 253 passed, 0 failed (`npm test -- --run`) |
 | **Frontend Typecheck** | TypeScript static typing | **PASS** | 0 errors (`npm run typecheck`) |
 | **Frontend ESLint** | Linter rules & code hygiene | **PASS** | 0 errors (`npm run lint`) |
-| **Next.js Production Build** | Production compiler & asset optimization | **PASS** | 20 routes compiled cleanly with Turbopack (`npm run build`) |
-| **Operational Service Health** | PM2 runtime health & readiness | **PASS** | `/healthz` (200 OK), `/readyz` (200 OK, database: true) |
-| **Operational Safe DB Upgrade** | Canonical CLI upgrade command in live POSTGRES_*-only environment | **PASS** | Exit code 0, 0015_batch_a3_risk_account_fk head verified |
+| **Next.js Production Build** | Production compiler & asset optimization | **PASS** | 20 routes compiled cleanly (`npm run build`) |
+| **Contract Synchronization** | Backend OpenAPI to Frontend TS contract | **PASS** | Exported via `scripts.export_api_contract`, matching `api.generated.ts` and `api-contract.json` |
 
 ---
 
 ## Governance & Freeze Integrity
 - **Freeze Baseline SHA**: `4835051b7870b293a9036a85d5c7226b1ba70af1`
 - **Documentation**: [docs/FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md) remains unaltered and authoritative.
-- **Batch A Status**: Remains **CLOSED**; Batch B1 did not alter its authority or trading-safety invariants.
-- **Batch B1 Status**: **AUD-P1-005 REMEDIATED** by implementation commit `42569ede5b3cb1926bb1faa770cdc55626bd6515` and migration `0016_batch_b_refresh_families`.
-- **Deferred Finding**: **AUD-P2-002 remains OPEN** for Batch B2/B3.
-- **Operational Safety**: Migration 0016 was verified only against the isolated disposable PostgreSQL test database. The operational database `ai_trading` was never targeted or modified during Batch B1 implementation.
-- **Scope Compliance**: Strictly restricted to Batch B1 atomic refresh rotation and session-family containment. No Batch B2, Batch B3, trading, execution, or broker-routing work was performed.
+- **Batch A Status**: Remains **CLOSED**; Batch B2 did not alter its authority or trading-safety invariants.
+- **Batch B1 Status**: Remains **CLOSED** (`AUD-P1-005`).
+- **Batch B2 Status**: **AUD-P2-002 PARTIALLY REMEDIATED / OPEN**. Refresh token is secure in HttpOnly cookie with strict Origin validation; transitional `access_token` remains in `localStorage` until **Batch B3**.
+- **Operational Safety**: Migration 0016 was verified only against the isolated disposable PostgreSQL test database. The operational database `ai_trading` was never targeted or modified during Batch B2 implementation.
+- **Scope Compliance**: Strictly restricted to Batch B2 secure refresh cookie and browser auth contract. Did NOT begin Batch B3 memory-only coordinator. No trading, execution, or broker-routing work was performed.

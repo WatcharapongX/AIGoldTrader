@@ -148,7 +148,7 @@ def client(db_session, fake_redis) -> TestClient:
 
     app = create_app()
     app.dependency_overrides[get_session] = _override_session
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={"origin": "http://localhost:3000"}) as test_client:
         yield test_client
     app.dependency_overrides.clear()
 

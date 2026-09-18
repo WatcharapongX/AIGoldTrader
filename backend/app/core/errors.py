@@ -7,10 +7,18 @@ class AppError(Exception):
     status_code = 400
     code = "INTERNAL"
 
-    def __init__(self, message: str, *, details: dict | None = None, code: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        details: dict | None = None,
+        code: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.details = details or {}
+        self.headers = headers or {}
         if code:
             self.code = code
 

@@ -20,6 +20,7 @@ from app.db.session import dispose_engine, get_session_factory
 from app.main import create_app
 from app.models import AuditLog, RefreshSession
 from app.services import audit
+from app.services.auth_cookies import get_refresh_cookie_name
 from app.services.users import hash_refresh_token
 
 pytestmark = pytest.mark.integration
@@ -77,12 +78,12 @@ def test_0016_refresh_family_migration_and_legacy_cutover(isolated_postgres):  #
     _alembic("check")
 
 
-async def _release_pair(client_a, client_b, token):
+async def _release_pair(client_a, client_b, cookie_name: str, token: str):
     release = asyncio.Event()
 
     async def send(client):
         await release.wait()
-        return await client.post("/api/auth/refresh", json={"refresh_token": token})
+        return await client.post("/api/auth/refresh", cookies={cookie_name: token})
 
     first = asyncio.create_task(send(client_a))
     second = asyncio.create_task(send(client_b))
@@ -94,26 +95,39 @@ async def _release_pair(client_a, client_b, token):
 async def _verify_100_atomic_refresh_races() -> None:
     assert make_url(os.environ["DATABASE_URL"]).database != "ai_trading"
     app = create_app()
+    cookie_name = get_refresh_cookie_name()
     async with app.router.lifespan_context(app):
         password = secrets.token_urlsafe(24)
         await seed_admin("batch-b1-race@example.com", password)
         transport_a = httpx.ASGITransport(app=app)
         transport_b = httpx.ASGITransport(app=app)
+        headers = {"origin": "http://localhost:3000"}
         async with (
-            httpx.AsyncClient(transport=transport_a, base_url="http://test") as client_a,
-            httpx.AsyncClient(transport=transport_b, base_url="http://test") as client_b,
+            httpx.AsyncClient(transport=transport_a, base_url="http://test", headers=headers) as client_a,
+            httpx.AsyncClient(transport=transport_b, base_url="http://test", headers=headers) as client_b,
         ):
             for _ in range(100):
+                client_a.cookies.clear()
+                client_b.cookies.clear()
                 login = await client_a.post(
                     "/api/auth/login",
                     json={"email": "batch-b1-race@example.com", "password": password},
                 )
                 assert login.status_code == 200
-                old_token = login.json()["refresh_token"]
-                responses = await _release_pair(client_a, client_b, old_token)
+                assert "refresh_token" not in login.json()
+                old_token = login.cookies.get(cookie_name)
+                assert old_token is not None
+                responses = await _release_pair(client_a, client_b, cookie_name, old_token)
                 assert sorted(response.status_code for response in responses) == [200, 401]
+                winner = next(response for response in responses if response.status_code == 200)
                 failure = next(response for response in responses if response.status_code == 401)
                 assert failure.json()["error"]["message"] == "Invalid refresh token"
+                # Concurrency loser MUST NOT clear the cookie (winner's new cookie preserved)
+                set_cookie_loser = failure.headers.get("set-cookie", "")
+                assert "Max-Age=0" not in set_cookie_loser
+                # Winner has received new rotated refresh token in cookie
+                new_token = winner.cookies.get(cookie_name)
+                assert new_token is not None and new_token != old_token
 
                 factory = get_session_factory()
                 async with factory() as session:
@@ -145,20 +159,35 @@ def test_atomic_refresh_http_concurrency_100_iterations(isolated_postgres, monke
 
 async def _verify_postgres_replay_and_rollback(monkeypatch) -> None:
     app = create_app()
+    cookie_name = get_refresh_cookie_name()
     async with app.router.lifespan_context(app):
         password = secrets.token_urlsafe(24)
         await seed_admin("batch-b1-replay@example.com", password)
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        headers = {"origin": "http://localhost:3000"}
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test", headers=headers
+        ) as client:
             login = await client.post(
                 "/api/auth/login", json={"email": "batch-b1-replay@example.com", "password": password}
             )
-            token_a = login.json()["refresh_token"]
-            refresh = await client.post("/api/auth/refresh", json={"refresh_token": token_a})
-            assert refresh.status_code == 200
-            token_b = refresh.json()["refresh_token"]
+            assert login.status_code == 200
+            assert "refresh_token" not in login.json()
+            token_a = login.cookies.get(cookie_name)
+            assert token_a is not None
 
-            immediate = await client.post("/api/auth/refresh", json={"refresh_token": token_a})
+            # 1. Normal rotation via cookie
+            refresh = await client.post("/api/auth/refresh", cookies={cookie_name: token_a})
+            assert refresh.status_code == 200
+            assert "refresh_token" not in refresh.json()
+            token_b = refresh.cookies.get(cookie_name)
+            assert token_b is not None and token_b != token_a
+
+            # 2. Immediate replay of token_a (within 5s grace window)
+            # Concurrency loser: 401, but does NOT clear cookie
+            immediate = await client.post("/api/auth/refresh", cookies={cookie_name: token_a})
             assert immediate.status_code == 401
+            assert "Max-Age=0" not in immediate.headers.get("set-cookie", "")
+
             factory = get_session_factory()
             async with factory() as session:
                 session_a = await session.scalar(
@@ -171,14 +200,24 @@ async def _verify_postgres_replay_and_rollback(monkeypatch) -> None:
                 session_a.consumed_at = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=10)
                 await session.commit()
 
-            later = await client.post("/api/auth/refresh", json={"refresh_token": token_a})
+            # 3. Late replay of token_a (> 5s grace window) -> family revocation & terminal cookie clear
+            later = await client.post("/api/auth/refresh", cookies={cookie_name: token_a})
             assert later.status_code == 401
-            assert (await client.post("/api/auth/refresh", json={"refresh_token": token_b})).status_code == 401
+            assert "Max-Age=0" in later.headers.get("set-cookie", "")
 
+            # token_b was revoked as part of the family revocation
+            later_b = await client.post("/api/auth/refresh", cookies={cookie_name: token_b})
+            assert later_b.status_code == 401
+            assert "Max-Age=0" in later_b.headers.get("set-cookie", "")
+
+            # 4. Rollback injection
             rollback_login = await client.post(
                 "/api/auth/login", json={"email": "batch-b1-replay@example.com", "password": password}
             )
-            rollback_token = rollback_login.json()["refresh_token"]
+            assert rollback_login.status_code == 200
+            rollback_token = rollback_login.cookies.get(cookie_name)
+            assert rollback_token is not None
+
             original_write = audit.write_audit
             failed = False
 
@@ -191,8 +230,9 @@ async def _verify_postgres_replay_and_rollback(monkeypatch) -> None:
 
             monkeypatch.setattr(audit, "write_audit", fail_once)
             assert (
-                await client.post("/api/auth/refresh", json={"refresh_token": rollback_token})
+                await client.post("/api/auth/refresh", cookies={cookie_name: rollback_token})
             ).status_code == 500
+
             async with factory() as session:
                 stored = await session.scalar(
                     select(RefreshSession).where(
@@ -215,8 +255,9 @@ async def _verify_postgres_replay_and_rollback(monkeypatch) -> None:
                 ).all()
                 # One successful audit belongs to A -> B; none was added for the failed family.
                 assert len(audits) == 1
+
             assert (
-                await client.post("/api/auth/refresh", json={"refresh_token": rollback_token})
+                await client.post("/api/auth/refresh", cookies={cookie_name: rollback_token})
             ).status_code == 200
 
 

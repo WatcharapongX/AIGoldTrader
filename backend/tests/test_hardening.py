@@ -34,6 +34,7 @@ def request(peer="198.51.100.1", forwarded="203.0.113.1"):
             "type": "http",
             "client": (peer, 1234),
             "headers": [
+                (b"origin", b"http://localhost:3000"),
                 (b"x-forwarded-for", forwarded.encode()),
                 (b"forwarded", b"for=203.0.113.2"),
                 (b"x-real-ip", b"203.0.113.3"),
@@ -78,9 +79,12 @@ async def test_normalized_account_budget_spans_different_peers(monkeypatch):
     for i, email in enumerate(("User@example.com", "user@example.com", "USER@example.com")):
         error = AuthError if i < 2 else RateLimitedError
         with pytest.raises(error):
+            from starlette.responses import Response
+
             await auth.login(
                 auth.LoginRequest(email=email, password="incorrect-password"),
                 request(peer=f"198.51.100.{i + 1}"),
+                Response(),
                 AsyncMock(),
             )
 
@@ -208,8 +212,6 @@ def test_documented_native_launch_disables_server_proxy_rewriting():
     [
         ("access_token", ""),
         ("access_token", "  "),
-        ("refresh_token", ""),
-        ("refresh_token", "\t"),
         ("token_type", "Basic"),
         ("token_type", "Bearer"),
         ("token_type", "other"),
@@ -224,30 +226,29 @@ def test_documented_native_launch_disables_server_proxy_rewriting():
 def test_token_response_semantic_constraints(field, value):
     payload = {
         "access_token": "fixture-access",
-        "refresh_token": "fixture-refresh",
         "token_type": "bearer",
         "expires_at": "2030-01-01T00:00:00Z",
     }
     payload[field] = value
     with pytest.raises(ValidationError):
-        auth.TokenPair.model_validate(payload)
+        auth.AccessTokenResponse.model_validate(payload)
 
 
 def test_token_response_contract_requires_every_field_and_accepts_real_format():
     payload = {
         "access_token": "fixture-access",
-        "refresh_token": "fixture-refresh",
         "token_type": "bearer",
         "expires_at": "2030-01-01T00:00:00.123456+00:00",
     }
-    model = auth.TokenPair.model_validate(payload)
+    model = auth.AccessTokenResponse.model_validate(payload)
     assert model.token_type == "bearer"
     for field in payload:
         with pytest.raises(ValidationError):
-            auth.TokenPair.model_validate({key: value for key, value in payload.items() if key != field})
-    schema = auth.TokenPair.model_json_schema()
+            auth.AccessTokenResponse.model_validate({key: value for key, value in payload.items() if key != field})
+    schema = auth.AccessTokenResponse.model_json_schema()
     assert set(schema["required"]) == set(payload)
     assert schema["properties"]["access_token"]["minLength"] == 1
     assert schema["properties"]["access_token"]["pattern"] == r"^\S+$"
     assert schema["properties"]["token_type"]["const"] == "bearer"
     assert schema["properties"]["expires_at"]["format"] == "date-time"
+    assert "refresh_token" not in schema["properties"]

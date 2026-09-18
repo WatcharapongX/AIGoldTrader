@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     trusted_proxy_cidrs: str = ""
     rate_limit_api_per_minute: int = 120
 
+    # Auth & Cookie Security (Batch B2, AUD-P2-002)
+    auth_cookie_name: str | None = None
+    auth_cookie_secure: bool | None = None
+    auth_trusted_origins: str = ""
+
     # Database
     database_connection_url: str | None = Field(default=None, validation_alias="DATABASE_URL", repr=False)
     # Compatibility with the existing optional Compose deployment.
@@ -179,9 +184,67 @@ class Settings(BaseSettings):
             database=self.postgres_db,
         ).render_as_string(hide_password=False)
 
+    @property
+    def effective_auth_cookie_name(self) -> str:
+        if self.auth_cookie_name:
+            return self.auth_cookie_name
+        return "__Host-aigold_refresh" if self.app_env in {"PROD", "UAT"} else "aigold_refresh_dev"
+
+    @property
+    def effective_auth_cookie_secure(self) -> bool:
+        if self.auth_cookie_secure is not None:
+            return self.auth_cookie_secure
+        return self.app_env in {"PROD", "UAT"}
+
+    @staticmethod
+    def _normalize_single_origin(raw: str) -> str | None:
+        from urllib.parse import urlsplit
+
+        s = raw.strip()
+        if not s or s == "*":
+            return s
+        parts = urlsplit(s)
+        if not parts.scheme or not parts.netloc:
+            return s.rstrip("/")
+        # Reconstruct scheme://netloc strictly (strips paths, queries, fragments, trailing slashes)
+        netloc = parts.netloc.lower()
+        return f"{parts.scheme.lower()}://{netloc}"
+
+    @property
+    def auth_trusted_origin_list(self) -> list[str]:
+        raw_list = [o.strip() for o in self.auth_trusted_origins.split(",") if o.strip()]
+        if not raw_list:
+            raw_list = self.cors_origin_list
+        normalized: list[str] = []
+        for origin in raw_list:
+            norm = self._normalize_single_origin(origin)
+            if norm and norm not in normalized:
+                normalized.append(norm)
+        return normalized
+
     def validate_runtime_secrets(self) -> None:
         if len(self.secret_key.encode()) < 32 or self.secret_key.startswith("change-me"):
             raise ValueError("Set SECRET_KEY to a private random value of at least 32 bytes")
+
+        cookie_name = self.effective_auth_cookie_name
+        cookie_secure = self.effective_auth_cookie_secure
+        trusted_origins = self.auth_trusted_origin_list
+
+        if self.app_env in {"PROD", "UAT"}:
+            if not cookie_secure:
+                raise ValueError("PROD/UAT requires secure refresh cookie (auth_cookie_secure=True)")
+            if not cookie_name.startswith("__Host-"):
+                raise ValueError("PROD/UAT requires __Host- prefix for refresh cookie name")
+            if not trusted_origins:
+                raise ValueError("PROD/UAT requires explicit non-empty trusted origins")
+            for origin in trusted_origins:
+                if origin == "*" or "*" in origin:
+                    raise ValueError("Wildcard origins are strictly forbidden for auth trusted origins")
+                if not origin.startswith("https://"):
+                    raise ValueError(f"PROD/UAT trusted origins must use HTTPS: {origin}")
+        else:
+            if not cookie_secure and cookie_name.startswith("__Host-"):
+                raise ValueError("Insecure cookie cannot use __Host- prefix")
 
     @property
     def redis_url(self) -> str:

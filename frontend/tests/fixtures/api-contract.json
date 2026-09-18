@@ -27,19 +27,13 @@
       ],
       "title": "MeResponse"
     },
-    "TokenPair": {
+    "AccessTokenResponse": {
       "properties": {
         "access_token": {
           "type": "string",
           "minLength": 1,
           "pattern": "^\\S+$",
           "title": "Access Token"
-        },
-        "refresh_token": {
-          "type": "string",
-          "minLength": 1,
-          "pattern": "^\\S+$",
-          "title": "Refresh Token"
         },
         "token_type": {
           "type": "string",
@@ -56,11 +50,10 @@
       "type": "object",
       "required": [
         "access_token",
-        "refresh_token",
         "token_type",
         "expires_at"
       ],
-      "title": "TokenPair"
+      "title": "AccessTokenResponse"
     },
     "HealthResponse": {
       "properties": {
@@ -184,7 +177,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TokenPair"
+                "$ref": "#/components/schemas/AccessTokenResponse"
               }
             }
           }
@@ -208,7 +201,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TokenPair"
+                "$ref": "#/components/schemas/AccessTokenResponse"
               }
             }
           }

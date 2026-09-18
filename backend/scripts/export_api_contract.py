@@ -27,7 +27,7 @@ from app.services.news.public_calendar import ProviderHealth
 from app.services.strategy.domain import StrategyResponse, Transition
 
 ROOT = Path(__file__).resolve().parents[2]
-MODELS = ("MeResponse", "TokenPair", "HealthResponse", "ReadyResponse", "ReadyChecks", "Role")
+MODELS = ("MeResponse", "AccessTokenResponse", "HealthResponse", "ReadyResponse", "ReadyChecks", "Role")
 ENDPOINTS = ("/api/auth/me", "/api/auth/login", "/api/auth/refresh", "/api/healthz", "/api/readyz")
 
 

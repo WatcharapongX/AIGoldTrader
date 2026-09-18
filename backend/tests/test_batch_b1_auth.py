@@ -20,7 +20,12 @@ def _login(client: TestClient) -> dict:
         headers={"user-agent": "batch-b1-test"},
     )
     assert response.status_code == 200
-    return response.json()
+    data = response.json()
+    assert "refresh_token" not in data
+    cookie = response.cookies.get("aigold_refresh_dev") or client.cookies.get("aigold_refresh_dev")
+    assert cookie is not None
+    data["refresh_token"] = cookie
+    return data
 
 
 async def _session_for_token(db_session, token: str) -> RefreshSession:
@@ -43,13 +48,15 @@ async def test_login_and_successor_session_family_metadata(client, admin_user, d
 
     refreshed = client.post(
         "/api/auth/refresh",
-        json={"refresh_token": pair["refresh_token"]},
         headers={"user-agent": "batch-b1-refresh"},
     )
     assert refreshed.status_code == 200
+    assert "refresh_token" not in refreshed.json()
     original = await _session_for_token(db_session, pair["refresh_token"])
     assert original.consumed_at is not None and original.revoked_at is None
-    successor = await _session_for_token(db_session, refreshed.json()["refresh_token"])
+    successor_token = refreshed.cookies.get("aigold_refresh_dev") or client.cookies.get("aigold_refresh_dev")
+    assert successor_token is not None
+    successor = await _session_for_token(db_session, successor_token)
     assert successor.family_id == family_id
     assert successor.consumed_at is None and successor.revoked_at is None
     assert successor.user_agent == "batch-b1-refresh"
@@ -57,14 +64,16 @@ async def test_login_and_successor_session_family_metadata(client, admin_user, d
 
 async def test_immediate_reuse_rejected_without_family_revocation(client, admin_user, db_session) -> None:
     pair = _login(client)
-    refreshed = client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    refreshed = client.post("/api/auth/refresh")
     assert refreshed.status_code == 200
+    successor_token = refreshed.cookies.get("aigold_refresh_dev") or client.cookies.get("aigold_refresh_dev")
+    assert successor_token is not None
 
-    replay = client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    replay = client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": pair["refresh_token"]})
     assert replay.status_code == 401
     assert replay.json()["error"]["message"] == "Invalid refresh token"
 
-    successor = await _session_for_token(db_session, refreshed.json()["refresh_token"])
+    successor = await _session_for_token(db_session, successor_token)
     assert successor.consumed_at is None and successor.revoked_at is None
     session, _ = db_session
     reuse = (
@@ -75,20 +84,22 @@ async def test_immediate_reuse_rejected_without_family_revocation(client, admin_
 
 async def test_later_replay_revokes_active_family(client, admin_user, db_session) -> None:
     pair = _login(client)
-    refreshed = client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    refreshed = client.post("/api/auth/refresh")
     assert refreshed.status_code == 200
+    successor_token = refreshed.cookies.get("aigold_refresh_dev") or client.cookies.get("aigold_refresh_dev")
+    assert successor_token is not None
 
     original = await _session_for_token(db_session, pair["refresh_token"])
     original.consumed_at = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=10)
     session, _ = db_session
     await session.commit()
 
-    replay = client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    replay = client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": pair["refresh_token"]})
     assert replay.status_code == 401
-    successor = await _session_for_token(db_session, refreshed.json()["refresh_token"])
+    successor = await _session_for_token(db_session, successor_token)
     assert successor.revoked_at is not None
     assert client.post(
-        "/api/auth/refresh", json={"refresh_token": refreshed.json()["refresh_token"]}
+        "/api/auth/refresh", cookies={"aigold_refresh_dev": successor_token}
     ).status_code == 401
     actions = (
         await session.scalars(select(AuditLog.action).where(AuditLog.action.in_(("REFRESH_REUSE", "SESSION_REVOKED"))))
@@ -111,7 +122,7 @@ async def test_refresh_failure_rolls_back_consume_and_successor(
         return await original_write(session, **kwargs)
 
     monkeypatch.setattr(audit, "write_audit", fail_once)
-    response = client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    response = client.post("/api/auth/refresh")
     assert response.status_code == 500
 
     original = await _session_for_token(db_session, pair["refresh_token"])
@@ -125,8 +136,8 @@ async def test_refresh_failure_rolls_back_consume_and_successor(
         await session.scalars(select(AuditLog).where(AuditLog.action == "TOKEN_REFRESH"))
     ).all()
 
-    assert client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]}).status_code == 200
-    assert client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]}).status_code == 401
+    assert client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": pair["refresh_token"]}).status_code == 200
+    assert client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": pair["refresh_token"]}).status_code == 401
 
 
 async def test_inactive_user_gets_no_successor_and_family_is_terminal(client, admin_user, db_session) -> None:
@@ -135,7 +146,7 @@ async def test_inactive_user_gets_no_successor_and_family_is_terminal(client, ad
     admin_user.is_active = False
     await session.commit()
 
-    response = client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    response = client.post("/api/auth/refresh")
     assert response.status_code == 401
     assert response.json()["error"]["message"] == "Invalid refresh token"
     original = await _session_for_token(db_session, pair["refresh_token"])
@@ -149,12 +160,12 @@ async def test_inactive_user_gets_no_successor_and_family_is_terminal(client, ad
 
 
 async def test_refresh_uses_current_database_role(client, admin_user, db_session) -> None:
-    pair = _login(client)
+    _login(client)
     session, _ = db_session
     admin_user.role = Role.VIEWER
     await session.commit()
 
-    response = client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    response = client.post("/api/auth/refresh")
     assert response.status_code == 200
     claims = decode_token(response.json()["access_token"], get_settings().secret_key, expected_type="access")
     assert claims["role"] == "VIEWER"
@@ -183,7 +194,7 @@ async def test_jwt_session_user_mismatch_fails_closed(client, admin_user, trader
     )
     await session.commit()
 
-    response = client.post("/api/auth/refresh", json={"refresh_token": token})
+    response = client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": token})
     assert response.status_code == 401
     stored = await _session_for_token(db_session, token)
     assert stored.consumed_at is not None
@@ -194,7 +205,7 @@ async def test_jwt_session_user_mismatch_fails_closed(client, admin_user, trader
 
 async def test_invalid_refresh_conditions_share_generic_contract(client, admin_user, db_session) -> None:
     expected = {"code": "AUTH_FAILED", "message": "Invalid refresh token"}
-    malformed = client.post("/api/auth/refresh", json={"refresh_token": "not-a-jwt"})
+    malformed = client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": "not-a-jwt"})
     assert {k: malformed.json()["error"][k] for k in expected} == expected
 
     unknown, _ = create_token(
@@ -203,7 +214,7 @@ async def test_invalid_refresh_conditions_share_generic_contract(client, admin_u
         token_type="refresh",
         secret_key=get_settings().secret_key,
     )
-    unknown_response = client.post("/api/auth/refresh", json={"refresh_token": unknown})
+    unknown_response = client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": unknown})
     assert {k: unknown_response.json()["error"][k] for k in expected} == expected
 
     for field, value in (
@@ -215,5 +226,5 @@ async def test_invalid_refresh_conditions_share_generic_contract(client, admin_u
         setattr(stored, field, value)
         session, _ = db_session
         await session.commit()
-        response = client.post("/api/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+        response = client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": pair["refresh_token"]})
         assert {k: response.json()["error"][k] for k in expected} == expected

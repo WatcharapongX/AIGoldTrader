@@ -1,21 +1,9 @@
-import type { TokenPair, User, HealthResponse, ReadyResponse } from '@/types';
-import { parseUser, parseTokenPair, parseHealth, parseReady, errorMessage, ApiContractError } from '@/lib/contracts';
-
-/** Sync token to a cookie so Next.js middleware can check auth state. */
-function syncTokenCookie(token: string | null) {
-  if (typeof document === 'undefined') return;
-  if (token) {
-    document.cookie = `access_token=${token}; path=/; SameSite=Strict; max-age=86400`;
-  } else {
-    document.cookie = 'access_token=; path=/; SameSite=Strict; max-age=0';
-  }
-}
+import type { AccessTokenResponse, User, HealthResponse, ReadyResponse } from '@/types';
+import { parseUser, parseAccessTokenResponse, parseHealth, parseReady, errorMessage, ApiContractError } from '@/lib/contracts';
 
 export function clearSession() {
   if (typeof window === 'undefined') return;
   localStorage.removeItem('access_token');
-  localStorage.removeItem('refresh_token');
-  syncTokenCookie(null);
   window.dispatchEvent(new Event('auth:expired'));
 }
 
@@ -24,7 +12,7 @@ export class ApiClient {
   private refreshPromise: Promise<string> | null = null;
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:8000/api');
+    this.baseUrl = baseUrl || (typeof window !== 'undefined' ? '/api' : (process.env.BACKEND_INTERNAL_URL || 'http://127.0.0.1:8000/api'));
   }
 
   private refreshAccessToken(): Promise<string> {
@@ -36,8 +24,6 @@ export class ApiClient {
           throw new Error('Session expired. Please sign in again.');
         }
         localStorage.setItem('access_token', tokens.access_token);
-        localStorage.setItem('refresh_token', tokens.refresh_token);
-        syncTokenCookie(tokens.access_token);
         return tokens.access_token;
       })().finally(() => { this.refreshPromise = null; });
     }
@@ -50,7 +36,12 @@ export class ApiClient {
     const headers = new Headers(options?.headers);
     headers.set('Content-Type', 'application/json');
     if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
-    const config: RequestInit = { ...options, method, headers };
+    const config: RequestInit = {
+      credentials: 'same-origin',
+      ...options,
+      method,
+      headers,
+    };
     if (body !== undefined) config.body = JSON.stringify(body);
     let response = await fetch(url, config);
     if (response.status === 401 && accessToken && path !== '/auth/login') {
@@ -92,42 +83,41 @@ export class ApiClient {
   }
 
   // Auth methods
-  private async refreshTokenRequest(): Promise<TokenPair | null> {
-    const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
-    if (!refreshToken) return null;
-
+  private async refreshTokenRequest(): Promise<AccessTokenResponse | null> {
     try {
       const response = await fetch(`${this.baseUrl}/auth/refresh`, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ refresh_token: refreshToken }),
       });
 
       if (!response.ok) {
         return null;
       }
 
-      return parseTokenPair(await response.json());
+      return parseAccessTokenResponse(await response.json());
     } catch (error) {
       if (error instanceof ApiContractError) throw error;
       return null;
     }
   }
 
-  public async login(email: string, password: string): Promise<TokenPair> {
-    const data = parseTokenPair(await this.post('/auth/login', { email, password }));
+  public async login(email: string, password: string): Promise<AccessTokenResponse> {
+    const data = parseAccessTokenResponse(await this.post('/auth/login', { email, password }));
     if (typeof window !== 'undefined') {
       localStorage.setItem('access_token', data.access_token);
-      localStorage.setItem('refresh_token', data.refresh_token);
-      syncTokenCookie(data.access_token);
     }
     return data;
   }
 
   public async logout(): Promise<void> {
-     await this.post('/auth/logout');
+    try {
+      await this.post('/auth/logout');
+    } finally {
+      clearSession();
+    }
   }
 
   public async getMe(): Promise<User> {

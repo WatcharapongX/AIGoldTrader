@@ -8,14 +8,12 @@ const ts = require('typescript');
 const NOW = Date.UTC(2029, 0, 1);
 class FixedDate extends Date { static now() { return NOW; } }
 const valid = {
-  access_token: 'fixture-access', refresh_token: 'fixture-refresh',
+  access_token: 'fixture-access',
   token_type: 'bearer', expires_at: '2029-01-01T00:01:00.123456Z',
 };
 const cases = [
   ['empty access', { ...valid, access_token: '' }],
   ['whitespace access', { ...valid, access_token: ' \t\n' }],
-  ['empty refresh', { ...valid, refresh_token: '' }],
-  ['whitespace refresh', { ...valid, refresh_token: ' \t' }],
   ['Basic type', { ...valid, token_type: 'Basic' }],
   ['case variant type', { ...valid, token_type: 'Bearer' }],
   ['arbitrary type', { ...valid, token_type: 'other' }],
@@ -33,8 +31,8 @@ const cases = [
 ];
 function harness(mode, payload) {
   const items = new Map([['unrelated', 'keep']]);
-  if (mode !== 'login') { items.set('access_token', 'old-access'); items.set('refresh_token', 'old-refresh'); }
-  const document = { cookie: mode === 'login' ? 'unrelated=keep' : 'access_token=old-access' };
+  if (mode !== 'login') { items.set('access_token', 'old-access'); }
+  const document = { cookie: 'unrelated=keep' };
   const before = { items: JSON.stringify([...items]), cookie: document.cookie };
   const modules = new Map();
   const env = {
@@ -92,8 +90,6 @@ test('valid future bearer responses persist and authenticate for login/refresh/r
     else if (mode === 'refresh') await h.store.getState().fetchUser();
     else await h.store.getState().hydrate();
     assert.equal(h.items.get('access_token'), valid.access_token);
-    assert.equal(h.items.get('refresh_token'), valid.refresh_token);
-    assert.match(h.document.cookie, /access_token=fixture-access/);
     assert.equal(h.store.getState().isAuthenticated, true);
   }
 });

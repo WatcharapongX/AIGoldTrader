@@ -32,7 +32,7 @@ test('simultaneous 401 requests rotate once and retry with the new token', async
     if (url.endsWith('/auth/refresh')) {
       refreshes++;
       await new Promise(resolve => setImmediate(resolve));
-      return response(200, { access_token: 'new', refresh_token: 'refresh-new', token_type: 'bearer', expires_at: '2030-01-01T00:00:00Z' });
+      return response(200, { access_token: 'new', token_type: 'bearer', expires_at: '2030-01-01T00:00:00Z' });
     }
     return options.headers.get('Authorization') === 'Bearer new'
       ? response(200, { ok: true }) : response(401, {});
@@ -42,7 +42,7 @@ test('simultaneous 401 requests rotate once and retry with the new token', async
   const values = await Promise.all([api.get('/auth/me'), api.get('/auth/me')]);
   assert.equal(values.every(v => v.ok), true);
   assert.equal(refreshes, 1);
-  assert.equal(env.localStorage.getItem('refresh_token'), 'refresh-new');
+  assert.equal(env.localStorage.getItem('access_token'), 'new');
 });
 
 test('failed refresh rejects every waiter and clears session', { timeout: 2000 }, async () => {
@@ -56,7 +56,6 @@ test('failed refresh rejects every waiter and clears session', { timeout: 2000 }
   const values = await Promise.allSettled([api.get('/auth/me'), api.get('/auth/me')]);
   assert.equal(values.every(v => v.status === 'rejected'), true);
   assert.equal(env.localStorage.getItem('access_token'), null);
-  assert.match(env.document.cookie, /max-age=0/);
 });
 
 test('bad login does not refresh an unrelated stored session', async () => {

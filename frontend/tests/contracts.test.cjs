@@ -36,7 +36,7 @@ function sample(schema) {
   throw Error('Uncovered authoritative schema construct');
 }
 const mappings = {
-  MeResponse: 'parseUser', TokenPair: 'parseTokenPair',
+  MeResponse: 'parseUser', AccessTokenResponse: 'parseAccessTokenResponse',
   HealthResponse: 'parseHealth', ReadyResponse: 'parseReady',
 };
 for (const [name, parserName] of Object.entries(mappings)) {

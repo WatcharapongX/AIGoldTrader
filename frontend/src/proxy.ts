@@ -25,6 +25,8 @@ export function proxy(request: NextRequest) {
   }
 
   const hasToken =
+    request.cookies.get("__Host-aigold_refresh")?.value ||
+    request.cookies.get("aigold_refresh_dev")?.value ||
     request.cookies.get("access_token")?.value ||
     request.headers.get("authorization");
 

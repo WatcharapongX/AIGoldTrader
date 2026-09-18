@@ -10,8 +10,9 @@ def test_login_success_returns_token_pair(client: TestClient, admin_user) -> Non
     assert response.status_code == 200
     body = response.json()
     assert body["access_token"]
-    assert body["refresh_token"]
+    assert "refresh_token" not in body
     assert body["token_type"] == "bearer"
+    assert "aigold_refresh_dev" in response.cookies
 
 
 def test_login_wrong_password_rejected(client: TestClient, admin_user) -> None:
@@ -40,14 +41,20 @@ def test_me_returns_profile(client: TestClient, auth_headers: dict[str, str]) ->
 
 
 def test_refresh_rotates_session(client: TestClient, admin_user) -> None:
-    login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"}).json()
+    login_resp = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"})
+    assert login_resp.status_code == 200
+    old_cookie = login_resp.cookies.get("aigold_refresh_dev")
+    assert old_cookie is not None
 
-    refreshed = client.post("/api/auth/refresh", json={"refresh_token": login["refresh_token"]})
+    refreshed = client.post("/api/auth/refresh")
     assert refreshed.status_code == 200
     new_pair = refreshed.json()
+    assert "refresh_token" not in new_pair
+    new_cookie = refreshed.cookies.get("aigold_refresh_dev")
+    assert new_cookie is not None and new_cookie != old_cookie
 
-    # refresh token เดิมถูก revoke — ใช้ซ้ำไม่ได้ (rotation)
-    replay = client.post("/api/auth/refresh", json={"refresh_token": login["refresh_token"]})
+    # refresh token เดิมถูก revoke — replay ด้วย old cookie ใช้ซ้ำไม่ได้ (rotation)
+    replay = client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": old_cookie})
     assert replay.status_code == 401
 
     # ชุดใหม่ใช้ได้จริง
@@ -56,11 +63,13 @@ def test_refresh_rotates_session(client: TestClient, admin_user) -> None:
 
 
 def test_logout_revokes_sessions(client: TestClient, admin_user) -> None:
-    login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"}).json()
-    headers = {"Authorization": f"Bearer {login['access_token']}"}
-    assert client.post("/api/auth/logout", headers=headers).status_code == 200
+    login_resp = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"})
+    cookie = login_resp.cookies.get("aigold_refresh_dev")
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+    logout_resp = client.post("/api/auth/logout", headers=headers)
+    assert logout_resp.status_code == 200
     # refresh หลัง logout = revoked
-    replay = client.post("/api/auth/refresh", json={"refresh_token": login["refresh_token"]})
+    replay = client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": cookie})
     assert replay.status_code == 401
 
 

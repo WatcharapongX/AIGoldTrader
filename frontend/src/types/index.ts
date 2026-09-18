@@ -1,5 +1,7 @@
-// Endpoint response types come from authoritative backend OpenAPI.
-export type { MeResponse as User, TokenPair, HealthResponse, ReadyResponse } from './api.generated';
+import type { AccessTokenResponse, HealthResponse, MeResponse, ReadyResponse } from './api.generated';
+export type { AccessTokenResponse, HealthResponse, ReadyResponse };
+export type User = MeResponse;
+export type TokenPair = AccessTokenResponse;
 
 export interface LoginRequest {
   email: string;
