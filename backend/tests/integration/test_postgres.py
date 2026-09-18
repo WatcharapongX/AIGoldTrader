@@ -29,6 +29,7 @@ from app.db.seed import seed_admin
 from app.db.session import get_session_factory
 from app.main import create_app
 from app.models import AuditLog, RefreshSession, Role, User
+from app.services.auth_cookies import get_refresh_cookie_name
 
 pytestmark = pytest.mark.integration
 
@@ -367,7 +368,12 @@ async def _verify_auth():
                 await session.flush()
             await session.rollback()
 
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        cookie_name = get_refresh_cookie_name()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+            headers={"origin": "http://localhost:3000"},
+        ) as client:
             health = await client.get("/healthz")
             assert health.json()["trading_mode"] == "PAPER"
             assert health.json()["live_auto_trading"] is False
@@ -394,14 +400,18 @@ async def _verify_auth():
             login = await client.post("/api/auth/login", json={"email": "phase1@example.com", "password": password})
             assert login.status_code == 200
             tokens = login.json()
+            refresh_token = login.cookies.get(cookie_name)
+            assert refresh_token is not None
             headers = {"Authorization": f"Bearer {tokens['access_token']}"}
             assert (await client.get("/api/auth/me", headers=headers)).json()["role"] == "ADMIN"
-            refreshed = await client.post("/api/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+            refreshed = await client.post("/api/auth/refresh", cookies={cookie_name: refresh_token})
             assert refreshed.status_code == 200
-            replay = await client.post("/api/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+            new_refresh_token = refreshed.cookies.get(cookie_name)
+            assert new_refresh_token is not None
+            replay = await client.post("/api/auth/refresh", cookies={cookie_name: refresh_token})
             assert replay.status_code == 401
             assert (await client.post("/api/auth/logout", headers=headers)).status_code == 200
-            replay = await client.post("/api/auth/refresh", json={"refresh_token": refreshed.json()["refresh_token"]})
+            replay = await client.post("/api/auth/refresh", cookies={cookie_name: new_refresh_token})
             assert replay.status_code == 401
         async with get_session_factory()() as session:
             audits = (await session.execute(select(AuditLog).where(AuditLog.action == "LOGIN"))).scalars().all()
@@ -421,8 +431,8 @@ async def _verify_auth():
             assert len({item.family_id for item in sessions}) == 1
             assert sum(item.consumed_at is not None for item in sessions) == 1
             assert sum(item.consumed_at is None and item.revoked_at is not None for item in sessions) == 1
-            assert all(item.refresh_token_hash != tokens["refresh_token"] for item in sessions)
-        return (password, tokens["access_token"], tokens["refresh_token"], get_settings().secret_key)
+            assert all(item.refresh_token_hash != refresh_token for item in sessions)
+        return (password, tokens["access_token"], refresh_token, get_settings().secret_key)
 
 
 @pytest.mark.parametrize("log_format", ["json", "console"])
@@ -465,6 +475,7 @@ async def _verify_hardening():
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
             base_url="http://test",
+            headers={"origin": "http://localhost:3000"},
         ) as client:
             for incoming in ("v" * 64, "x" * 65, "invalid space", "bad\nforged", "bad\rforged"):
                 response = await client.post(
@@ -537,6 +548,7 @@ def test_live_launch_surfaces_preserve_peer(isolated_postgres, tmp_path, surface
             response = client.post(
                 "/api/auth/login",
                 headers={
+                    "origin": "http://localhost:3000",
                     "X-Forwarded-For": f"203.0.113.{index + 1}",
                     "X-Real-IP": f"192.0.2.{index + 1}",
                     "Forwarded": f"for=198.51.100.{index + 1}",
@@ -590,7 +602,7 @@ def test_live_base_compose_proxy_opt_in(isolated_postgres, tmp_path, trusted, ex
         statuses = [
             client.post(
                 "/api/auth/login",
-                headers={"X-Forwarded-For": f"203.0.113.{index + 1}"},
+                headers={"origin": "http://localhost:3000", "X-Forwarded-For": f"203.0.113.{index + 1}"},
                 json={"email": f"proxy{index}@example.com", "password": "incorrect-password"},
             ).status_code
             for index in range(4)
