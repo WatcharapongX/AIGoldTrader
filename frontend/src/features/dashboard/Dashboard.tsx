@@ -4,6 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { api } from '@/lib/api';
 import { MarketConnection, type ConnectionState } from '@/features/chart/transport';
+import { getValidAccessToken } from '@/lib/auth-coordinator';
 import type { DashboardSummary, EconomicEvent } from '@/types/dashboard.generated';
 import type { Candle, Quote, MarketDataStatus } from '@/types/market.generated';
 import { bangkok, eventName } from '@/features/news/thai';
@@ -211,12 +212,7 @@ export function Dashboard() {
     };
 
     const connection = new MarketConnection(
-      async () => {
-        await api.getMe();
-        const t = localStorage.getItem('access_token');
-        if (!t) throw new Error('Session expired');
-        return t;
-      },
+      getValidAccessToken,
       (msg) => {
         if (abort.signal.aborted) return;
         setMarketStatus(msg.status);

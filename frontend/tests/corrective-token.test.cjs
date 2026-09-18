@@ -31,7 +31,7 @@ const cases = [
 ];
 function harness(mode, payload) {
   const items = new Map([['unrelated', 'keep']]);
-  if (mode !== 'login') { items.set('access_token', 'old-access'); }
+  const sessionItems = new Map();
   const document = { cookie: 'unrelated=keep' };
   const before = { items: JSON.stringify([...items]), cookie: document.cookie };
   const modules = new Map();
@@ -41,11 +41,18 @@ function harness(mode, payload) {
       getItem: key => items.get(key) || null, setItem: (key, value) => items.set(key, value),
       removeItem: key => items.delete(key),
     },
-    fetch: async url => {
+    sessionStorage: {
+      getItem: key => sessionItems.get(key) || null, setItem: (key, value) => sessionItems.set(key, value),
+      removeItem: key => sessionItems.delete(key),
+    },
+    fetch: async (url, options) => {
       if (url.endsWith('/auth/login') || url.endsWith('/auth/refresh')) {
         return new Response(JSON.stringify(payload), { status: 200 });
       }
-      const accepted = items.get('access_token') === valid.access_token;
+      const authHeader = options?.headers instanceof Headers
+        ? options.headers.get('Authorization')
+        : options?.headers?.Authorization;
+      const accepted = authHeader === 'Bearer ' + valid.access_token;
       return new Response(JSON.stringify(accepted ?
         { id: 'fixture-id', email: 'user@example.com', role: 'VIEWER', is_active: true } : {}),
       { status: accepted ? 200 : 401 });
@@ -76,20 +83,22 @@ for (const [name, payload] of cases) {
       } else {
         await h.store.getState().hydrate();
       }
-      assert.equal(JSON.stringify([...h.items]), h.before.items, mode + ': storage unchanged');
+      assert.equal(h.items.has('access_token'), false, mode + ': no access_token in storage');
+      assert.equal(h.items.has('refresh_token'), false, mode + ': no refresh_token in storage');
       assert.equal(h.document.cookie, h.before.cookie, mode + ': cookie unchanged');
       assert.equal(h.store.getState().isAuthenticated, false);
       assert.equal(h.store.getState().user, null);
     }
   });
 }
-test('valid future bearer responses persist and authenticate for login/refresh/recovery', async () => {
+test('valid future bearer responses authenticate in memory and never write to storage', async () => {
   for (const mode of ['login', 'refresh', 'hydrate']) {
     const h = harness(mode, valid);
     if (mode === 'login') assert.equal(await h.store.getState().login('user@example.com', 'fixture-password'), true);
     else if (mode === 'refresh') await h.store.getState().fetchUser();
     else await h.store.getState().hydrate();
-    assert.equal(h.items.get('access_token'), valid.access_token);
+    assert.equal(h.items.has('access_token'), false);
+    assert.equal(h.items.has('refresh_token'), false);
     assert.equal(h.store.getState().isAuthenticated, true);
   }
 });

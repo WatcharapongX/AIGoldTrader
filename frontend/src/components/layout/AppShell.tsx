@@ -29,7 +29,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }
     });
     const onExpired = () => {
-      useAuthStore.setState({ user: null, isAuthenticated: false });
+      useAuthStore.setState({ user: null, isAuthenticated: false, status: 'unauthenticated' });
       router.replace('/login');
     };
     window.addEventListener('auth:expired', onExpired);

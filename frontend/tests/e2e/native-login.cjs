@@ -41,21 +41,40 @@ async function main() {
     results.login_correlation_id = loginResponse.headers()['x-correlation-id'];
     await page.waitForURL(url => url.pathname === '/dashboard');
     await page.getByText('Market workspace · PAPER', { exact: true }).waitFor();
-    assert.ok(await page.evaluate(() => Boolean(localStorage.getItem('access_token') && localStorage.getItem('refresh_token'))));
-    assert.ok((await page.context().cookies()).some(c => c.name === 'access_token'));
+    // Verify zero persistent auth tokens in browser storage
+    const storageState = await page.evaluate(() => ({
+      localAccess: localStorage.getItem('access_token'),
+      localRefresh: localStorage.getItem('refresh_token'),
+      sessionAccess: sessionStorage.getItem('access_token'),
+      sessionRefresh: sessionStorage.getItem('refresh_token'),
+      docCookie: document.cookie,
+    }));
+    assert.equal(storageState.localAccess, null);
+    assert.equal(storageState.localRefresh, null);
+    assert.equal(storageState.sessionAccess, null);
+    assert.equal(storageState.sessionRefresh, null);
+    assert.equal(storageState.docCookie.includes('access_token'), false);
+    assert.equal(storageState.docCookie.includes('refresh_token'), false);
+
+    // Verify HttpOnly refresh cookie is present in browser context
+    const cookies = await page.context().cookies();
+    const refreshCookie = cookies.find(c => c.name === '__Host-aigold_refresh' || c.name === 'aigold_refresh_dev');
+    assert.ok(refreshCookie, 'HttpOnly refresh cookie must exist');
+    assert.equal(refreshCookie.httpOnly, true, 'Refresh cookie must be HttpOnly');
+    assert.equal(cookies.some(c => c.name === 'access_token'), false, 'No access token cookie in browser');
     results.login_authenticated_shell = 'PASS';
     await page.screenshot({ path: path.join(output, 'dashboard.png'), fullPage: true });
+
     stage = 'session_reload';
+    // On reload, memory token is gone; bootstrap must call /api/auth/refresh using HttpOnly cookie
+    const refreshOnReload = page.waitForResponse(r => r.url().endsWith('/api/auth/refresh'));
     await page.reload();
+    const reloadRefreshRes = await refreshOnReload;
+    assert.equal(reloadRefreshRes.status(), 200);
     await page.getByText('Market workspace · PAPER', { exact: true }).waitFor();
     results.session_reload = 'PASS';
-    stage = 'token_refresh';
-    await page.evaluate(() => localStorage.setItem('access_token', 'expired-test-access-token'));
-    const refresh = page.waitForResponse(r => r.url().endsWith('/api/auth/refresh'));
-    await page.reload();
-    assert.equal((await refresh).status(), 200);
-    await page.getByText('Market workspace · PAPER', { exact: true }).waitFor();
     results.token_refresh = 'PASS';
+
     stage = 'logout';
     // Click the real UI control: do not call the store or endpoint to bypass it.
     const logout = page.waitForResponse(r => r.url().endsWith('/api/auth/logout'));
@@ -63,7 +82,8 @@ async function main() {
     assert.equal((await logout).status(), 200);
     await page.waitForURL(url => url.pathname === '/login');
     assert.ok(await page.evaluate(() => !localStorage.getItem('access_token') && !localStorage.getItem('refresh_token')));
-    assert.ok(!(await page.context().cookies()).some(c => c.name === 'access_token'));
+    const postLogoutCookies = await page.context().cookies();
+    assert.equal(postLogoutCookies.some(c => (c.name === '__Host-aigold_refresh' || c.name === 'aigold_refresh_dev') && c.value), false);
     await page.goto(baseURL + '/dashboard');
     await page.waitForURL(url => url.pathname === '/login');
     results.logout_and_session_clear = 'PASS';

@@ -63,9 +63,6 @@ async function main(){
   stage='unavailable';
   const failures=await browser.newPage();activePage=failures;
   await failures.context().addCookies(await page.context().cookies());
-  await failures.addInitScript(tokens=>{
-   for(const [k,v] of Object.entries(tokens))if(v)localStorage.setItem(k,v);
-  },await page.evaluate(()=>({access_token:localStorage.getItem('access_token'),refresh_token:localStorage.getItem('refresh_token')})));
   await failures.route('**/api/**',route=>{
    const p=new URL(route.request().url()).pathname;
    if(['/api/dashboard/summary','/api/healthz','/api/readyz','/api/market/status'].includes(p))

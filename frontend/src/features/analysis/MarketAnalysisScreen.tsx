@@ -23,6 +23,7 @@ import { parseKillSwitch, parseRiskDecisions } from '@/features/risk/contracts';
 import type { AIAnalysisResult } from '@/types/ai.generated';
 import { instant, parseCandles, parseStatus, parseSymbols, providerLabel, timeframes } from '@/features/chart/contracts';
 import { MarketConnection, type ConnectionState } from '@/features/chart/transport';
+import { getValidAccessToken } from '@/lib/auth-coordinator';
 import { parseUiPreferences, UI_PREFERENCES_KEY } from '@/features/settings/contracts';
 
 function chartPoint(candle: Candle) {
@@ -625,12 +626,7 @@ export function MarketAnalysisScreen({
         }
 
         connection = new MarketConnection(
-          async () => {
-            await api.getMe();
-            const token = localStorage.getItem('access_token');
-            if (!token) throw new Error('Session expired');
-            return token;
-          },
+          getValidAccessToken,
           (message) => {
             if (!active) return;
             setProvider(message.status);

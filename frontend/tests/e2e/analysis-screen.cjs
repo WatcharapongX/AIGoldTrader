@@ -139,8 +139,7 @@ async function main() {
     throw new Error(stage + ': ' + error.message);
   } finally {
     await page.evaluate(async () => {
-      const token = localStorage.getItem('access_token');
-      if (token) await fetch('/api/auth/logout', { method:'POST',headers:{ Authorization:'Bearer ' + token } });
+      await fetch('/api/auth/logout', { method:'POST',credentials:'same-origin' });
     }).catch(() => {});
     await browser.close();
   }

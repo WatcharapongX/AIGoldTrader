@@ -1,82 +1,79 @@
 import { create } from 'zustand';
-import { api, clearSession } from '@/lib/api';
-import { ApiContractError } from '@/lib/contracts';
+import {
+  authCoordinator,
+  type AuthStatus,
+  type AuthCoordinatorState,
+} from '@/lib/auth-coordinator';
 import type { User } from '@/types';
+
+export type { AuthStatus };
 
 interface AuthState {
   user: User | null;
+  status: AuthStatus;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
-  
+
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
   fetchUser: () => Promise<void>;
   clearError: () => void;
-  hydrate: () => Promise<void>; // check stored tokens on app load
+  hydrate: () => Promise<void>; // bootstrap on app load
+  bootstrap: (options?: { force?: boolean }) => Promise<boolean>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  isAuthenticated: false,
-  isLoading: false,
-  error: null,
-  
-  login: async (email, password) => {
-    set({ isLoading: true, error: null });
-    try {
-      await api.login(email, password);
-      const user = await api.getMe();
-      set({ user, isAuthenticated: true, isLoading: false });
-      return true;
-    } catch (err) {
-      set({ error: (err as Error).message, isLoading: false });
-      return false;
-    }
-  },
-  
-  logout: async () => {
-    try { await api.logout(); } catch {} 
-    if (typeof window !== 'undefined') {
-      clearSession();
-    }
-    set({ user: null, isAuthenticated: false, error: null });
-  },
-  
-  fetchUser: async () => {
-    try {
-      const user = await api.getMe();
-      set({ user, isAuthenticated: true });
-    } catch {
-      set({ user: null, isAuthenticated: false });
-    }
-  },
-  
-  clearError: () => set({ error: null }),
-  
-  hydrate: async () => {
-    set({ isLoading: true });
-    if (typeof window === 'undefined') {
-      set({ isLoading: false });
-      return;
-    }
-    try {
-      localStorage.removeItem('refresh_token');
-      sessionStorage.removeItem('refresh_token');
-    } catch {
-      // Ignore storage access errors
-    }
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-      set({ isLoading: false });
-      return;
-    }
-    try {
-      const user = await api.getMe();
-      set({ user, isAuthenticated: true, isLoading: false });
-    } catch (error) {
-      if (!(error instanceof ApiContractError)) clearSession();
-      set({ user: null, isAuthenticated: false, isLoading: false });
-    }
-  },
-}));
+export const useAuthStore = create<AuthState>((set) => {
+  // Synchronize Zustand with AuthCoordinator events
+  authCoordinator.subscribe((coordState: AuthCoordinatorState) => {
+    set({
+      user: coordState.user,
+      status: coordState.status,
+      error: coordState.error,
+      isAuthenticated: coordState.status === 'authenticated',
+      isLoading:
+        coordState.status === 'bootstrapping' ||
+        coordState.status === 'refreshing' ||
+        coordState.status === 'logging_out',
+    });
+  });
+
+  return {
+    user: null,
+    status: 'idle',
+    isAuthenticated: false,
+    isLoading: false,
+    error: null,
+
+    login: async (email: string, password: string) => {
+      try {
+        await authCoordinator.login(email, password);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    logout: async () => {
+      await authCoordinator.logout();
+    },
+
+    fetchUser: async () => {
+      try {
+        await authCoordinator.fetchMe();
+      } catch {
+        // State update handled by coordinator
+      }
+    },
+
+    clearError: () => set({ error: null }),
+
+    hydrate: async () => {
+      await authCoordinator.bootstrap();
+    },
+
+    bootstrap: async (options?: { force?: boolean }) => {
+      return await authCoordinator.bootstrap(options);
+    },
+  };
+});

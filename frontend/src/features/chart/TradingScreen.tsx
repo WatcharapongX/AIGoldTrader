@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 import type { Candle, MarketDataStatus, Quote, SymbolInfo, Timeframe } from '@/types/market.generated';
 import { instant, parseCandles, parseStatus, parseSymbols, providerLabel, timeframes } from './contracts';
 import { MarketConnection, type ConnectionState } from './transport';
+import { getValidAccessToken } from '@/lib/auth-coordinator';
 
 function chartPoint(candle: Candle) {
   return { time: instant(candle.open_time) / 1000 as UTCTimestamp,
@@ -128,12 +129,7 @@ export function TradingScreen() {
           await new Promise(resolve => setTimeout(resolve, 500));
           if (!active) return;
         }
-        connection = new MarketConnection(async () => {
-          await api.getMe(); // Existing refresh/single-flight semantics; never token in a URL.
-          const token = localStorage.getItem('access_token');
-          if (!token) throw new Error('Session expired');
-          return token;
-        }, message => {
+        connection = new MarketConnection(getValidAccessToken, message => {
           if (!active) return;
           setProvider(message.status); staleSeconds.current = message.status.stale_after_seconds;
           if (message.quote) { latest.current = message.quote; setQuote(message.quote); }

@@ -13,6 +13,8 @@ function load(file, overrides = {}) {
   } }).outputText;
   vm.runInNewContext(output, { exports, process, Date, BigInt, setTimeout, clearTimeout, setInterval, clearInterval,
     require: name => name === './contracts' ? load('contracts.ts') :
+      name === '@/lib/auth-coordinator' ? { getValidAccessToken: async () => 'fixture' } :
+      name === '@/lib/api' ? { clearSession: () => {} } :
       name.endsWith('.json') ? require('../src/features/chart/market-contract.generated.json') : require(name),
     ...overrides,
   });

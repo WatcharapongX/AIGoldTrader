@@ -47,8 +47,8 @@ async function main(){
  }catch(error){result.status='FAIL';result.stage=stage;result.error=error.message;result.errors=errors;
    result.api_errors=apiErrors;await page.screenshot({path:path.join(out,'failure.png')}).catch(()=>{});process.exitCode=1;
  }finally{
-  await page.evaluate(async()=>{const token=localStorage.getItem('access_token');if(token)await fetch('http://localhost:8000/api/auth/logout',
-    {method:'POST',headers:{Authorization:'Bearer '+token}}).catch(()=>{});}).catch(()=>{});
+   await page.evaluate(async()=>{await fetch('http://localhost:8000/api/auth/logout',
+     {method:'POST',credentials:'same-origin'}).catch(()=>{});}).catch(()=>{});
   await browser.close();fs.writeFileSync(path.join(out,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
  }
 }

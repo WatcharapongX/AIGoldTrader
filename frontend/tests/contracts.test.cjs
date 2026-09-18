@@ -14,7 +14,7 @@ function load(file, overrides = {}) {
   const exports = {};
   vm.runInNewContext(outputText, {
     exports, process, Headers, Event,
-    require: name => name === '@/lib/contracts' ? load('lib/contracts.ts') : require(name),
+    require: name => name.startsWith('@/') ? load(name.slice(2) + (name.endsWith('.ts') ? '' : '.ts'), overrides) : require(name),
     ...overrides,
   }, { filename: file });
   return exports;

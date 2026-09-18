@@ -1,69 +1,103 @@
 import type { AccessTokenResponse, User, HealthResponse, ReadyResponse } from '@/types';
-import { parseUser, parseAccessTokenResponse, parseHealth, parseReady, errorMessage, ApiContractError } from '@/lib/contracts';
+import { parseUser, parseHealth, parseReady, errorMessage } from '@/lib/contracts';
+import {
+  getTokenSnapshot,
+  clearAccessToken,
+  purgeLegacyAuthStorage,
+} from '@/lib/auth-token-memory';
+import { authCoordinator, AuthCoordinator } from '@/lib/auth-coordinator';
 
 export function clearSession() {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    sessionStorage.removeItem('refresh_token');
-  } catch {
-    // Ignore storage failures
+  clearAccessToken();
+  purgeLegacyAuthStorage();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('auth:expired'));
   }
-  window.dispatchEvent(new Event('auth:expired'));
 }
 
 export class ApiClient {
   private baseUrl: string;
-  private refreshPromise: Promise<string> | null = null;
+  private coordinator: AuthCoordinator;
 
-  constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || (typeof window !== 'undefined' ? '/api' : (process.env.BACKEND_INTERNAL_URL || 'http://127.0.0.1:8000/api'));
+  constructor(baseUrl?: string, coordinator?: AuthCoordinator) {
+    this.baseUrl =
+      baseUrl ||
+      (typeof window !== 'undefined'
+        ? '/api'
+        : process.env.BACKEND_INTERNAL_URL || 'http://127.0.0.1:8000/api');
+    this.coordinator =
+      coordinator || (baseUrl ? new AuthCoordinator(this.baseUrl) : authCoordinator);
   }
 
-  private refreshAccessToken(): Promise<string> {
-    if (!this.refreshPromise) {
-      this.refreshPromise = (async () => {
-        const tokens = await this.refreshTokenRequest();
-        if (!tokens) {
-          clearSession();
-          throw new Error('Session expired. Please sign in again.');
-        }
-        localStorage.setItem('access_token', tokens.access_token);
-        return tokens.access_token;
-      })().finally(() => { this.refreshPromise = null; });
-    }
-    return this.refreshPromise;
-  }
-
-  private async request(method: string, path: string, body?: unknown, options?: RequestInit): Promise<unknown> {
+  private async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: RequestInit,
+  ): Promise<unknown> {
     const url = `${this.baseUrl}${path}`;
-    const accessToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const initialSnapshot = getTokenSnapshot();
     const headers = new Headers(options?.headers);
     headers.set('Content-Type', 'application/json');
-    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+
+    if (initialSnapshot.token) {
+      headers.set('Authorization', `Bearer ${initialSnapshot.token}`);
+    }
+
     const config: RequestInit = {
       credentials: 'same-origin',
       ...options,
       method,
       headers,
     };
-    if (body !== undefined) config.body = JSON.stringify(body);
-    let response = await fetch(url, config);
-    if (response.status === 401 && accessToken && path !== '/auth/login') {
-      // Every concurrent request shares the same resolving/rejecting promise.
-      const currentToken = localStorage.getItem('access_token');
-      const token = currentToken && currentToken !== accessToken
-        ? currentToken : await this.refreshAccessToken();
-      headers.set('Authorization', `Bearer ${token}`);
-      response = await fetch(url, { ...config, headers });
-      if (response.status === 401) clearSession();
+
+    if (body !== undefined) {
+      config.body = JSON.stringify(body);
     }
+
+    let response = await fetch(url, config);
+
+    // Bounded 401 retry:
+    // Exclude /auth/login and /auth/refresh from refresh recursion.
+    if (response.status === 401 && path !== '/auth/login' && path !== '/auth/refresh') {
+      const currentSnapshot = getTokenSnapshot();
+      let retryToken: string;
+
+      if (
+        currentSnapshot.generation !== initialSnapshot.generation &&
+        currentSnapshot.token
+      ) {
+        // Generation already changed by another request/coordinator; retry once with new token
+        retryToken = currentSnapshot.token;
+      } else {
+        // Generation unchanged: perform coordinated refresh
+        try {
+          retryToken = await this.coordinator.refreshAccessToken();
+        } catch {
+          clearSession();
+          throw new Error('Session expired. Please sign in again.');
+        }
+      }
+
+      headers.set('Authorization', `Bearer ${retryToken}`);
+      response = await fetch(url, { ...config, headers });
+
+      if (response.status === 401) {
+        clearSession();
+        throw new Error('Session expired. Please sign in again.');
+      }
+    }
+
     if (!response.ok) {
       let message: string | undefined;
-      try { message = errorMessage(await response.json()); } catch { /* Non-JSON error response. */ }
+      try {
+        message = errorMessage(await response.json());
+      } catch {
+        /* Non-JSON error response. */
+      }
       throw new Error(message || response.statusText || 'An API error occurred');
     }
+
     if (response.status === 204) return null;
     return await response.json();
   }
@@ -89,41 +123,12 @@ export class ApiClient {
   }
 
   // Auth methods
-  private async refreshTokenRequest(): Promise<AccessTokenResponse | null> {
-    try {
-      const response = await fetch(`${this.baseUrl}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        return null;
-      }
-
-      return parseAccessTokenResponse(await response.json());
-    } catch (error) {
-      if (error instanceof ApiContractError) throw error;
-      return null;
-    }
-  }
-
   public async login(email: string, password: string): Promise<AccessTokenResponse> {
-    const data = parseAccessTokenResponse(await this.post('/auth/login', { email, password }));
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('access_token', data.access_token);
-    }
-    return data;
+    return await this.coordinator.login(email, password);
   }
 
   public async logout(): Promise<void> {
-    try {
-      await this.post('/auth/logout');
-    } finally {
-      clearSession();
-    }
+    await this.coordinator.logout();
   }
 
   public async getMe(): Promise<User> {
