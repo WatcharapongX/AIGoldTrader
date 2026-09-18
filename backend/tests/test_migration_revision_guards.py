@@ -5,6 +5,7 @@ Verifies strict exact-string revision matching:
 - REV_0013 = "0013_batch_a_risk_authority" -> SKIP NORMALIZER
 - REV_0014 = "0014_batch_a2_account_authority" -> SKIP NORMALIZER
 - REV_0015 = "0015_batch_a3_risk_account_fk" -> SKIP NORMALIZER
+- REV_0016 = "0016_batch_b_refresh_families" -> SKIP NORMALIZER
 
 All unsupported / invalid / unknown revisions must FAIL CLOSED:
 - 0012_unknown -> FAIL
@@ -36,6 +37,7 @@ from app.scripts.normalize_0012_accounts import (
     REV_0013,
     REV_0014,
     REV_0015,
+    REV_0016,
     normalize_0012_database,
 )
 from app.scripts.safe_db_upgrade import (
@@ -54,6 +56,7 @@ def test_classify_revision_action_exact_matches():
     assert classify_revision_action(REV_0013) == "UPGRADE_ONLY"
     assert classify_revision_action(REV_0014) == "UPGRADE_ONLY"
     assert classify_revision_action(REV_0015) == "UPGRADE_ONLY"
+    assert classify_revision_action(REV_0016) == "UPGRADE_ONLY"
 
 
 @pytest.mark.parametrize(
@@ -107,7 +110,7 @@ def test_normalizer_exact_0012_allowed(sqlite_conn):
     assert res["normalized_aliases"] == 0
 
 
-@pytest.mark.parametrize("upgraded_rev", [REV_0013, REV_0014, REV_0015])
+@pytest.mark.parametrize("upgraded_rev", [REV_0013, REV_0014, REV_0015, REV_0016])
 def test_normalizer_exact_upgraded_skipped(sqlite_conn, upgraded_rev):
     """Exact REV_0013, REV_0014, REV_0015 skip normalizer safely."""
     sqlite_conn.execute("INSERT INTO alembic_version VALUES (?)", (upgraded_rev,))
@@ -259,7 +262,7 @@ def test_safe_db_upgrade_invokes_normalizer_on_exact_0012():
         mock_subproc.assert_called_once()
 
 
-@pytest.mark.parametrize("upgraded_rev", [REV_0013, REV_0014, REV_0015])
+@pytest.mark.parametrize("upgraded_rev", [REV_0013, REV_0014, REV_0015, REV_0016])
 def test_safe_db_upgrade_skips_normalizer_on_exact_upgraded(upgraded_rev):
     """Exact REV_0013, REV_0014, REV_0015 do NOT invoke normalizer, directly apply Alembic upgrade."""
     mock_conn = MagicMock()

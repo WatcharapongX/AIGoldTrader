@@ -4,11 +4,11 @@ import datetime as dt
 import hashlib
 import re
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import AwareDatetime, BaseModel, EmailStr, Field, StringConstraints, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -21,9 +21,16 @@ from app.core.security import create_token, decode_token
 from app.db.session import get_session
 from app.models import RefreshSession, Role, User
 from app.services import audit
-from app.services.users import authenticate, get_user, hash_refresh_token
+from app.services.refresh_sessions import (
+    consume_refresh_session,
+    find_refresh_session_by_hash,
+    revoke_active_family,
+)
+from app.services.users import authenticate, hash_refresh_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+REFRESH_REUSE_GRACE = dt.timedelta(seconds=5)
+INVALID_REFRESH_MESSAGE = "Invalid refresh token"
 
 # auth endpoints อนุญาตสั้นกว่า API ทั่วไป (docs/05 §4)
 _auth_limiter = RateLimiter(
@@ -116,8 +123,11 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
     session.add(
         RefreshSession(
             user_id=user.id,
+            family_id=uuid.uuid4(),
             refresh_token_hash=hash_refresh_token(tokens.refresh_token),
             expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=get_settings().jwt_refresh_token_expire_days),
+            consumed_at=None,
+            revoked_at=None,
             ip=ip,
             user_agent=request.headers.get("user-agent", "")[:300],
         )
@@ -135,34 +145,119 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
     return tokens
 
 
+async def _reject_refresh_reuse(session: AsyncSession, *, token_hash: str) -> NoReturn:
+    """Classify a failed consume internally while keeping one public error."""
+    stored = await find_refresh_session_by_hash(session, token_hash=token_hash)
+    if stored is None or stored.consumed_at is None:
+        raise AuthError(INVALID_REFRESH_MESSAGE)
+
+    consumed_at = _as_utc(stored.consumed_at)
+    within_grace = dt.datetime.now(dt.UTC) - consumed_at <= REFRESH_REUSE_GRACE
+    reason = "concurrent_rejection_within_grace" if within_grace else "consumed_token_replay_family_revoked"
+    await audit.write_audit(
+        session,
+        action="REFRESH_REUSE",
+        entity="refresh_session",
+        entity_id=stored.id,
+        user_id=stored.user_id,
+        reason=reason,
+    )
+    if not within_grace:
+        revoked = await revoke_active_family(session, family_id=stored.family_id)
+        await audit.write_audit(
+            session,
+            action="SESSION_REVOKED",
+            entity="refresh_family",
+            entity_id=stored.family_id,
+            user_id=stored.user_id,
+            reason=f"refresh_replay active_sessions={revoked}",
+        )
+    await session.commit()
+    raise AuthError(INVALID_REFRESH_MESSAGE)
+
+
+async def _revoke_compromised_family(
+    session: AsyncSession,
+    *,
+    family_id: uuid.UUID,
+    user_id: uuid.UUID,
+    session_id: uuid.UUID,
+    reason: str,
+) -> None:
+    revoked = await revoke_active_family(session, family_id=family_id)
+    await audit.write_audit(
+        session,
+        action="SESSION_REVOKED",
+        entity="refresh_family",
+        entity_id=family_id,
+        user_id=user_id,
+        reason=f"{reason} active_sessions={revoked} source_session={session_id}",
+    )
+    await session.commit()
+
+
 @router.post("/refresh", response_model=TokenPair)
-async def refresh(body: RefreshRequest, session: AsyncSession = Depends(get_session)) -> TokenPair:
+async def refresh(
+    body: RefreshRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> TokenPair:
     settings = get_settings()
     try:
         claims = decode_token(body.refresh_token, settings.secret_key, expected_type="refresh")
-    except Exception as exc:  # noqa: BLE001 — ใด ๆ ที่ decode fail = invalid
-        raise AuthError("Invalid refresh token") from exc
+        subject = uuid.UUID(str(claims.get("sub")))
+    except Exception as exc:  # noqa: BLE001 — decode/subject failures intentionally share one contract
+        raise AuthError(INVALID_REFRESH_MESSAGE) from exc
 
     token_hash = hash_refresh_token(body.refresh_token)
-    result = await session.execute(select(RefreshSession).where(RefreshSession.refresh_token_hash == token_hash))
-    stored = result.scalar_one_or_none()
-    if stored is None or stored.revoked_at is not None or _as_utc(stored.expires_at) < dt.datetime.now(dt.UTC):
-        raise AuthError("Refresh session is revoked or expired")
+    try:
+        consumed = await consume_refresh_session(session, token_hash=token_hash)
+        if consumed is None:
+            await _reject_refresh_reuse(session, token_hash=token_hash)
 
-    # rotation: revoke session เดิม ออก token ชุดใหม่
-    stored.revoked_at = dt.datetime.now(dt.UTC)
-    user = await get_user(session, uuid.UUID(str(claims.get("sub"))))
-    tokens = _issue_tokens(user)
-    session.add(
-        RefreshSession(
-            user_id=user.id,
-            refresh_token_hash=hash_refresh_token(tokens.refresh_token),
-            expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=settings.jwt_refresh_token_expire_days),
+        if subject != consumed.user_id:
+            await _revoke_compromised_family(
+                session,
+                family_id=consumed.family_id,
+                user_id=consumed.user_id,
+                session_id=consumed.id,
+                reason="jwt_session_subject_mismatch",
+            )
+            raise AuthError(INVALID_REFRESH_MESSAGE)
+
+        user = await session.get(User, consumed.user_id)
+        if user is None or not user.is_active:
+            await _revoke_compromised_family(
+                session,
+                family_id=consumed.family_id,
+                user_id=consumed.user_id,
+                session_id=consumed.id,
+                reason="user_missing_or_inactive",
+            )
+            raise AuthError(INVALID_REFRESH_MESSAGE)
+
+        tokens = _issue_tokens(user)
+        session.add(
+            RefreshSession(
+                user_id=user.id,
+                family_id=consumed.family_id,
+                refresh_token_hash=hash_refresh_token(tokens.refresh_token),
+                expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=settings.jwt_refresh_token_expire_days),
+                consumed_at=None,
+                revoked_at=None,
+                ip=resolve_client_ip(request),
+                user_agent=request.headers.get("user-agent", "")[:300],
+            )
         )
-    )
-    await audit.write_audit(session, action="TOKEN_REFRESH", entity="user", entity_id=user.id, user_id=user.id)
-    await session.commit()
-    return tokens
+        await audit.write_audit(session, action="TOKEN_REFRESH", entity="user", entity_id=user.id, user_id=user.id)
+        await session.commit()
+        return tokens
+    except AuthError:
+        await session.rollback()
+        raise
+    except Exception:
+        await session.rollback()
+        raise
 
 
 @router.post("/logout")
@@ -174,7 +269,12 @@ async def logout(
     request.state.user = current_user
     # revoke ทุก session ที่ยัง active ของ user (simple policy — ปรับเป็นต่อ-device ได้)
     result = await session.execute(
-        select(RefreshSession).where(RefreshSession.user_id == current_user.id, RefreshSession.revoked_at.is_(None))
+        select(RefreshSession).where(
+            RefreshSession.user_id == current_user.id,
+            RefreshSession.consumed_at.is_(None),
+            RefreshSession.revoked_at.is_(None),
+            RefreshSession.expires_at > func.now(),
+        )
     )
     now = dt.datetime.now(dt.UTC)
     for stored in result.scalars():

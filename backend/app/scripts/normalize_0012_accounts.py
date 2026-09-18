@@ -32,11 +32,13 @@ REV_0012 = "0012_phase5_reconciliation"
 REV_0013 = "0013_batch_a_risk_authority"
 REV_0014 = "0014_batch_a2_account_authority"
 REV_0015 = "0015_batch_a3_risk_account_fk"
+REV_0016 = "0016_batch_b_refresh_families"
 
 KNOWN_UPGRADED_REVISIONS: frozenset[str] = frozenset({
     REV_0013,
     REV_0014,
     REV_0015,
+    REV_0016,
 })
 
 
@@ -104,7 +106,7 @@ def normalize_0012_database(conn: Any) -> dict[str, Any]:
     if not current_revision:
         raise RuntimeError("Cannot normalize: alembic_version table contains empty revision string.")
 
-    # Known later exact revisions: 0013, 0014, 0015 -> SKIP safely
+    # Known later exact revisions: 0013 through 0016 -> SKIP safely
     if current_revision in KNOWN_UPGRADED_REVISIONS:
         logger.info("Database revision is %s; skipping 0012 normalization.", current_revision)
         return {

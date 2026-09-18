@@ -54,6 +54,9 @@ def isolated_postgres(monkeypatch):
         assert (url.host, url.port, url.database) != (dev.host, dev.port, dev.database), (
             "TEST_DATABASE_URL must target a separate database from DEV"
         )
+    else:
+        operational_database = local_config.get("POSTGRES_DB") or "ai_trading"
+        assert url.database != operational_database, "TEST_DATABASE_URL must target a separate database from DEV"
     connection_url = url.set(drivername="postgresql").render_as_string(hide_password=False)
     # The caller supplied a test DB. Only this newly created schema is modified.
     schema = "phase1_gate_" + uuid.uuid4().hex
@@ -207,14 +210,16 @@ def test_postgresql_corrective_roundtrip_and_drift_gate(isolated_postgres):
     )
     session_hash = "migration-fixture-hash"
     conn.execute(
-        "INSERT INTO sessions (id,user_id,refresh_token_hash,expires_at) VALUES (%s,%s,%s,now())",
+        "INSERT INTO sessions (id,user_id,refresh_token_hash,expires_at,revoked_at) VALUES (%s,%s,%s,now(),now())",
         (uuid.uuid4(), user_id, session_hash),
     )
 
     def snapshot():
         return {
             table: conn.execute(
-                sql.SQL("SELECT to_jsonb(t) - 'default_spread' FROM {} t ORDER BY id").format(sql.Identifier(table))
+                sql.SQL(
+                    "SELECT to_jsonb(t) - 'default_spread' - 'family_id' - 'consumed_at' FROM {} t ORDER BY id"
+                ).format(sql.Identifier(table))
             ).fetchall()
             for table in ("users", "sessions", "symbols", "audit_logs", "system_events")
         }
@@ -248,10 +253,17 @@ def test_postgresql_corrective_roundtrip_and_drift_gate(isolated_postgres):
         ).fetchone() == (1, 1)
         assert conn.execute("SELECT session_hours FROM symbols WHERE name='DEFAULT'").fetchone() == ({},)
         with pytest.raises(psycopg.errors.UniqueViolation):
-            conn.execute(
-                "INSERT INTO sessions (id,user_id,refresh_token_hash,expires_at) VALUES (%s,%s,%s,now())",
-                (uuid.uuid4(), user_id, session_hash),
-            )
+            if target == "head":
+                conn.execute(
+                    "INSERT INTO sessions (id,user_id,family_id,refresh_token_hash,expires_at) "
+                    "VALUES (%s,%s,%s,%s,now())",
+                    (uuid.uuid4(), user_id, uuid.uuid4(), session_hash),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO sessions (id,user_id,refresh_token_hash,expires_at) VALUES (%s,%s,%s,now())",
+                    (uuid.uuid4(), user_id, session_hash),
+                )
         if target == "head":
             _alembic("check")
         else:
@@ -281,6 +293,7 @@ def _verify_schema(conn, schema, expected):
         ("0013_batch_a_risk_authority",),
         ("0014_batch_a2_account_authority",),
         ("0015_batch_a3_risk_account_fk",),
+        ("0016_batch_b_refresh_families",),
     )
     indexes = {
         row[0]: row[1]
@@ -291,7 +304,13 @@ def _verify_schema(conn, schema, expected):
     for unique_index in ("ix_users_email", "ix_sessions_refresh_token_hash", "ix_symbols_name"):
         assert "UNIQUE INDEX" in indexes[unique_index]
     assert "uq_sessions_refresh_token_hash" not in indexes
-    assert {"ix_accounts_user_id", "ix_sessions_user_id", "ix_audit_logs_ts", "ix_audit_logs_action"} <= indexes.keys()
+    assert {
+        "ix_accounts_user_id",
+        "ix_sessions_user_id",
+        "ix_sessions_family_id",
+        "ix_audit_logs_ts",
+        "ix_audit_logs_action",
+    } <= indexes.keys()
     constraints = conn.execute(
         "SELECT table_name, constraint_type FROM information_schema.table_constraints WHERE table_schema = %s",
         (schema,),
@@ -339,6 +358,7 @@ async def _verify_auth():
             session.add(
                 RefreshSession(
                     user_id=uuid.uuid4(),
+                    family_id=uuid.uuid4(),
                     refresh_token_hash=secrets.token_hex(32),
                     expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=1),
                 )
@@ -397,7 +417,10 @@ async def _verify_auth():
             sessions = (
                 (await session.execute(select(RefreshSession).where(RefreshSession.user_id == user_id))).scalars().all()
             )
-            assert len(sessions) == 2 and all(item.revoked_at for item in sessions)
+            assert len(sessions) == 2
+            assert len({item.family_id for item in sessions}) == 1
+            assert sum(item.consumed_at is not None for item in sessions) == 1
+            assert sum(item.consumed_at is None and item.revoked_at is not None for item in sessions) == 1
             assert all(item.refresh_token_hash != tokens["refresh_token"] for item in sessions)
         return (password, tokens["access_token"], tokens["refresh_token"], get_settings().secret_key)
 
