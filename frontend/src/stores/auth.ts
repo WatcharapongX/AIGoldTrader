@@ -60,6 +60,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ isLoading: false });
       return;
     }
+    try {
+      localStorage.removeItem('refresh_token');
+      sessionStorage.removeItem('refresh_token');
+    } catch {
+      // Ignore storage access errors
+    }
     const token = localStorage.getItem('access_token');
     if (!token) {
       set({ isLoading: false });

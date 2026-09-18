@@ -76,10 +76,6 @@ class AccessTokenResponse(BaseModel):
 TokenPair = AccessTokenResponse
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str | None = None
-
-
 class MeResponse(BaseModel):
     id: str
     email: str
@@ -233,16 +229,12 @@ async def _revoke_compromised_family(
 async def refresh(
     request: Request,
     response: Response,
-    body: RefreshRequest | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> AccessTokenResponse:
     validate_auth_origin(request)
     settings = get_settings()
     cookie_name = get_refresh_cookie_name(settings)
     raw_token = request.cookies.get(cookie_name)
-    if not raw_token and body and body.refresh_token:
-        # Transitional fallback for tests passing explicit body
-        raw_token = body.refresh_token
 
     if not raw_token:
         raise AuthError(INVALID_REFRESH_MESSAGE)

@@ -3,7 +3,13 @@ import { parseUser, parseAccessTokenResponse, parseHealth, parseReady, errorMess
 
 export function clearSession() {
   if (typeof window === 'undefined') return;
-  localStorage.removeItem('access_token');
+  try {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    sessionStorage.removeItem('refresh_token');
+  } catch {
+    // Ignore storage failures
+  }
   window.dispatchEvent(new Event('auth:expired'));
 }
 

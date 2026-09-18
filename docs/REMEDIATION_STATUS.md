@@ -1,9 +1,9 @@
-# Post-Freeze Remediation Status: Batch A through Batch B2
+# Post-Freeze Remediation Status: Batch A through Batch B2.1
 
 ## Executive Summary
-This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening), **Correction Batch A.3.2** (Database Config Compatibility & Cross-Domain Fixture Alignment), **Batch B1** (Atomic Refresh Rotation and Session Families), and **Batch B2** (Secure Refresh Cookie and Browser Auth Contract) of the post-freeze audit findings for **AIGoldTrader**.
+This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening), **Correction Batch A.3.2** (Database Config Compatibility & Cross-Domain Fixture Alignment), **Batch B1** (Atomic Refresh Rotation and Session Families), **Batch B2** (Secure Refresh Cookie and Browser Auth Contract), and **Correction Batch B2.1** (Refresh Cookie Contract Closure) of the post-freeze audit findings for **AIGoldTrader**.
 
-All confirmed findings assigned through Batch B1 remain closed. Batch B2 partially remediates **AUD-P2-002** (Browser-Safe Refresh Token Storage and Origin CSRF Contract). **AUD-P1-005** remains **CLOSED**. **AUD-P2-002** status is updated to **PARTIAL / OPEN** pending the final client-side in-memory token coordinator and tab synchronization scheduled for **Batch B3**. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+All confirmed findings assigned through Batch B1 remain closed. Batch B2 and B2.1 partially remediate **AUD-P2-002** (Browser-Safe Refresh Token Storage and Origin CSRF Contract). **AUD-P1-005** remains **CLOSED**. **AUD-P2-002** status is updated to **PARTIAL / OPEN** pending the final client-side in-memory token coordinator and tab synchronization scheduled for **Batch B3**. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
 
 ---
 
@@ -31,6 +31,14 @@ All confirmed findings assigned through Batch B1 remain closed. Batch B2 partial
 - **Scope Boundary / Transitional Debt**:
   - `access_token` temporarily remains stored in browser `localStorage` as transitional debt until **Batch B3** introduces the in-memory token coordinator with Web Locks and BroadcastChannel tab synchronization.
   - Finding **AUD-P2-002** remains **PARTIAL / OPEN** until Batch B3 closure.
+
+### 2. BATCH B2.1: Refresh Cookie Contract Closure (Correction Batch B2.1)
+- **Defect**: `POST /auth/refresh` retained the legacy `RefreshRequest` schema and `body` parameter fallback, which could allow clients to attempt refreshing using request bodies. In the browser frontend, legacy `refresh_token` entries in `localStorage` or `sessionStorage` were not unconditionally purged prior to checking access tokens, and the Next.js proxy checked stale `access_token` cookie and `authorization` headers.
+- **Remediation**:
+  - **Excised `RefreshRequest` & Body Fallback**: Completely removed `RefreshRequest` model and `body: RefreshRequest | None = None` parameter from `POST /auth/refresh` in `backend/app/api/auth.py`. Refresh credential authority is strictly derived from `request.cookies.get(cookie_name)`. Any request providing a valid refresh token in the JSON body without cookie is rejected with generic `401 Unauthorized`, zero database mutation, zero session consumption, and zero successor creation.
+  - **Unconditional Frontend Storage Purge**: In `frontend/src/stores/auth.ts` (`hydrate()`) and `frontend/src/lib/api.ts` (`clearSession()`), added unconditional `localStorage.removeItem('refresh_token')` and `sessionStorage.removeItem('refresh_token')` at initialization before any token inspection, ensuring stale refresh tokens are purged even if no `access_token` exists.
+  - **Proxy Hint Hardening**: In `frontend/src/proxy.ts`, removed stale `access_token` cookie and `authorization` header checks; refresh cookie presence (`__Host-aigold_refresh` or `aigold_refresh_dev`) serves strictly as an optimistic navigation hint.
+  - **Batch B1 Integrity**: Verified all Batch B1 session-family invariants (`consume_refresh_session`, atomic family rotation, 5s grace replay containment, migration 0016) remain completely intact and unaltered.
 
 ---
 
@@ -237,16 +245,16 @@ All confirmed findings assigned through Batch B1 remain closed. Batch B2 partial
 
 | Suite / Gate | Test Scope | Result | Details |
 |---|---|---|---|
-| **Batch B2 Refresh Cookie & Origin Suite** | Cookie attributes (`HttpOnly`, `SameSite=Strict`, `Path=/`, no domain), origin allowlist & normalization, origin rejection (403), loser cookie preservation (no `Max-Age=0`), terminal failure cookie clear (`Max-Age=0`) | **PASS** | 10 passed (`tests/test_batch_b2_cookies.py`) |
+| **Batch B2 Refresh Cookie & Origin Suite** | Cookie attributes (`HttpOnly`, `SameSite=Strict`, `Path=/`, no domain), origin allowlist & normalization, origin rejection (403), loser cookie preservation (no `Max-Age=0`), terminal failure cookie clear (`Max-Age=0`), body credential rejection (401 zero mutation) | **PASS** | 12 passed (`tests/test_batch_b2_cookies.py`) |
 | **Batch B1 Focused Unit Gate** | Login family metadata, atomic successor behavior, grace replay, late replay, rollback/retry, inactive user, current role, JWT/session mismatch, generic failure contract, revision guards | **PASS** | 61 passed, 0 failed |
 | **Batch B1/B2 PostgreSQL Concurrency Gate** | 100 barrier-released two-client refresh races using independent sessions via HttpOnly cookie transport | **PASS** | 100/100 produced exactly one `200` and one `401`; winner rotated cookie, loser did NOT clear cookie; one consumed original and one active same-family successor |
 | **Batch B1/B2 PostgreSQL Replay / Rollback / Migration Gate** | 0015 to 0016 cutover and backfill, immediate replay (preserves cookie), late family revocation (clears cookie), audit-failure rollback and retry | **PASS** | 3 tests passed (`tests/integration/test_batch_b1_postgres.py`) |
-| **Complete PostgreSQL Integration Gate** | All migration, foundation, Batch A, risk, AI, market storage, and Batch B1/B2 integration tests | **PASS** | 60 passed, 0 failed against disposable database `aigoldtrader_batcha3_test`; operational database `ai_trading` was not used or modified |
+| **Complete PostgreSQL Integration Gate** | All migration, foundation, Batch A, risk, AI, market storage, and Batch B1/B2 integration tests | **PASS** | 49 passed, 0 failed against disposable database `aigoldtrader_batcha3_test`; operational database `ai_trading` was not used or modified |
 | **Exact Revision Guard Unit Suite** | Strict canonical revisions (0012-0016), fail-closed on unknown/corrupt, zero-mutation guarantee | **PASS** | 45 tests passed (`tests/test_migration_revision_guards.py`) |
 | **Database Config Matrix Unit Suite** | Cases A-G: DATABASE_URL, POSTGRES_*, precedence, partial config, override isolation, --db-url | **PASS** | 14 tests passed in 0.38s (`tests/test_safe_db_upgrade_config.py`) |
-| **Full Backend Unit Suite** | Complete backend test suite excluding explicitly marked live-external tests | **PASS** | 856 passed, 0 failed (`pytest --ignore=tests/integration -q`) |
+| **Full Backend Unit Suite** | Complete backend test suite excluding explicitly marked live-external tests | **PASS** | 858 passed, 0 failed (`pytest --ignore=tests/integration -q`) |
 | **Backend Static Quality Gates** | Ruff linting and Mypy type-checking on all auth modules and tests | **PASS** | All checks passed (`ruff check backend/`), 0 issues (`mypy`) |
-| **Frontend Test Suite** | Component, contract, truthfulness, cookie auth, AccessTokenResponse tests | **PASS** | 253 passed, 0 failed (`npm test -- --run`) |
+| **Frontend Test Suite** | Component, contract, truthfulness, cookie auth, AccessTokenResponse, storage purge tests | **PASS** | 256 passed, 0 failed (`npm test -- --run`) |
 | **Frontend Typecheck** | TypeScript static typing | **PASS** | 0 errors (`npm run typecheck`) |
 | **Frontend ESLint** | Linter rules & code hygiene | **PASS** | 0 errors (`npm run lint`) |
 | **Next.js Production Build** | Production compiler & asset optimization | **PASS** | 20 routes compiled cleanly (`npm run build`) |

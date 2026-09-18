@@ -17,11 +17,22 @@ function load(file, overrides = {}, mocks = {}) {
   return exports;
 }
 function browser() {
-  const items = new Map([['access_token', 'old'], ['refresh_token', 'refresh-old']]);
-  return { window: { dispatchEvent() {} }, document: { cookie: '' }, localStorage: {
-    getItem: key => items.get(key) || null,
-    setItem: (key, value) => items.set(key, value), removeItem: key => items.delete(key),
-  } };
+  const items = new Map([['access_token', 'old']]);
+  const sessionItems = new Map();
+  return {
+    window: { dispatchEvent() {} },
+    document: { cookie: '' },
+    localStorage: {
+      getItem: key => items.get(key) || null,
+      setItem: (key, value) => items.set(key, value),
+      removeItem: key => items.delete(key),
+    },
+    sessionStorage: {
+      getItem: key => sessionItems.get(key) || null,
+      setItem: (key, value) => sessionItems.set(key, value),
+      removeItem: key => sessionItems.delete(key),
+    },
+  };
 }
 const response = (status, data) => new Response(JSON.stringify(data), { status });
 
@@ -112,4 +123,45 @@ test('proxy exposes only the named login illustration without opening protected 
     assert.equal(redirect.pathname, '/login');
     assert.equal(redirect.searchParams.get('redirect'), pathname);
   }
+});
+
+test('hydrate unconditionally purges legacy refresh_token from browser storage without reading it', async () => {
+  const env = browser();
+  env.localStorage.setItem('refresh_token', 'legacy-secret-token');
+  env.localStorage.setItem('access_token', 'valid-access');
+  const requestedUrls = [];
+  env.fetch = async (url, options) => {
+    requestedUrls.push({ url, options });
+    return response(200, { id: 'u1', email: 'user@example.com', role: 'VIEWER', is_active: true });
+  };
+  const { useAuthStore } = load('stores/auth.ts', env, {
+    '@/lib/api': load('lib/api.ts', env),
+  });
+  await useAuthStore.getState().hydrate();
+  assert.equal(env.localStorage.getItem('refresh_token'), null);
+  // Verify legacy value was never sent in any request
+  assert.equal(JSON.stringify(requestedUrls).includes('legacy-secret-token'), false);
+  assert.equal(useAuthStore.getState().isAuthenticated, true);
+});
+
+test('hydrate purges legacy refresh_token even when access_token is completely absent', async () => {
+  const env = browser();
+  env.localStorage.removeItem('access_token');
+  env.localStorage.setItem('refresh_token', 'legacy-orphan-token');
+  const { useAuthStore } = load('stores/auth.ts', env, {
+    '@/lib/api': load('lib/api.ts', env),
+  });
+  await useAuthStore.getState().hydrate();
+  assert.equal(env.localStorage.getItem('refresh_token'), null);
+  assert.equal(useAuthStore.getState().isAuthenticated, false);
+});
+
+test('clearSession purges access_token and legacy refresh_token defense-in-depth', () => {
+  const env = browser();
+  env.localStorage.setItem('access_token', 'active-access');
+  env.localStorage.setItem('refresh_token', 'stale-refresh');
+  const { clearSession } = load('lib/api.ts', env);
+  clearSession();
+  assert.equal(env.localStorage.getItem('access_token'), null);
+  assert.equal(env.localStorage.getItem('refresh_token'), null);
 });

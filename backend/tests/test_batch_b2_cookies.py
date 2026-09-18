@@ -307,3 +307,93 @@ def test_production_startup_validation() -> None:
             auth_cookie_name="__Host-aigold_refresh",
             auth_trusted_origins="http://localhost:3000",
         ).validate_runtime_secrets()
+
+
+async def test_refresh_ignores_json_body_without_cookie_zero_mutation(
+    client: TestClient, admin_user, db_session
+) -> None:
+    """Gap #1: JSON body containing valid refresh token without cookie must return 401 with 0 DB mutations."""
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "admin-pass-123"},
+        headers={"origin": "http://localhost:3000"},
+    )
+    assert login.status_code == 200
+    token = login.cookies.get("aigold_refresh_dev")
+    assert token is not None
+
+    session, _ = db_session
+    before_sess = await session.scalar(
+        select(RefreshSession).where(RefreshSession.refresh_token_hash == hash_refresh_token(token))
+    )
+    assert before_sess is not None and before_sess.consumed_at is None
+
+    # Clear all cookies so client has NO refresh cookie
+    client.cookies.clear()
+
+    # Send POST /auth/refresh with valid token in JSON body but no cookie
+    response = client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": token},
+        headers={"origin": "http://localhost:3000"},
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["message"] == "Invalid refresh token"
+    assert "set-cookie" not in response.headers
+
+    # Verify zero DB mutation: session remains unconsumed and unrevoked, no successors created
+    after_sess = await session.scalar(
+        select(RefreshSession).where(RefreshSession.refresh_token_hash == hash_refresh_token(token))
+    )
+    assert after_sess is not None
+    assert after_sess.consumed_at is None
+    assert after_sess.revoked_at is None
+
+    family_sessions = (
+        await session.scalars(select(RefreshSession).where(RefreshSession.family_id == before_sess.family_id))
+    ).all()
+    assert len(family_sessions) == 1
+
+
+async def test_refresh_cookie_is_sole_authority_ignores_body(
+    client: TestClient, admin_user, db_session
+) -> None:
+    """Gap #1: Cookie is the sole authority; body content is completely ignored."""
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "admin-pass-123"},
+        headers={"origin": "http://localhost:3000"},
+    )
+    assert login.status_code == 200
+    token_a = login.cookies.get("aigold_refresh_dev")
+    assert token_a is not None
+
+    session, _ = db_session
+    before_sess = await session.scalar(
+        select(RefreshSession).where(RefreshSession.refresh_token_hash == hash_refresh_token(token_a))
+    )
+    assert before_sess is not None
+
+    # Client has cookie_a, but supplies unrelated token in JSON body
+    client.cookies.clear()
+    client.cookies.set("aigold_refresh_dev", token_a)
+    response = client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": "some-other-unrelated-token"},
+        headers={"origin": "http://localhost:3000"},
+    )
+    assert response.status_code == 200
+
+    # Cookie A was the authority that rotated
+    session.expire_all()
+    after_sess = await session.scalar(
+        select(RefreshSession).where(RefreshSession.refresh_token_hash == hash_refresh_token(token_a))
+    )
+    assert after_sess is not None
+    assert after_sess.consumed_at is not None
+
+    # Family has exactly 2 members: consumed A and new successor
+    family_sessions = (
+        await session.scalars(select(RefreshSession).where(RefreshSession.family_id == before_sess.family_id))
+    ).all()
+    assert len(family_sessions) == 2

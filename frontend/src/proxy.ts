@@ -3,11 +3,12 @@ import type { NextRequest } from "next/server";
 
 /**
  * Public routes that do not require authentication.
- * All other routes redirect to /login if no access_token cookie is present.
+ * All other routes redirect to /login if no refresh cookie is present.
  *
- * NOTE: We check for the `access_token` cookie set by the client-side auth
- * store. This is a lightweight gate — actual token validation happens
- * server-side on every API call.
+ * NOTE: Refresh cookie presence (__Host-aigold_refresh or aigold_refresh_dev)
+ * is an optimistic navigation hint only. It does not replace or constitute
+ * authorization; actual token verification and authorization happen
+ * server-side on every FastAPI endpoint.
  */
 const PUBLIC_PATHS = ["/login"];
 // Also allow unauthenticated requests from image optimization for this asset.
@@ -26,9 +27,7 @@ export function proxy(request: NextRequest) {
 
   const hasToken =
     request.cookies.get("__Host-aigold_refresh")?.value ||
-    request.cookies.get("aigold_refresh_dev")?.value ||
-    request.cookies.get("access_token")?.value ||
-    request.headers.get("authorization");
+    request.cookies.get("aigold_refresh_dev")?.value;
 
   const isPublicPath = PUBLIC_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + "/"),

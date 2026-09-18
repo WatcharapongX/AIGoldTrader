@@ -65,7 +65,11 @@ async def resume(request: Request):
         extra_env={"PYTHONPATH": str(tmp_path), "CORS_ORIGINS": "http://localhost:3000"},
     ) as client:
         assert client.get("/api/market/status").status_code == 401
-        login = client.post("/api/auth/login", json={"email": "market@example.com", "password": "market-fixture-pass"})
+        login = client.post(
+            "/api/auth/login",
+            headers={"origin": "http://localhost:3000"},
+            json={"email": "market@example.com", "password": "market-fixture-pass"},
+        )
         assert login.status_code == 200
         token = login.json()["access_token"]
         headers = {"Authorization": "Bearer " + token}
@@ -120,7 +124,7 @@ async def resume(request: Request):
             ws.send(json.dumps({"type": "auth", "token": token}))
             ws.send(json.dumps({"type": "subscribe", "symbol": "XAUUSD", "timeframe": "M5"}))
             assert len(receive(ws, "snapshot").candles) == 300
-        client.post("/api/auth/logout", headers=headers)
+        client.post("/api/auth/logout", headers={"origin": "http://localhost:3000", **headers})
     conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
     assert conn.execute("SELECT count(*) FROM ticks").fetchone()[0] >= 2
     assert conn.execute("SELECT count(DISTINCT timeframe) FROM candles").fetchone()[0] == 9
