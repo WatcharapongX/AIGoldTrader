@@ -14,8 +14,9 @@ export class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
   private authRetryCount = 0;
+  private connectedAt = 0;
 
-  constructor(baseUrl?: string) {
+  constructor(baseUrl?: string, private onClearSession?: () => void) {
     if (baseUrl) {
       this.url = baseUrl;
     } else if (process.env.NEXT_PUBLIC_WS_URL) {
@@ -55,7 +56,8 @@ export class WsClient {
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
       this.reconnectDelay = 1000;
-      this.authRetryCount = 0;
+      this.connectedAt = Date.now();
+      // Notice: authRetryCount is NOT reset merely on TCP onopen before healthy auth is proven.
       // First frame authentication
       if (token && this.ws?.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ type: 'auth', token }));
@@ -106,6 +108,8 @@ export class WsClient {
 
   private onMessage(event: MessageEvent): void {
     try {
+      // Valid message receipt proves authenticated connection; reset auth retry budget
+      this.authRetryCount = 0;
       const data = JSON.parse(event.data);
       if (data && data.type) {
         const topicHandlers = this.handlers.get(data.type);
@@ -124,7 +128,11 @@ export class WsClient {
 
     if (event.code === 4401) {
       if (this.authRetryCount >= 1) {
-        clearSession();
+        if (this.onClearSession) {
+          this.onClearSession();
+        } else {
+          clearSession({ broadcast: true });
+        }
         return;
       }
       this.authRetryCount++;

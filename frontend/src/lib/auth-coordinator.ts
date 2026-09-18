@@ -34,12 +34,14 @@ interface BroadcastEvent {
     | 'session-changed'
     | 'logout'
     | 'session-expired';
+  senderId?: string;
 }
 
 const BROADCAST_CHANNEL_NAME = 'aigold-auth';
 const AUTH_MUTATION_LOCK = 'aigold-auth-mutation';
 
 export class AuthCoordinator {
+  private coordinatorId: string;
   private baseUrl: string;
   private state: AuthCoordinatorState = {
     user: null,
@@ -51,12 +53,14 @@ export class AuthCoordinator {
   private inFlightRefresh: Promise<string> | null = null;
   private bootstrapPromise: Promise<boolean> | null = null;
   private remoteRefreshing = false;
+  private lastRemoteRefreshCompletedAt = 0;
   private remoteRefreshWaiters: Array<{
     resolve: () => void;
     reject: (err: Error) => void;
   }> = [];
 
   constructor(baseUrl?: string) {
+    this.coordinatorId = Math.random().toString(36).slice(2) + Date.now().toString(36);
     this.baseUrl =
       baseUrl ||
       (typeof window !== 'undefined'
@@ -95,7 +99,7 @@ export class AuthCoordinator {
   private broadcast(event: BroadcastEvent): void {
     if (this.channel) {
       try {
-        this.channel.postMessage(event);
+        this.channel.postMessage({ ...event, senderId: this.coordinatorId });
       } catch {
         // Ignore channel communication errors
       }
@@ -106,6 +110,11 @@ export class AuthCoordinator {
     const data = event.data;
     if (!data || !data.type) return;
 
+    // Never handle our own broadcast messages
+    if (data.senderId && data.senderId === this.coordinatorId) {
+      return;
+    }
+
     switch (data.type) {
       case 'refresh-started':
         this.remoteRefreshing = true;
@@ -113,6 +122,7 @@ export class AuthCoordinator {
 
       case 'refresh-completed':
         this.remoteRefreshing = false;
+        this.lastRemoteRefreshCompletedAt = Date.now();
         this.notifyRemoteWaiters(true);
         break;
 
@@ -123,17 +133,8 @@ export class AuthCoordinator {
 
       case 'logout':
       case 'session-expired':
-        advanceSessionEpoch();
-        clearAccessToken();
-        purgeLegacyAuthStorage();
-        this.updateState({
-          user: null,
-          status: 'unauthenticated',
-          error: null,
-        });
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('auth:expired'));
-        }
+        // Canonical terminal invalidation without re-broadcasting (avoids loops)
+        this.clearSession({ broadcast: false });
         break;
 
       case 'session-changed':
@@ -198,8 +199,61 @@ export class AuthCoordinator {
   }
 
   /**
+   * Narrow internal coordinated refresh primitive.
+   * All refresh-token cookie mutations (normal refresh, cold bootstrap, forced bootstrap)
+   * use this origin-wide coordination policy under Web Locks (or bounded fallback).
+   */
+  private async executeCoordinatedRefresh(
+    expectedEpoch?: number,
+  ): Promise<AccessTokenResponse | null> {
+    return await this.withAuthLock(async () => {
+      if (expectedEpoch !== undefined && getSessionEpoch() !== expectedEpoch) {
+        return null;
+      }
+
+      this.broadcast({ type: 'refresh-started', senderId: this.coordinatorId });
+
+      let response = await this.executeRefreshRequest();
+
+      // Fallback race recovery if Web Locks are unavailable:
+      // If initial refresh failed (e.g. 401 because another tab just rotated cookie)
+      if (!response && !('locks' in (typeof navigator !== 'undefined' ? navigator : {}))) {
+        let waitSuccess = false;
+        if (this.remoteRefreshing) {
+          try {
+            await this.waitForRemoteRefresh(2000);
+            waitSuccess = true;
+          } catch {
+            waitSuccess = false;
+          }
+        } else if (Date.now() - this.lastRemoteRefreshCompletedAt < 2000) {
+          waitSuccess = true;
+        }
+
+        if (waitSuccess && (expectedEpoch === undefined || getSessionEpoch() === expectedEpoch)) {
+          response = await this.executeRefreshRequest();
+        }
+      }
+
+      // If session epoch advanced during in-flight network operation, discard response
+      if (expectedEpoch !== undefined && getSessionEpoch() !== expectedEpoch) {
+        return null;
+      }
+
+      if (response) {
+        this.broadcast({ type: 'refresh-completed', senderId: this.coordinatorId });
+      } else {
+        this.broadcast({ type: 'refresh-failed', senderId: this.coordinatorId });
+      }
+
+      return response;
+    });
+  }
+
+  /**
    * Bootstrap application authentication at initialization.
    * Executes at most once per page lifecycle unless forced.
+   * Coordinates refresh cookie rotation origin-wide.
    */
   public async bootstrap(options?: { force?: boolean }): Promise<boolean> {
     if (this.bootstrapPromise && !options?.force) {
@@ -212,7 +266,7 @@ export class AuthCoordinator {
 
       const epoch = advanceSessionEpoch();
       try {
-        const tokenResponse = await this.executeRefreshRequest();
+        const tokenResponse = await this.executeCoordinatedRefresh(epoch);
         if (!tokenResponse) {
           if (getSessionEpoch() === epoch) {
             clearAccessToken();
@@ -271,56 +325,29 @@ export class AuthCoordinator {
       this.updateState({ status: 'refreshing' });
 
       try {
-        const token = await this.withAuthLock(async () => {
-          if (getSessionEpoch() !== startEpoch) {
-            throw new Error('Session invalidated during refresh wait');
-          }
-
-          // Broadcast refresh started to advise other tabs without Web Locks
-          this.broadcast({ type: 'refresh-started' });
-
-          let response = await this.executeRefreshRequest();
-
-          // Fallback race recovery if Web Locks were unavailable:
-          // If we received a 401, another tab may have won the cookie race.
-          // Wait briefly for its completion and retry refresh ONCE.
-          if (!response && !('locks' in (typeof navigator !== 'undefined' ? navigator : {}))) {
-            await this.waitForRemoteRefresh(2000).catch(() => {});
-            if (getSessionEpoch() === startEpoch) {
-              response = await this.executeRefreshRequest();
-            }
-          }
-
-          if (!response) {
-            this.broadcast({ type: 'refresh-failed' });
-            throw new Error('Session expired. Please sign in again.');
-          }
-
+        const response = await this.executeCoordinatedRefresh(startEpoch);
+        if (!response) {
           if (getSessionEpoch() !== startEpoch) {
             throw new Error('Session invalidated during refresh');
           }
-
-          setAccessToken(response.access_token, response.expires_at);
-          this.broadcast({ type: 'refresh-completed' });
-          return response.access_token;
-        });
-
-        if (getSessionEpoch() === startEpoch) {
-          this.updateState({ status: 'authenticated', error: null });
+          throw new Error('Session expired. Please sign in again.');
         }
-        return token;
+
+        if (getSessionEpoch() !== startEpoch) {
+          throw new Error('Session invalidated during refresh');
+        }
+
+        setAccessToken(response.access_token, response.expires_at);
+        this.updateState({ status: 'authenticated', error: null });
+        return response.access_token;
       } catch (error) {
         if (getSessionEpoch() === startEpoch) {
-          clearAccessToken();
-          purgeLegacyAuthStorage();
+          this.clearSession({ broadcast: true });
           this.updateState({
             user: null,
             status: 'unauthenticated',
             error: error instanceof Error ? error.message : 'Session expired',
           });
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event('auth:expired'));
-          }
         }
         throw error;
       } finally {
@@ -378,15 +405,15 @@ export class AuthCoordinator {
         error: null,
       });
 
-      // Broadcast to other tabs that login occurred so they can synchronize
-      this.broadcast({ type: 'session-changed' });
+      // Broadcast to other tabs that login occurred so they can synchronize (no secrets broadcasted)
+      this.broadcast({ type: 'session-changed', senderId: this.coordinatorId });
       return tokenData;
     });
   }
 
   /**
    * Authenticated logout: calls backend logout endpoint with memory token and cookie,
-   * clears memory tokens, purges legacy storage, and broadcasts logout to other tabs.
+   * performs canonical local session invalidation, and broadcasts logout to other tabs.
    */
   public async logout(): Promise<void> {
     const token = getAccessToken();
@@ -398,7 +425,7 @@ export class AuthCoordinator {
       status: 'unauthenticated',
       error: null,
     });
-    this.broadcast({ type: 'logout' });
+    this.broadcast({ type: 'logout', senderId: this.coordinatorId });
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('auth:expired'));
     }
@@ -441,7 +468,13 @@ export class AuthCoordinator {
     return user;
   }
 
-  public clearSession(): void {
+  /**
+   * Canonical terminal session invalidation operation.
+   * Advances session epoch, clears volatile memory token, purges legacy storage,
+   * updates coordinator state to unauthenticated, dispatches local auth:expired event,
+   * and optionally broadcasts a non-secret session-expired event to other tabs without looping.
+   */
+  public clearSession(options?: { broadcast?: boolean }): void {
     advanceSessionEpoch();
     clearAccessToken();
     purgeLegacyAuthStorage();
@@ -452,6 +485,9 @@ export class AuthCoordinator {
     });
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('auth:expired'));
+    }
+    if (options?.broadcast) {
+      this.broadcast({ type: 'session-expired', senderId: this.coordinatorId });
     }
   }
 
@@ -495,3 +531,5 @@ export class AuthCoordinator {
 export const authCoordinator = new AuthCoordinator();
 export const getValidAccessToken = (options?: { forceRefresh?: boolean }) =>
   authCoordinator.getValidAccessToken(options);
+export const clearSession = (options?: { broadcast?: boolean }) =>
+  authCoordinator.clearSession(options);

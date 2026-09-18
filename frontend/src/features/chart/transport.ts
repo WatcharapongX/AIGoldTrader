@@ -43,6 +43,7 @@ export class MarketConnection {
     private symbol: string,
     private timeframe: Timeframe,
     private url = defaultMarketWsUrl(),
+    private onClearSession?: () => void,
   ) {}
 
   start() {
@@ -132,7 +133,11 @@ export class MarketConnection {
         if (event.code === 4401) {
           if (this.authRetryCount >= 1) {
             this.onState('ERROR');
-            clearSession();
+            if (this.onClearSession) {
+              this.onClearSession();
+            } else {
+              clearSession();
+            }
             return;
           }
           this.authRetryCount++;

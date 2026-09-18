@@ -52,6 +52,19 @@ All confirmed findings assigned through Batch B1 remain closed (**AUD-P1-005** r
   - **WebSocket First-Frame Authentication Contract**: Updated `MarketConnection` (`frontend/src/features/chart/transport.ts`) and legacy `WsClient` (`frontend/src/lib/websocket.ts`) to strictly follow the backend WebSocket contract: zero token query strings in connection URLs, mandatory first-frame authentication `{ "type": "auth", "token": "<token>" }`, followed by subscriptions. Direct `localStorage` token reads were removed from all market screens (`TradingScreen.tsx`, `MarketOverviewScreen.tsx`, `Dashboard.tsx`, `MarketAnalysisScreen.tsx`) in favor of the memory token supplier `getValidAccessToken`. On backend close code `4401`, connections execute at most one coordinated refresh attempt before failing closed.
 - **Audit Status**: **AUD-P2-002: READY FOR FINAL INDEPENDENT VERIFICATION**.
 
+### 4. BATCH B3.1: Auth Coordinator Race & Terminal State Closure (Correction Batch B3.1)
+- **Defects Addressed**:
+  - `AuthCoordinator.bootstrap()` and `session-changed` forced bootstrap bypassed origin-wide cross-tab Web Locks, calling `executeRefreshRequest()` directly and risking 401 lockout on simultaneous cold start.
+  - `frontend/src/lib/api.ts` `clearSession()` directly cleared tokens without advancing `sessionEpoch` or updating `AuthCoordinator` state, creating an authority split and risking stale async token restoration.
+  - Test harness lacked an isolated multi-module multi-tab test environment and multi-tab fallback test did not run two real coordinator instances.
+- **Remediation**:
+  - **Coordinated Refresh Primitive**: Factored `executeCoordinatedRefresh(expectedEpoch)` in `AuthCoordinator`, ensuring all refresh cookie rotations (normal refresh, cold bootstrap, and forced bootstrap from `session-changed`) are serialized under Web Locks (`aigold-auth-mutation`) or bounded fallback BroadcastChannel recovery with at most one retry.
+  - **Single Canonical Terminal Invalidator**: Consolidated terminal session invalidation in `AuthCoordinator.clearSession(options?: { broadcast?: boolean })`. Advances `sessionEpoch`, purges legacy storage, clears volatile memory token, updates state to `unauthenticated`, dispatches local `auth:expired`, and optionally broadcasts non-secret `session-expired` (avoiding broadcast loops). Both `ApiClient` (on secondary 401) and WebSocket transports (`MarketConnection`, `WsClient` on 4401 exhaustion) invoke this canonical invalidator.
+  - **Stale Async Completion Guard**: Late 200 refresh or login completions checking against `expectedEpoch` immediately discard late tokens when session epoch diverged, preventing token restoration after terminal clear or logout.
+  - **WebSocket Bound Hardening**: Fixed legacy `WsClient` to avoid resetting `authRetryCount` on TCP `onopen` before authentication is verified.
+  - **Realistic Multi-Tab Test Suite**: Created isolated multi-tab test harness in `frontend/tests/b3-auth-coordinator.test.cjs` with independent module memory per tab and shared cookie/locks/channel simulation. Added 17 deterministic tests covering Web Locks cold bootstrap, fallback race recovery, session-changed fanout, stale token discard, second-401 canonical invalidation, and WebSocket 4401 exhaustion.
+- **Audit Status**: **AUD-P2-002: READY FOR FINAL INDEPENDENT VERIFICATION**.
+
 ---
 
 ## Remediated Audit Findings: Batch B1

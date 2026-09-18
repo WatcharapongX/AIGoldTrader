@@ -1,18 +1,10 @@
 import type { AccessTokenResponse, User, HealthResponse, ReadyResponse } from '@/types';
 import { parseUser, parseHealth, parseReady, errorMessage } from '@/lib/contracts';
-import {
-  getTokenSnapshot,
-  clearAccessToken,
-  purgeLegacyAuthStorage,
-} from '@/lib/auth-token-memory';
+import { getTokenSnapshot } from '@/lib/auth-token-memory';
 import { authCoordinator, AuthCoordinator } from '@/lib/auth-coordinator';
 
-export function clearSession() {
-  clearAccessToken();
-  purgeLegacyAuthStorage();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('auth:expired'));
-  }
+export function clearSession(options?: { broadcast?: boolean }) {
+  authCoordinator.clearSession(options ?? { broadcast: true });
 }
 
 export class ApiClient {
@@ -74,7 +66,7 @@ export class ApiClient {
         try {
           retryToken = await this.coordinator.refreshAccessToken();
         } catch {
-          clearSession();
+          this.coordinator.clearSession({ broadcast: true });
           throw new Error('Session expired. Please sign in again.');
         }
       }
@@ -83,7 +75,7 @@ export class ApiClient {
       response = await fetch(url, { ...config, headers });
 
       if (response.status === 401) {
-        clearSession();
+        this.coordinator.clearSession({ broadcast: true });
         throw new Error('Session expired. Please sign in again.');
       }
     }
