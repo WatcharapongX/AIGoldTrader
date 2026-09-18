@@ -51,6 +51,7 @@ export class AuthCoordinator {
   private listeners: Set<AuthStateListener> = new Set();
   private channel: BroadcastChannel | null = null;
   private inFlightRefresh: Promise<string> | null = null;
+  private inFlightRefreshEpoch: number | null = null;
   private bootstrapPromise: Promise<boolean> | null = null;
   private remoteRefreshing = false;
   private lastRemoteRefreshCompletedAt = 0;
@@ -315,25 +316,50 @@ export class AuthCoordinator {
   /**
    * Coordinate refresh token rotation across tabs and in-tab callers.
    */
-  public async refreshAccessToken(): Promise<string> {
-    if (this.inFlightRefresh) {
-      return this.inFlightRefresh;
+  public async refreshAccessToken(options?: { expectedSessionEpoch?: number }): Promise<string> {
+    // Terminal recovery barrier: normal business recovery is forbidden in terminal states
+    if (this.state.status === 'unauthenticated' || this.state.status === 'logging_out') {
+      throw new Error('Session expired. Cannot refresh in terminal state.');
     }
 
+    const currentEpoch = getSessionEpoch();
+
+    // Pre-network epoch check against originating request authority
+    if (
+      options?.expectedSessionEpoch !== undefined &&
+      options.expectedSessionEpoch !== currentEpoch
+    ) {
+      throw new Error('Session invalidated during refresh wait');
+    }
+
+    const targetEpoch = options?.expectedSessionEpoch ?? currentEpoch;
+
+    // Epoch-bound in-flight single flight
+    if (this.inFlightRefresh) {
+      if (this.inFlightRefreshEpoch === targetEpoch) {
+        return this.inFlightRefresh;
+      }
+      throw new Error('Session invalidated during refresh wait');
+    }
+
+    this.inFlightRefreshEpoch = targetEpoch;
     this.inFlightRefresh = (async () => {
-      const startEpoch = getSessionEpoch();
       this.updateState({ status: 'refreshing' });
 
       try {
-        const response = await this.executeCoordinatedRefresh(startEpoch);
+        if (getSessionEpoch() !== targetEpoch) {
+          throw new Error('Session invalidated during refresh');
+        }
+
+        const response = await this.executeCoordinatedRefresh(targetEpoch);
         if (!response) {
-          if (getSessionEpoch() !== startEpoch) {
+          if (getSessionEpoch() !== targetEpoch) {
             throw new Error('Session invalidated during refresh');
           }
           throw new Error('Session expired. Please sign in again.');
         }
 
-        if (getSessionEpoch() !== startEpoch) {
+        if (getSessionEpoch() !== targetEpoch) {
           throw new Error('Session invalidated during refresh');
         }
 
@@ -341,7 +367,7 @@ export class AuthCoordinator {
         this.updateState({ status: 'authenticated', error: null });
         return response.access_token;
       } catch (error) {
-        if (getSessionEpoch() === startEpoch) {
+        if (getSessionEpoch() === targetEpoch) {
           this.clearSession({ broadcast: true });
           this.updateState({
             user: null,
@@ -352,6 +378,7 @@ export class AuthCoordinator {
         throw error;
       } finally {
         this.inFlightRefresh = null;
+        this.inFlightRefreshEpoch = null;
       }
     })();
 
@@ -453,12 +480,15 @@ export class AuthCoordinator {
    * Token supplier for WebSocket transports and API requests.
    * Proactively checks validity against proactive clock skew.
    */
-  public async getValidAccessToken(options?: { forceRefresh?: boolean }): Promise<string> {
+  public async getValidAccessToken(options?: {
+    forceRefresh?: boolean;
+    expectedSessionEpoch?: number;
+  }): Promise<string> {
     if (!options?.forceRefresh && isAccessTokenUsable(15)) {
       const token = getAccessToken();
       if (token) return token;
     }
-    return await this.refreshAccessToken();
+    return await this.refreshAccessToken(options);
   }
 
   public async fetchMe(): Promise<User> {
@@ -529,7 +559,9 @@ export class AuthCoordinator {
 }
 
 export const authCoordinator = new AuthCoordinator();
-export const getValidAccessToken = (options?: { forceRefresh?: boolean }) =>
-  authCoordinator.getValidAccessToken(options);
+export const getValidAccessToken = (options?: {
+  forceRefresh?: boolean;
+  expectedSessionEpoch?: number;
+}) => authCoordinator.getValidAccessToken(options);
 export const clearSession = (options?: { broadcast?: boolean }) =>
   authCoordinator.clearSession(options);

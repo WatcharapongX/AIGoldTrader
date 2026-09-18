@@ -52,30 +52,50 @@ export class ApiClient {
     // Bounded 401 retry:
     // Exclude /auth/login and /auth/refresh from refresh recursion.
     if (response.status === 401 && path !== '/auth/login' && path !== '/auth/refresh') {
+      const requestEpoch = initialSnapshot.sessionEpoch;
       const currentSnapshot = getTokenSnapshot();
+
+      // Gate 1: Check session epoch authority immediately upon receiving 401.
+      // If epoch changed (due to logout, login, session-expired, cross-tab event),
+      // the request is obsolete and must NEVER refresh, retry, or clear current session.
+      if (currentSnapshot.sessionEpoch !== requestEpoch) {
+        throw new Error('Session expired. Please sign in again.');
+      }
+
       let retryToken: string;
 
       if (
         currentSnapshot.generation !== initialSnapshot.generation &&
         currentSnapshot.token
       ) {
-        // Generation already changed by another request/coordinator; retry once with new token
+        // Generation already changed by another request in the SAME epoch; retry once with new token
         retryToken = currentSnapshot.token;
       } else {
-        // Generation unchanged: perform coordinated refresh
+        // Generation unchanged: perform coordinated refresh bound to requestEpoch
         try {
-          retryToken = await this.coordinator.refreshAccessToken();
+          retryToken = await this.coordinator.refreshAccessToken({ expectedSessionEpoch: requestEpoch });
         } catch {
-          this.coordinator.clearSession({ broadcast: true });
+          // Only clear session if epoch has NOT changed
+          if (getTokenSnapshot().sessionEpoch === requestEpoch) {
+            this.coordinator.clearSession({ broadcast: true });
+          }
           throw new Error('Session expired. Please sign in again.');
         }
+      }
+
+      // Gate 2: Verify epoch before issuing retry
+      if (getTokenSnapshot().sessionEpoch !== requestEpoch) {
+        throw new Error('Session expired. Please sign in again.');
       }
 
       headers.set('Authorization', `Bearer ${retryToken}`);
       response = await fetch(url, { ...config, headers });
 
       if (response.status === 401) {
-        this.coordinator.clearSession({ broadcast: true });
+        // Gate 3: Only clear session if epoch has NOT changed while retry was in flight
+        if (getTokenSnapshot().sessionEpoch === requestEpoch) {
+          this.coordinator.clearSession({ broadcast: true });
+        }
         throw new Error('Session expired. Please sign in again.');
       }
     }

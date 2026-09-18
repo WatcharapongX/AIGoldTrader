@@ -75,6 +75,21 @@ All confirmed findings assigned through Batch B1 remain closed (**AUD-P1-005** r
   - **B3/B3.1 Invariants Preserved**: Web Locks, BroadcastChannel, memory-only token manager, and WebSocket first-frame contracts remain completely unchanged.
 - **Audit Status**: **AUD-P2-002: READY FOR FINAL INDEPENDENT VERIFICATION**.
 
+### 6. BATCH B3.3: Terminal Session Epoch / Late-401 Resurrection Closure (Correction Batch B3.3)
+- **Defects Addressed**:
+  - **B3.2-NEW-P2-001 (Severity: P2)**: A business request in flight during logout receiving HTTP 401 triggered `ApiClient` 401 recovery because generation had changed, which called `refreshAccessToken()`. In the absence of Web Locks or before cookie revocation, `refreshAccessToken()` captured the post-logout epoch, succeeded against `/auth/refresh`, and resurrected the authenticated session with a fresh in-memory access token after user logout. Furthermore, old requests could potentially be retried under a subsequent user's session token or trigger `clearSession()` on a newer session upon receiving a secondary 401.
+- **Remediation**:
+  - **Request-Epoch Authority Binding**: In `frontend/src/lib/api.ts`, outgoing requests capture `requestEpoch = initialSnapshot.sessionEpoch`. Upon receiving HTTP 401, `ApiClient` verifies `currentSnapshot.sessionEpoch === requestEpoch`. If the session epoch has advanced (via logout, login, or cross-tab session invalidation), the request is discarded immediately without triggering refresh, retry, or session invalidation.
+  - **Expected-Epoch Coordinator Gate**: Hardened `AuthCoordinator.refreshAccessToken({ expectedSessionEpoch?: number })` to validate the requesting session epoch before issuing network calls and after all asynchronous operations. If the epoch has diverged, the refresh is aborted and discarded immediately with zero token installation.
+  - **Epoch-Bound Single Flight**: In `AuthCoordinator`, in-flight refresh promises are strictly bound to `inFlightRefreshEpoch`. Callers from mismatched session epochs cannot reuse or join an in-flight refresh.
+  - **Terminal Recovery Barrier**: In `AuthCoordinator.refreshAccessToken()`, business recovery is strictly rejected if the coordinator is in a terminal state (`unauthenticated` or `logging_out`). Internal bootstrap (`bootstrap()`) uses `executeCoordinatedRefresh(epoch)` directly and remains unblocked.
+  - **Cross-Session Retry & Terminal Clear Protection**: `ApiClient` guards generation retry and secondary 401 terminal clear: requests from an obsolete session epoch are never retried with a newer session token, and a secondary 401 from an obsolete request cannot clear a newly established session.
+  - **Test Suite**: Added `frontend/tests/b3-3-epoch-recovery.test.cjs` with 10 deterministic tests covering: late 401 after logout without Web Locks, late refresh discard, post-logout teardown 401 terminal barrier, cross-identity retry prevention (User A request after User B login), second 401 after epoch change, cross-tab logout with late 401, normal recovery, single-flight deduplication, generation-change retry, and cold bootstrap.
+- **Audit Status**:
+  - **B3.2-NEW-P2-001**: **REMEDIATED IN B3.3 — PENDING INDEPENDENT RE-VERIFICATION**.
+  - **AUD-P2-002**: **READY FOR FINAL INDEPENDENT VERIFICATION** (NOT CLOSED).
+  - **Batch B3 / B3.1 / B3.2 / B3.3**: **READY FOR FINAL INDEPENDENT VERIFICATION** (NOT CLOSED).
+
 ---
 
 ## Remediated Audit Findings: Batch B1
