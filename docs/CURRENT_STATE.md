@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-22
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Post-Freeze Remediation Baseline (FC-12 Frozen + Batches A, B1, B2, B3, B3.1, B3.2, B3.3)
-- **Current Active Gate**: Gate R0 — Independent Re-Verification of Batch B Session Security
-- **Next Authorized Activity**: Independent verification of R0-P2-001 together with Batch B3/B3.x browser authentication remediation
-- **Prohibited Next Activity**: Strictly DO NOT start Batch C; DO NOT implement execution modules or live trading
+- **Current Milestone**: Post-Freeze Remediation Baseline — Batch B Session Security Independently Accepted and Closed
+- **Current Active Gate**: Batch B Security Closure Complete
+- **Next Authorized Activity**: Batch C — External AI Runtime Safety: Scope & Architecture Planning ONLY. No Batch C implementation is authorized.
+- **Prohibited Next Activity**: Batch C implementation; execution modules; broker routing; live trading
 
 ---
 
@@ -29,14 +29,11 @@
 5. **Risk Engine**: Server-authoritative policy parser, gross directional exposure limits, portfolio risk reservation ledger, fail-closed Kill Switch.
 6. **AI Analysis Engine**: 6 canonical domain analytical agents (`market_context`, `smc_ict`, `macro_news`, `strategy_critic`, `risk_interpreter`, `trade_thesis`) and Meta Controller.
 7. **Frontend Command Center**: Next.js 16 (Turbopack) decoupled screens (`/dashboard`, `/trading`, `/analysis`, `/signals`, `/backtesting`, `/calendar`, `/scanner`, `/analytics`, `/journal`, `/settings`, `/risk`), strict data provenance badging, failure isolation.
-8. **Browser Authentication & Session Security (Batches B1–B3.3)**:
-   - Atomic refresh token rotation with session family tracking and 5s grace replay containment (`migration 0016`).
-   - Host-only, HttpOnly refresh cookie with strict Origin CSRF validation.
-   - Volatile in-memory access token (zero persistent storage in `localStorage`, `sessionStorage`, `document.cookie`).
-   - Origin-wide Web Locks (`aigold-auth-mutation`) and non-secret BroadcastChannel (`aigold-auth`) synchronization.
-   - Canonical `clearSession()` terminal invalidator; monotonic `sessionEpoch` guards.
-   - Request-epoch binding on 401 recovery and WebSocket first-frame authentication (`{ "type": "auth", "token" }`).
-   - Global application startup legacy storage cutover (`AuthStorageSanitizer` in `RootLayout`).
+8. **Browser Authentication & Session Security (Batch B, independently verified)**:
+   - Atomic PostgreSQL refresh rotation and user-authority serialization of concurrent refresh/logout operations.
+   - Host-only, HttpOnly refresh cookie with strict Origin CSRF validation and terminal concurrent logout.
+   - Volatile memory-only access token, origin-wide Web Locks, and non-secret BroadcastChannel synchronization.
+   - Canonical terminal invalidation, `sessionEpoch`/request-epoch protections, WebSocket first-frame authentication, and global legacy-storage cutover.
 
 ### B. Partially Implemented / Hardening
 - **External AI Provider Infrastructure**: Provider integration abstraction exists in `backend/app/services/ai/`; operates in deterministic fixture/mock mode by default when external credentials are not supplied. External provider hardening is in progress.
@@ -52,10 +49,11 @@
 ---
 
 ## 3. Current Open Findings & Governance
-- **R0-P2-001** (Terminal Logout / Refresh Authority): **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. Explicit logout is refresh-cookie-authorized after Origin validation; expired, missing, and malformed bearer tokens cannot leave server-side refresh authority active.
-- **AUD-P2-002** (Browser-Safe Refresh Token & Session Security): **REMAINS OPEN — PENDING R0 RE-VERIFICATION**. Must not be marked CLOSED until independently verified.
-- **B3.2-NEW-P2-001** (Stale 401 Token Resurrection after Logout): **CLOSED**; the B3.3 epoch protection remains in place.
-- **Batch B**: **REMAINS OPEN — PENDING R0 RE-VERIFICATION**.
+- **R0-P2-001** (Terminal Logout / Refresh Authority): **CLOSED**.
+- **AUD-P2-002** (Browser-Safe Refresh Token & Session Security): **CLOSED**.
+- **B3.2-NEW-P2-001** (Stale 401 Token Resurrection after Logout): **CLOSED**.
+- **Batch B**: **CLOSED**.
+- **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
 
 ---
 

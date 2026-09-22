@@ -10,16 +10,20 @@
 ## Executive Summary
 This document records the formal remediation status for **Correction Batch A**, **Correction Batch A.1**, **Correction Batch A.2** (Canonical Account Authority Hardening), **Correction Batch A.3** (Referential Integrity Closure), **Correction Batch A.3.1** (Exact Migration Revision Guard Hardening), **Correction Batch A.3.2** (Database Config Compatibility & Cross-Domain Fixture Alignment), **Batch B1** (Atomic Refresh Rotation and Session Families), **Batch B2** (Secure Refresh Cookie and Browser Auth Contract), **Correction Batch B2.1** (Refresh Cookie Contract Closure), and **Batch B3** (Memory-Only Access Token, Auth Coordinator, Multi-Tab Web Locks/BroadcastChannel, and First-Frame WebSocket Authentication) of the post-freeze audit findings for **AIGoldTrader**.
 
-All confirmed findings assigned through Batch B1 remain closed (**AUD-P1-005** remains **CLOSED**). Batch B2 and B3 complete the full browser-side implementation for **AUD-P2-002** (Browser-Safe Refresh Token Storage, Origin CSRF Contract, Memory-Only Access Token, and Tab Coordination). Per the remediation governance specification, **AUD-P2-002** is updated to **READY FOR FINAL INDEPENDENT VERIFICATION** (pending final B3/B4 security and browser acceptance). The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
+All confirmed findings assigned through Batch B1 remain closed (**AUD-P1-005** remains **CLOSED**). Batch B2 and B3 complete the full browser-side implementation for **AUD-P2-002** (Browser-Safe Refresh Token Storage, Origin CSRF Contract, Memory-Only Access Token, and Tab Coordination). Final independent R0 verification closed **AUD-P2-002** and Batch B at `28dfa693ead2e16705a1334847145b14142841e0`; the bounded advisory-lock timeout response remains an open, non-blocking P3 operational concern. The feature freeze baseline established at `4835051b7870b293a9036a85d5c7226b1ba70af1` remains strictly governed per [FEATURE_FREEZE.md](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md). No new trading, execution, or broker routing features were introduced.
 
 ---
 
-## R0-CORR-001: Terminal Logout / Refresh Authority Remediation
+## R0 Final Independent Re-Verification: Batch B Closure
 
-- **R0-P2-001**: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. Explicit logout now uses the existing HttpOnly refresh-cookie session authority after strict Origin validation, so expired, missing, or malformed access bearers cannot prevent refresh-session termination.
-- **AUD-P2-002**: **REMAINS OPEN — PENDING R0 RE-VERIFICATION**. It is not closed by this corrective implementation.
-- **B3.2-NEW-P2-001**: **CLOSED**. Its request-epoch and terminal recovery protections remain unchanged by this backend-only correction.
-- **Batch B**: **REMAINS OPEN — PENDING R0 RE-VERIFICATION**.
+- **Final result**: **PASS WITH P3 FINDINGS**.
+- **Verified commit**: `28dfa693ead2e16705a1334847145b14142841e0`.
+- **R0-P2-001**: **CLOSED**.
+- **AUD-P2-002**: **CLOSED**.
+- **B3.2-NEW-P2-001**: **CLOSED**.
+- **Batch B**: **CLOSED**.
+- **PostgreSQL evidence**: refresh-vs-refresh (100 iterations), logout-first, refresh-first, true concurrent start, >5s lock-wait classification, late replay, rollback, cross-user isolation, stale identity-map protection, browser-response ordering, and lock-timeout fail-closed all **PASS**.
+- **R0-P3-001**: **OPEN — NON-BLOCKING**. The bounded advisory-lock timeout fails closed but currently surfaces HTTP 500; response mapping and operational observability remain an improvement candidate.
 
 ---
 
@@ -335,7 +339,7 @@ All confirmed findings assigned through Batch B1 remain closed (**AUD-P1-005** r
 - **Batch A Status**: Remains **CLOSED**; Batch B3 did not alter its authority or trading-safety invariants.
 - **Batch B1 Status**: Remains **CLOSED** (`AUD-P1-005`).
 - **Batch B2 Status**: Remains **CLOSED**.
-- **Batch B3 Status**: **IMPLEMENTED**.
-- **AUD-P2-002 Status**: **READY FOR FINAL INDEPENDENT VERIFICATION**. Access token is strictly memory-only; zero persistent tokens in browser storage; Web Locks, BroadcastChannel, and WebSocket first-frame auth active.
+- **Batch B3 Status**: **CLOSED** as part of independently accepted Batch B security closure.
+- **AUD-P2-002 Status**: **CLOSED**. Access token is strictly memory-only; zero persistent tokens in browser storage; Web Locks, BroadcastChannel, WebSocket first-frame auth, PostgreSQL refresh/logout authority serialization, and terminal concurrent logout are independently verified.
 - **Operational Safety**: Disposable PostgreSQL test databases used for all verification. The operational database `ai_trading` was never targeted or modified during Batch B3 implementation.
 - **Scope Compliance**: Strictly restricted to Batch B3 browser-side memory token architecture and coordination. Did NOT begin Batch C, D, or E. No trading, execution, or broker-routing work was performed.

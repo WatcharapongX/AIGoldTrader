@@ -1,61 +1,58 @@
 # Rolling Agent Handoff — AIGoldTrader
 
-- **R0-CORR-002B baseline parent HEAD**: `7e9c530cf5ba8491450ef2dc49efe7772fea1247`
+- **Authoritative HEAD before documentation closure**: `28dfa693ead2e16705a1334847145b14142841e0`
 - **Current branch**: `main`
-- **Current active batch**: `R0 — Batch B Session Security Independent Re-Verification`
-- **Latest implementation work**: `R0-CORR-002C — Deterministic PostgreSQL Serialization Evidence`
+- **Latest completed gate**: R0 Final Independent Re-Verification
+- **Result**: **PASS WITH P3 FINDINGS**
 
----
+## Batch B Closure
 
-## 1. Corrective Change
-
-- Refresh and logout now serialize refresh-authority mutations with one transaction-scoped PostgreSQL advisory lock per `user_id`.
-- The key is the signed big-endian first 64 bits of `SHA-256(b"aigold:auth-user:v1:" + user_id.bytes)`; it is deterministic across workers and restarts.
-- Both paths resolve only immutable session routing fields before acquiring the lock, then scalar-project authoritative mutable state after the lock.
-- Refresh arrival is captured with PostgreSQL `clock_timestamp()` before waiting; loser classification compares it to the actual PostgreSQL consume timestamp.
-- PostgreSQL consumption writes `clock_timestamp()` (not transaction-start `now()`); SQLite retains its compatible timestamp only in the unit harness.
-- Logout accepts an active presented session or a session consumed by a concurrently started refresh within the existing five-second grace window.
-- Logout then set-revokes every active refresh session for the user in one database UPDATE.
-- A PostgreSQL-local five-second `lock_timeout` bounds acquisition; failure aborts and cannot mutate without serialized authority.
-- Success cookies are emitted only after commit. Concurrent refresh losers stay 401 without cookie deletion; terminal paths retain clear-cookie behavior.
-
-## 2. Root-Cause Protection
-
-- The stale logout snapshot race is closed: logout rereads post-lock state and revokes the current user-wide active authority set.
-- The identity-map/lock-wait regression is closed: every post-wait decision uses a fresh scalar projection, never a pre-lock ORM entity.
-- Refresh-first logout observes and revokes the successor; logout-first prevents a waiting refresh from leaving authority behind.
-
-## 3. Targeted PostgreSQL Evidence
-
-- `test_refresh_logout_serialization_prerequisites`: PostgreSQL isolation is `read committed`; advisory-key stability verified.
-- `test_atomic_refresh_http_concurrency_100_iterations`: 100 iterations; one 200 and one 401; loser has no `Max-Age=0`; one successor is active before logout.
-- `test_postgres_logout_first_serializes_refresh_authority`: post-lock gate; logout 200, waiting refresh 401, active authority count 0.
-- `test_postgres_refresh_first_logout_revokes_successor`: post-lock gate; refresh 200, logout 200, active authority count 0, successor refresh 401.
-- `test_postgres_replay_grace_family_revocation_and_rollback`: immediate loser preserves cookie, late replay clears/revokes family, injected audit failure rolls back and retry succeeds.
-- `test_postgres_true_concurrent_refresh_logout_is_terminal`: both requests reach the production lock helper before release; successful logout leaves no authority.
-- `test_postgres_lock_wait_beyond_grace_preserves_concurrent_loser`: a real PostgreSQL advisory-lock wait over five seconds remains a 401 without cookie deletion.
-- `test_postgres_cross_user_authority_locks_are_isolated`: User B rotates while User A is lock-held; keys and persisted authority remain isolated.
-- `test_postgres_post_lock_scalar_reread_defeats_stale_identity_map`: a deliberately stale ORM row remains stale while the production scalar reread sees consumption.
-- `test_postgres_browser_response_ordering_cannot_restore_authority`: applying a stale successor cookie after logout remains server-side 401.
-- `test_postgres_authority_lock_timeout_fails_closed`: real five-second timeout yields no consumption, successor, or refresh audit; retry succeeds once released.
-
-## 4. Test Results
-
-- `backend/.venv/Scripts/python.exe -m pytest tests/integration/test_batch_b1_postgres.py -q`: **12 passed**.
-- `backend/.venv/Scripts/python.exe -m pytest tests/test_auth.py tests/test_batch_b1_auth.py tests/test_batch_b2_cookies.py -q`: **35 passed**.
-- `backend/.venv/Scripts/python.exe -m ruff check app/api/auth.py app/services/refresh_sessions.py tests/integration/test_batch_b1_postgres.py`: **PASS**.
-
-## 5. Governance Status
-
-- **R0-P2-001**: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- **AUD-P2-002**: **REMAINS OPEN — PENDING R0 RE-VERIFICATION**.
+- **R0-P2-001**: **CLOSED**.
+- **AUD-P2-002**: **CLOSED**.
 - **B3.2-NEW-P2-001**: **CLOSED**.
-- **Batch B**: **REMAINS OPEN — PENDING R0 RE-VERIFICATION**.
-- Do not mark any R0 or Batch B finding closed without the independent gate.
+- **Batch B**: **CLOSED**.
+- PostgreSQL refresh/logout authority serialization and browser session-security controls were independently verified at the authoritative pre-closure HEAD.
 
-## 6. Next Authorized Task
+## Verified Security Controls
 
-- Run `R0 Independent Re-Verification` against the committed main HEAD.
-- Recommended model: `GPT-5.6 Sol / Medium`.
-- Independently reproduce refresh/logout ordering under real PostgreSQL.
-- Strictly do not start Batch C, trading execution, broker routing, OMS, or live trading.
+- Refresh rotation is atomic and retains session-family replay containment.
+- Refresh and logout authority mutations serialize per user with PostgreSQL transaction-scoped advisory locks.
+- Fresh post-lock scalar reads prevent stale ORM identity-map state from classifying replay or logout authority.
+- Concurrent refresh losers retain the winner's cookie; late replay remains terminal.
+- Terminal logout revokes current user-wide active refresh authority under concurrent refresh ordering.
+- Refresh credential transport remains a host-only HttpOnly cookie with strict Origin protection.
+- Access tokens remain volatile and memory-only; legacy persistent storage is sanitized.
+- Web Locks, non-secret BroadcastChannel coordination, session epochs, and request-epoch recovery guards remain in force.
+- WebSocket authentication uses the existing first-frame token contract rather than token-bearing URLs.
+
+## Independent Evidence
+
+- Refresh-vs-refresh PostgreSQL race: 100 iterations passed.
+- Logout-first, refresh-first, and true concurrent-start serialization cases passed.
+- Greater-than-five-second lock-wait classification passed without deleting the winner cookie.
+- Late replay, rollback, browser-response ordering, cross-user isolation, and stale identity-map protections passed.
+- Lock-timeout regression passed its fail-closed security assertions.
+- Targeted backend auth/B1/B2 regression and changed-file static checks passed.
+
+## Safety Boundaries
+
+- `TRADING_MODE=PAPER` remains enforced.
+- `LIVE_AUTO_TRADING=false` remains enforced.
+- Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain unimplemented.
+- AI remains advisory-only; Kill Switch and Risk Engine authority remain above strategy and AI layers.
+
+## Remaining Non-Blocking Finding
+
+- **R0-P3-001 — Lock-timeout API semantics**: **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed with no authority mutation, successor creation, or partial audit; a retriable operational response mapping remains an improvement candidate.
+
+## Governance Notes
+
+- The P3 does not reopen Batch B and does not represent an authentication bypass.
+- Do not change production behavior under this completed Batch B closure.
+- Future work addressing the P3 requires separately authorized remediation.
+
+## Next Authorized Task
+
+- **Batch C — External AI Runtime Safety: Scope & Architecture Planning ONLY**.
+- Recommended planning model: **GPT-5.6 Sol / Medium**.
+- **Do NOT begin Batch C implementation from this handoff alone.**

@@ -2,7 +2,7 @@
 # Authoritative baseline for AI coding agents and automated inspection.
 
 version: "1.0"
-last_verified: "2026-09-18"
+last_verified: "2026-09-22"
 repository: "WatcharapongX/AIGoldTrader"
 branch: "main"
 
@@ -49,8 +49,8 @@ capabilities:
     details: "Provider abstraction exists, fail-closed offline fallback, fixture mode default"
 
   browser_auth:
-    status: implemented_pending_verification
-    details: "HttpOnly refresh cookie, memory-only access token, Web Locks, requestEpoch 401 gate, global startup storage cutover (Batches B1-B3.3)"
+    status: implemented_verified
+    details: "Independently verified Batch B closure: HttpOnly refresh cookie, memory-only access token, Web Locks/sessionEpoch protections, and PostgreSQL refresh/logout authority serialization"
 
   backtesting:
     status: not_implemented
