@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-22
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Post-Freeze Remediation Baseline — Batch B Session Security Independently Accepted and Closed
-- **Current Active Gate**: Batch B Security Closure Complete
-- **Next Authorized Activity**: Batch C — External AI Runtime Safety: Scope & Architecture Planning ONLY. No Batch C implementation is authorized.
-- **Prohibited Next Activity**: Batch C implementation; execution modules; broker routing; live trading
+- **Current Milestone**: Batch C External AI Runtime Safety Architecture Planning completed — PLAN APPROVED WITH CONDITIONS
+- **Current Active Gate**: Batch C1 — External Boundary Closure Implementation
+- **Next Authorized Activity**: Implement C1 only using the approved architecture.
+- **Prohibited Next Activity**: C2; C3; model routing; trading execution work; live trading
 
 ---
 
@@ -53,6 +53,12 @@
 - **AUD-P2-002** (Browser-Safe Refresh Token & Session Security): **CLOSED**.
 - **B3.2-NEW-P2-001** (Stale 401 Token Resurrection after Logout): **CLOSED**.
 - **Batch B**: **CLOSED**.
+- **C-P2-001**: **OPEN — AUTHORIZED FOR C1 REMEDIATION**.
+- **C-ADR-005**: **OPEN — AUTHORIZED FOR C1 IMPLEMENTATION**.
+- **C-P3-003**: **OPEN — AUTHORIZED FOR C1 IMPLEMENTATION**.
+- **C-P3-006**: **OPEN — AUTHORIZED FOR C1 IMPLEMENTATION**.
+- **Batch C1**: **AUTHORIZED FOR IMPLEMENTATION**.
+- **Batch C**: **OPEN**.
 - **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
 
 ---
