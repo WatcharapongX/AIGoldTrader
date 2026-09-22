@@ -8,7 +8,6 @@ from typing import Annotated, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import AwareDatetime, BaseModel, EmailStr, Field, StringConstraints, field_validator
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -29,9 +28,13 @@ from app.services.auth_cookies import (
     validate_auth_origin,
 )
 from app.services.refresh_sessions import (
+    acquire_user_authority_lock,
     consume_refresh_session,
-    find_refresh_session_by_hash,
+    database_clock_timestamp,
+    reread_refresh_session_state,
+    resolve_refresh_session_identity,
     revoke_active_family,
+    revoke_active_user_sessions,
 )
 from app.services.users import authenticate, hash_refresh_token
 
@@ -169,14 +172,15 @@ async def login(
     )
 
 
-async def _reject_refresh_reuse(session: AsyncSession, *, token_hash: str) -> NoReturn:
-    """Classify a failed consume internally while keeping one public error."""
-    stored = await find_refresh_session_by_hash(session, token_hash=token_hash)
+async def _reject_refresh_reuse(
+    session: AsyncSession, *, stored, attempt_started_at: dt.datetime
+) -> NoReturn:
+    """Classify an authoritative post-lock failed consume while keeping one public error."""
     if stored is None or stored.consumed_at is None:
         raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers())
 
     consumed_at = _as_utc(stored.consumed_at)
-    within_grace = dt.datetime.now(dt.UTC) - consumed_at <= REFRESH_REUSE_GRACE
+    within_grace = _as_utc(attempt_started_at) <= consumed_at + REFRESH_REUSE_GRACE
     reason = "concurrent_rejection_within_grace" if within_grace else "consumed_token_replay_family_revoked"
     await audit.write_audit(
         session,
@@ -225,63 +229,6 @@ async def _revoke_compromised_family(
     await session.commit()
 
 
-async def _resolve_logout_refresh_authority(
-    request: Request,
-    session: AsyncSession,
-) -> RefreshSession:
-    """Resolve the active refresh session that authorizes terminal browser logout.
-
-    Logout deliberately uses the HttpOnly refresh credential rather than the
-    access-token dependency: an expired or malformed bearer must not leave
-    refresh authority active.  A *valid* bearer for another subject is still
-    rejected without changing either user's session state.
-    """
-    settings = get_settings()
-    raw_token = request.cookies.get(get_refresh_cookie_name(settings))
-    if not raw_token:
-        raise AuthError(INVALID_REFRESH_MESSAGE)
-
-    try:
-        refresh_claims = decode_token(raw_token, settings.secret_key, expected_type="refresh")
-        refresh_subject = uuid.UUID(str(refresh_claims.get("sub")))
-    except Exception as exc:  # noqa: BLE001 — preserve the generic refresh credential contract
-        raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings)) from exc
-
-    stored = await session.scalar(
-        select(RefreshSession).where(
-            RefreshSession.refresh_token_hash == hash_refresh_token(raw_token),
-            RefreshSession.consumed_at.is_(None),
-            RefreshSession.revoked_at.is_(None),
-            RefreshSession.expires_at > func.now(),
-        )
-    )
-    if stored is None:
-        raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
-
-    if refresh_subject != stored.user_id:
-        await _revoke_compromised_family(
-            session,
-            family_id=stored.family_id,
-            user_id=stored.user_id,
-            session_id=stored.id,
-            reason="logout_jwt_session_subject_mismatch",
-        )
-        raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
-
-    authorization = request.headers.get("authorization", "")
-    scheme, _, bearer_token = authorization.partition(" ")
-    if scheme.lower() == "bearer" and bearer_token:
-        try:
-            access_claims = decode_token(bearer_token, settings.secret_key, expected_type="access")
-            access_subject = uuid.UUID(str(access_claims.get("sub")))
-        except Exception:  # Invalid, expired, and malformed bearers are non-authoritative for logout.
-            access_subject = None
-        if access_subject is not None and access_subject != stored.user_id:
-            raise AuthError(INVALID_REFRESH_MESSAGE)
-
-    return stored
-
-
 @router.post("/refresh", response_model=AccessTokenResponse)
 async def refresh(
     request: Request,
@@ -296,6 +243,8 @@ async def refresh(
     if not raw_token:
         raise AuthError(INVALID_REFRESH_MESSAGE)
 
+    attempt_started_at = await database_clock_timestamp(session)
+
     try:
         claims = decode_token(raw_token, settings.secret_key, expected_type="refresh")
         subject = uuid.UUID(str(claims.get("sub")))
@@ -304,9 +253,22 @@ async def refresh(
 
     token_hash = hash_refresh_token(raw_token)
     try:
+        identity = await resolve_refresh_session_identity(session, token_hash=token_hash)
+        if identity is None:
+            raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
+        await acquire_user_authority_lock(session, user_id=identity.user_id)
+        stored = await reread_refresh_session_state(session, session_id=identity.id)
+        if stored is None:
+            raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
+        if stored.consumed_at is not None:
+            await _reject_refresh_reuse(session, stored=stored, attempt_started_at=attempt_started_at)
+        now = await database_clock_timestamp(session)
+        if stored.revoked_at is not None or _as_utc(stored.expires_at) <= _as_utc(now):
+            raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
         consumed = await consume_refresh_session(session, token_hash=token_hash)
         if consumed is None:
-            await _reject_refresh_reuse(session, token_hash=token_hash)
+            stored = await reread_refresh_session_state(session, session_id=identity.id)
+            await _reject_refresh_reuse(session, stored=stored, attempt_started_at=attempt_started_at)
 
         if subject != consumed.user_id:
             await _revoke_compromised_family(
@@ -368,29 +330,69 @@ async def logout(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     validate_auth_origin(request)
-    refresh_session = await _resolve_logout_refresh_authority(request, session)
-    # revoke ทุก session ที่ยัง active ของ user (simple policy — ปรับเป็นต่อ-device ได้)
-    result = await session.execute(
-        select(RefreshSession).where(
-            RefreshSession.user_id == refresh_session.user_id,
-            RefreshSession.consumed_at.is_(None),
-            RefreshSession.revoked_at.is_(None),
-            RefreshSession.expires_at > func.now(),
+    settings = get_settings()
+    raw_token = request.cookies.get(get_refresh_cookie_name(settings))
+    if not raw_token:
+        raise AuthError(INVALID_REFRESH_MESSAGE)
+    logout_attempt_started_at = await database_clock_timestamp(session)
+    try:
+        refresh_claims = decode_token(raw_token, settings.secret_key, expected_type="refresh")
+        refresh_subject = uuid.UUID(str(refresh_claims.get("sub")))
+    except Exception as exc:  # noqa: BLE001 — preserve generic refresh credential contract
+        raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings)) from exc
+
+    try:
+        identity = await resolve_refresh_session_identity(session, token_hash=hash_refresh_token(raw_token))
+        if identity is None:
+            raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
+
+        authorization = request.headers.get("authorization", "")
+        scheme, _, bearer_token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and bearer_token:
+            try:
+                access_claims = decode_token(bearer_token, settings.secret_key, expected_type="access")
+                access_subject = uuid.UUID(str(access_claims.get("sub")))
+            except Exception:  # Invalid, expired, and malformed bearers are non-authoritative for logout.
+                access_subject = None
+            if access_subject is not None and access_subject != identity.user_id:
+                raise AuthError(INVALID_REFRESH_MESSAGE)
+
+        await acquire_user_authority_lock(session, user_id=identity.user_id)
+        stored = await reread_refresh_session_state(session, session_id=identity.id)
+        now = await database_clock_timestamp(session)
+        if stored is None or stored.revoked_at is not None or _as_utc(stored.expires_at) <= _as_utc(now):
+            raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
+        if refresh_subject != stored.user_id:
+            await _revoke_compromised_family(
+                session,
+                family_id=stored.family_id,
+                user_id=stored.user_id,
+                session_id=stored.id,
+                reason="logout_jwt_session_subject_mismatch",
+            )
+            raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
+        if stored.consumed_at is not None and (
+            _as_utc(logout_attempt_started_at) > _as_utc(stored.consumed_at) + REFRESH_REUSE_GRACE
+        ):
+            raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
+
+        await revoke_active_user_sessions(session, user_id=stored.user_id)
+        await audit.write_audit(
+            session,
+            action="LOGOUT",
+            entity="user",
+            entity_id=stored.user_id,
+            user_id=stored.user_id,
         )
-    )
-    now = dt.datetime.now(dt.UTC)
-    for stored in result.scalars():
-        stored.revoked_at = now
-    await audit.write_audit(
-        session,
-        action="LOGOUT",
-        entity="user",
-        entity_id=refresh_session.user_id,
-        user_id=refresh_session.user_id,
-    )
-    await session.commit()
-    clear_refresh_cookie(response)
-    return {"status": "ok", "correlation_id": get_correlation_id()}
+        await session.commit()
+        clear_refresh_cookie(response)
+        return {"status": "ok", "correlation_id": get_correlation_id()}
+    except AuthError:
+        await session.rollback()
+        raise
+    except Exception:
+        await session.rollback()
+        raise
 
 
 @router.get("/me", response_model=MeResponse)
