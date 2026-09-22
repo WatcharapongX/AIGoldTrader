@@ -14,6 +14,15 @@ All confirmed findings assigned through Batch B1 remain closed (**AUD-P1-005** r
 
 ---
 
+## R0-CORR-001: Terminal Logout / Refresh Authority Remediation
+
+- **R0-P2-001**: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. Explicit logout now uses the existing HttpOnly refresh-cookie session authority after strict Origin validation, so expired, missing, or malformed access bearers cannot prevent refresh-session termination.
+- **AUD-P2-002**: **REMAINS OPEN — PENDING R0 RE-VERIFICATION**. It is not closed by this corrective implementation.
+- **B3.2-NEW-P2-001**: **CLOSED**. Its request-epoch and terminal recovery protections remain unchanged by this backend-only correction.
+- **Batch B**: **REMAINS OPEN — PENDING R0 RE-VERIFICATION**.
+
+---
+
 ## Remediated Audit Findings: Batch B2
 
 ### 1. AUD-P2-002: Secure Refresh Cookie and Browser Auth Contract (Partial Remediation)

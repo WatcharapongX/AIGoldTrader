@@ -1,8 +1,15 @@
 """Authentication flow — TASK-016 DoD evidence."""
 
+import datetime as dt
 import uuid
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+
+from app.core.config import get_settings
+from app.core.security import create_token
+from app.models import RefreshSession
+from app.services.users import hash_refresh_token
 
 
 def test_login_success_returns_token_pair(client: TestClient, admin_user) -> None:
@@ -71,6 +78,117 @@ def test_logout_revokes_sessions(client: TestClient, admin_user) -> None:
     # refresh หลัง logout = revoked
     replay = client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": cookie})
     assert replay.status_code == 401
+
+
+async def test_logout_with_expired_access_token_revokes_refresh_authority(
+    client: TestClient, admin_user, db_session
+) -> None:
+    login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"})
+    refresh_token = login.cookies.get("aigold_refresh_dev")
+    expired_access, _ = create_token(
+        subject=str(admin_user.id),
+        role=admin_user.role.value,
+        token_type="access",
+        secret_key=get_settings().secret_key,
+        access_expire_minutes=-1,
+    )
+
+    logout = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {expired_access}"})
+    assert logout.status_code == 200
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    assert refresh_token is not None
+    assert not client.cookies.get("aigold_refresh_dev")
+    session, _ = db_session
+    stored = await session.scalar(
+        select(RefreshSession).where(RefreshSession.refresh_token_hash == hash_refresh_token(refresh_token))
+    )
+    assert stored is not None and stored.revoked_at is not None
+    assert client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": refresh_token}).status_code == 401
+
+
+def test_logout_without_access_token_revokes_refresh_authority(client: TestClient, admin_user) -> None:
+    login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"})
+    refresh_token = login.cookies.get("aigold_refresh_dev")
+
+    logout = client.post("/api/auth/logout")
+    assert logout.status_code == 200
+    assert refresh_token is not None
+    assert client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": refresh_token}).status_code == 401
+
+
+def test_logout_with_malformed_access_token_revokes_refresh_authority(client: TestClient, admin_user) -> None:
+    login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"})
+    refresh_token = login.cookies.get("aigold_refresh_dev")
+
+    logout = client.post("/api/auth/logout", headers={"Authorization": "Bearer malformed.access.token"})
+    assert logout.status_code == 200
+    assert refresh_token is not None
+    assert client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": refresh_token}).status_code == 401
+
+
+def test_logout_missing_or_invalid_refresh_cookie_is_bounded(client: TestClient, admin_user) -> None:
+    client.cookies.clear()
+    assert client.post("/api/auth/logout").status_code == 401
+
+    invalid = client.post("/api/auth/logout", cookies={"aigold_refresh_dev": "not-a-jwt"})
+    assert invalid.status_code == 401
+    assert "Max-Age=0" in invalid.headers["set-cookie"]
+
+
+def test_logout_rejects_valid_bearer_for_different_refresh_subject(client: TestClient, admin_user, trader_user) -> None:
+    login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"})
+    refresh_token = login.cookies.get("aigold_refresh_dev")
+    trader_access, _ = create_token(
+        subject=str(trader_user.id),
+        role=trader_user.role.value,
+        token_type="access",
+        secret_key=get_settings().secret_key,
+    )
+
+    logout = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {trader_access}"})
+    assert logout.status_code == 401
+    assert refresh_token is not None
+    assert client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": refresh_token}).status_code == 200
+
+
+async def test_logout_refresh_jwt_session_subject_mismatch_is_terminal(
+    client: TestClient, admin_user, trader_user, db_session
+) -> None:
+    mismatched_refresh, _ = create_token(
+        subject=str(trader_user.id),
+        role=trader_user.role.value,
+        token_type="refresh",
+        secret_key=get_settings().secret_key,
+    )
+    session, _ = db_session
+    stored = RefreshSession(
+        user_id=admin_user.id,
+        family_id=uuid.uuid4(),
+        refresh_token_hash=hash_refresh_token(mismatched_refresh),
+        expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=1),
+    )
+    session.add(stored)
+    await session.commit()
+    stored_id = stored.id
+
+    logout = client.post("/api/auth/logout", cookies={"aigold_refresh_dev": mismatched_refresh})
+    assert logout.status_code == 401
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    session.expire_all()
+    stored = await session.get(RefreshSession, stored_id)
+    assert stored is not None and stored.revoked_at is not None
+
+
+def test_logout_origin_validation_precedes_refresh_session_mutation(client: TestClient, admin_user) -> None:
+    login = client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin-pass-123"})
+    refresh_token = login.cookies.get("aigold_refresh_dev")
+
+    missing_origin = client.post("/api/auth/logout", headers={"origin": ""})
+    assert missing_origin.status_code == 403
+    untrusted_origin = client.post("/api/auth/logout", headers={"origin": "https://attacker.example"})
+    assert untrusted_origin.status_code == 403
+    assert refresh_token is not None
+    assert client.post("/api/auth/refresh", cookies={"aigold_refresh_dev": refresh_token}).status_code == 200
 
 
 async def test_audit_log_records_login(client: TestClient, admin_user, db_session) -> None:

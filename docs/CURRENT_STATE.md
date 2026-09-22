@@ -1,10 +1,10 @@
 # Canonical Current Operational State — AIGoldTrader
 
-- **Last Verified Date**: 2026-09-18
+- **Last Verified Date**: 2026-09-22
 - **Authoritative Branch**: `main`
 - **Current Milestone**: Post-Freeze Remediation Baseline (FC-12 Frozen + Batches A, B1, B2, B3, B3.1, B3.2, B3.3)
-- **Current Active Gate**: Gate R0 — Final Independent Verification of Batch B3/B3.x Session Security
-- **Next Authorized Activity**: Read-only independent verification of Batch B3/B3.x browser authentication remediation
+- **Current Active Gate**: Gate R0 — Independent Re-Verification of Batch B Session Security
+- **Next Authorized Activity**: Independent verification of R0-P2-001 together with Batch B3/B3.x browser authentication remediation
 - **Prohibited Next Activity**: Strictly DO NOT start Batch C; DO NOT implement execution modules or live trading
 
 ---
@@ -52,8 +52,10 @@
 ---
 
 ## 3. Current Open Findings & Governance
-- **AUD-P2-002** (Browser-Safe Refresh Token & Session Security): Fully implemented through B3.3 (`5e6d794`), status remains **READY FOR FINAL INDEPENDENT VERIFICATION**. Must not be marked CLOSED until independently verified.
-- **B3.2-NEW-P2-001** (Stale 401 Token Resurrection after Logout): Remediated in Batch B3.3, status is **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- **R0-P2-001** (Terminal Logout / Refresh Authority): **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. Explicit logout is refresh-cookie-authorized after Origin validation; expired, missing, and malformed bearer tokens cannot leave server-side refresh authority active.
+- **AUD-P2-002** (Browser-Safe Refresh Token & Session Security): **REMAINS OPEN — PENDING R0 RE-VERIFICATION**. Must not be marked CLOSED until independently verified.
+- **B3.2-NEW-P2-001** (Stale 401 Token Resurrection after Logout): **CLOSED**; the B3.3 epoch protection remains in place.
+- **Batch B**: **REMAINS OPEN — PENDING R0 RE-VERIFICATION**.
 
 ---
 

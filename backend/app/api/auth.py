@@ -225,6 +225,63 @@ async def _revoke_compromised_family(
     await session.commit()
 
 
+async def _resolve_logout_refresh_authority(
+    request: Request,
+    session: AsyncSession,
+) -> RefreshSession:
+    """Resolve the active refresh session that authorizes terminal browser logout.
+
+    Logout deliberately uses the HttpOnly refresh credential rather than the
+    access-token dependency: an expired or malformed bearer must not leave
+    refresh authority active.  A *valid* bearer for another subject is still
+    rejected without changing either user's session state.
+    """
+    settings = get_settings()
+    raw_token = request.cookies.get(get_refresh_cookie_name(settings))
+    if not raw_token:
+        raise AuthError(INVALID_REFRESH_MESSAGE)
+
+    try:
+        refresh_claims = decode_token(raw_token, settings.secret_key, expected_type="refresh")
+        refresh_subject = uuid.UUID(str(refresh_claims.get("sub")))
+    except Exception as exc:  # noqa: BLE001 — preserve the generic refresh credential contract
+        raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings)) from exc
+
+    stored = await session.scalar(
+        select(RefreshSession).where(
+            RefreshSession.refresh_token_hash == hash_refresh_token(raw_token),
+            RefreshSession.consumed_at.is_(None),
+            RefreshSession.revoked_at.is_(None),
+            RefreshSession.expires_at > func.now(),
+        )
+    )
+    if stored is None:
+        raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
+
+    if refresh_subject != stored.user_id:
+        await _revoke_compromised_family(
+            session,
+            family_id=stored.family_id,
+            user_id=stored.user_id,
+            session_id=stored.id,
+            reason="logout_jwt_session_subject_mismatch",
+        )
+        raise AuthError(INVALID_REFRESH_MESSAGE, headers=build_clear_cookie_headers(settings))
+
+    authorization = request.headers.get("authorization", "")
+    scheme, _, bearer_token = authorization.partition(" ")
+    if scheme.lower() == "bearer" and bearer_token:
+        try:
+            access_claims = decode_token(bearer_token, settings.secret_key, expected_type="access")
+            access_subject = uuid.UUID(str(access_claims.get("sub")))
+        except Exception:  # Invalid, expired, and malformed bearers are non-authoritative for logout.
+            access_subject = None
+        if access_subject is not None and access_subject != stored.user_id:
+            raise AuthError(INVALID_REFRESH_MESSAGE)
+
+    return stored
+
+
 @router.post("/refresh", response_model=AccessTokenResponse)
 async def refresh(
     request: Request,
@@ -308,15 +365,14 @@ async def refresh(
 async def logout(
     request: Request,
     response: Response,
-    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     validate_auth_origin(request)
-    request.state.user = current_user
+    refresh_session = await _resolve_logout_refresh_authority(request, session)
     # revoke ทุก session ที่ยัง active ของ user (simple policy — ปรับเป็นต่อ-device ได้)
     result = await session.execute(
         select(RefreshSession).where(
-            RefreshSession.user_id == current_user.id,
+            RefreshSession.user_id == refresh_session.user_id,
             RefreshSession.consumed_at.is_(None),
             RefreshSession.revoked_at.is_(None),
             RefreshSession.expires_at > func.now(),
@@ -325,7 +381,13 @@ async def logout(
     now = dt.datetime.now(dt.UTC)
     for stored in result.scalars():
         stored.revoked_at = now
-    await audit.write_audit(session, action="LOGOUT", entity="user", entity_id=current_user.id, user_id=current_user.id)
+    await audit.write_audit(
+        session,
+        action="LOGOUT",
+        entity="user",
+        entity_id=refresh_session.user_id,
+        user_id=refresh_session.user_id,
+    )
     await session.commit()
     clear_refresh_cookie(response)
     return {"status": "ok", "correlation_id": get_correlation_id()}
