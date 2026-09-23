@@ -3,8 +3,8 @@
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
 - **Current Milestone**: Batch D remains open; D1 is CLOSED and D2 governance requires a split.
-- **Current Active Gate**: D2A Causal Replay Foundation — AUTHORIZED FOR IMPLEMENTATION.
-- **Next Permitted Activity**: D2A implementation only, followed by focused and independent verification.
+- **Current Active Gate**: D2A Causal Replay Foundation — IMPLEMENTED, PENDING INDEPENDENT VERIFICATION.
+- **Next Permitted Activity**: D2A independent verification only (GPT-5.6 Sol / High).
 - **Prohibited Progression**: D2B, D2C, and D3–D7 remain unapproved.
 
 ---
@@ -34,10 +34,13 @@
 ### Hardening
 - External AI provider infrastructure: C1–C3 independently verified; Batch C closed; fixture mode default.
 
-### Foundation Implemented and Verified
+### Foundation Status
 - **Deterministic Backtesting D1**: immutable configuration/lifecycle, coverage/provenance, resource-policy,
   canonical fingerprint, and simulation/live isolation contracts are implemented and independently verified.
-  D1-IV-001 through D1-IV-006 are closed. The Backtesting Engine is not implemented: no replay runner,
+  D1-IV-001 through D1-IV-006 are closed.
+- **D2A Causal Replay Foundation**: implemented and locally verified, pending independent GPT-5.6 Sol / High
+  verification. It provides pure UTC causal-prefix replay through existing Analysis, News, Strategy, and
+  suggestion-only TradePlan output. The Backtesting Engine is not complete: no Risk replay integration,
   fill simulation, PnL/metrics engine, persistence, API, or results UI exists.
 - The current `/backtesting` page renders Strategy Lab historical evaluation snapshots. These are not trades,
   fills, PnL, an equity curve, or a real backtest.
@@ -70,9 +73,9 @@ The approved staged data flow is:
 - Batch C: **CLOSED**.
 - Batch D: **OPEN; D1 CLOSED**.
 - D1: **CLOSED**.
-- D2A: **AUTHORIZED FOR IMPLEMENTATION; NOT YET IMPLEMENTED**.
+- D2A: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
 - D2B, D2C, and D3–D7: **NOT AUTHORIZED**.
-- Backtesting: **FOUNDATION CONTRACTS IMPLEMENTED AND VERIFIED; ENGINE NOT IMPLEMENTED**.
+- Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
 - Paper Trading: **NOT AUTHORIZED**.
 - Broker Execution: **NOT AUTHORIZED**.

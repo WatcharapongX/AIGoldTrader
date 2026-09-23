@@ -4,7 +4,15 @@ import ast
 from pathlib import Path
 
 PACKAGE = Path(__file__).parents[1] / "app" / "services" / "backtesting"
-EXPECTED_FILES = {"__init__.py", "domain.py", "fingerprint.py", "isolation.py", "policy.py"}
+EXPECTED_FILES = {
+    "__init__.py",
+    "domain.py",
+    "fingerprint.py",
+    "isolation.py",
+    "policy.py",
+    "replay.py",
+    "replay_domain.py",
+}
 FORBIDDEN_IMPORT_PREFIXES = (
     "app.services.risk.engine",
     "app.services.risk.repository",
@@ -61,7 +69,7 @@ def call_name(node: ast.Call) -> str | None:
     return None
 
 
-def test_d1_package_contains_only_contract_modules():
+def test_backtesting_package_contains_only_authorized_d1_d2a_modules():
     names = {path.name for path in PACKAGE.glob("*.py")}
     assert names == EXPECTED_FILES
     assert not names & FORBIDDEN_MODULES

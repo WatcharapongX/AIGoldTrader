@@ -18,7 +18,7 @@ from app.services.market_data.domain import Timeframe
 
 BACKTEST_CONTRACT_VERSION = "backtest-contract-1.0.0"
 BACKTEST_FINGERPRINT_VERSION = "backtest-fingerprint-1.0.0"
-REPLAY_ENGINE_VERSION_PLACEHOLDER = "replay-engine-not-implemented-d1"
+REPLAY_ENGINE_VERSION = "replay-engine-1.0.0"
 
 _TIMEFRAME_ORDER = {timeframe: index for index, timeframe in enumerate(Timeframe)}
 
@@ -295,7 +295,7 @@ class BacktestProvenance(FrozenContract):
     profile_id: ProfileId
     risk_policy_version: BoundedReference
     backtest_contract_version: Literal["backtest-contract-1.0.0"] = BACKTEST_CONTRACT_VERSION
-    replay_engine_version: Literal["replay-engine-not-implemented-d1"] = REPLAY_ENGINE_VERSION_PLACEHOLDER
+    replay_engine_version: Literal["replay-engine-1.0.0"] = REPLAY_ENGINE_VERSION
     costs: CostAssumptions
     data_coverage_fingerprint: Sha256
     data_fingerprint: Sha256

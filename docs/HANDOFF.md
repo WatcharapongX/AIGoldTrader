@@ -3,81 +3,68 @@
 ## Session Result
 - Date: 2026-09-23.
 - Branch: `main`.
-- Starting SHA: `d021306f83c213ea8b508981536fd9fe72064bee`.
-- Gate: Batch D2 Governance Authorization.
-- Result: **PLAN REQUIRES SPLIT**.
+- Starting SHA: `e202b1988da1a4d1b59b28122439c839bbfe55ff`.
+- Gate: Batch D2A Causal Replay Foundation implementation.
+- Result: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
 - D1 remains **CLOSED**.
-- D2A is **AUTHORIZED FOR IMPLEMENTATION**.
 - D2B, D2C, and D3–D7 remain **NOT AUTHORIZED**.
-- Backtesting Foundation remains **IMPLEMENTED AND VERIFIED**.
-- Backtesting Engine remains **NOT IMPLEMENTED**.
+- Backtesting remains incomplete: Risk replay, fills, PnL/metrics, persistence, API, and UI are absent.
 
-## Repository Findings
-- The backtesting package contains D1 contracts, fingerprints, resource policy, and isolation declarations only.
-- There is no replay runner, execution simulator, fill model, PnL/metrics engine, persistence, API, or results UI.
-- `strategy.context.build_context()` already requires an aware cutoff, filters candles by their own close,
-  projects quotes by both market timestamp and observation availability, and supports `replay=True`.
-- News projection selects only revisions with `available_at <= T` and validates point-in-time structure inputs.
-- Analysis is a deterministic closed-candle state machine; confirmation and lifecycle changes occur on causal
-  candle-close events when it is rebuilt or advanced from the prefix available at `T`.
-- Full-dataset lifecycle objects must never be reused directly at an earlier cutoff; D2A must reconstruct from
-  the causal prefix so a later invalidation, fill, sweep, or session outcome cannot leak backward.
-- Existing Analysis, Strategy Engine, STRAT01–STRAT06, profiles, candidate identity, and TradePlan geometry are
-  reusable and must not be duplicated for backtesting.
+## Production Implementation
+- `backend/app/services/backtesting/replay_domain.py` defines the stable replay failure vocabulary,
+  immutable replay inputs/events/results, and an aware-UTC strictly monotonic `ReplayClock`.
+- `backend/app/services/backtesting/replay.py` validates bounded canonical inputs, derives configured primary
+  close events, projects each required timeframe by its own close, and recomputes causal prefixes.
+- Replay reuses `analysis.engine.analyze`, `news.engine.build_context`,
+  `strategy.context.build_context(..., replay=True)`, canonical profiles, `strategy.engine.evaluate`,
+  SetupCandidate, and suggestion-only TradePlan contracts without copying strategy or structure rules.
+- Warm-up primary events feed reconstructed state but cannot emit reportable events before requested start.
+- News revisions are selected only when `available_at <= T`; quote evidence requires both market timestamp
+  and `observed_at` at or before `T`; news structure is rebuilt from the same causal M1 prefix.
+- Events are bounded, unique, and ordered by `(as_of, profile_id, strategy_id, candidate_id)`.
+- Event and replay fingerprints are canonical and contain no wall-clock, random, or operational input.
+- `REPLAY_ENGINE_VERSION` is now server-owned as `replay-engine-1.0.0` and remains part of D1 provenance
+  and the existing run-input fingerprint. Contract and fingerprint versions were not changed.
 
-## Risk Architecture Classification
-- Pure today: Decimal position sizing, cooldown calculation, evaluation-intent identity, dependency-fingerprint
-  construction when all inputs are explicit, and most gate/news/account/spec/plan arithmetic embedded in the engine.
-- Live orchestration: PostgreSQL advisory locks, automatic Kill Switch evaluation/mutation, global Kill Switch
-  reads, existing-decision lookup, repository persistence, reservation reads/releases/creates, and idempotency repair.
-- Mixed/extraction required: quote freshness/spread classification, news blackout/reduction, account loss/drawdown/
-  freshness rules, symbol-spec freshness, terminal/expiry gates, portfolio capacity, final outcome construction,
-  and stable semantic reason codes.
-- Portfolio capacity currently combines pure limit math with locked database reservation reads and must be split.
-- Kill Switch ACTIVE/INACTIVE/UNKNOWN policy can be a pure explicit input, but all live state reads and automatic
-  trigger mutations must remain outside the pure seam.
-- Current Risk tests cover live outcomes and side effects, but no pure/live parity harness exists yet.
+## Causality Evidence
+- Full input plus cutoff equals the causal-prefix-only event stream and replay fingerprint at multiple cutoffs.
+- Mutating or removing future primary candles cannot change prefix output.
+- Mutating not-yet-closed H1, H4, D1, or W1 candles cannot change prefix Analysis or candidate identity.
+- A final forming HTF candle is accepted as input but never exposed as closed state.
+- Future economic revisions cannot change earlier news context, candidate, or event identity.
+- Delayed quotes remain invisible before `observed_at`; later visible quote mutations affect only later state.
+- Repeated identical replay produces identical events, ordering, identities, and fingerprints.
+- Existing TradePlan geometry is preserved as `SUGGESTION_ONLY`; no outcome or execution field exists.
 
-## Authorized D2A Scope
-- Add a pure aware-UTC monotonic replay clock advanced by chronological closed primary-timeframe candle events.
-- Validate unique canonical inputs and D1 limits: 366 days, 250,000 primary events, and 1,000,000 candle inputs.
-- Project every required M1–W1 frame only after that frame closes.
-- Project immutable news revisions by `available_at` and quotes by both `timestamp` and `observed_at`.
-- Feed warm-up data from the governed fixed origin but emit no reportable output before `requested_start`.
-- Reuse existing Analysis, `build_context(..., replay=True)`, Strategy evaluation, profiles, and TradePlan geometry.
-- Emit deterministic bounded in-memory context/candidate/TradePlan events only; no Risk decision event yet.
-- Order equal-time outputs by `(as_of, profile_id, strategy_id, candidate_id)`.
-- Use prefix recomputation as the correctness oracle; optimize incrementally only with equivalence proof.
-- Replace the D1 replay-version placeholder with a server-owned D2A version only when implementation exists,
-  and include it through existing provenance/run-input fingerprint authority.
-- Add focused causal, determinism, resource, and architecture-isolation tests.
+## Resource and Failure Semantics
+- D1 limits remain authoritative: 366 requested days, 250,000 primary events, 1,000,000 candle inputs,
+  and 100,000 reportable candidate events.
+- Primary and total candle counts reject before sequence materialization in the replay input factory.
+- Stable codes cover invalid input, non-monotonic input, resource rejection, causality violation,
+  unavailable historical news, and invalid profile/strategy configuration.
+- Conflicting duplicates fail closed; exact reportable event duplicates may only canonical-deduplicate.
 
-## Required D2A Tests
-- Full input plus cutoff equals causal-prefix-only output at every selected cutoff.
-- Mutating future candles, HTF bars, swings/events/zones/patterns, session outcomes, news revisions, quotes,
-  candidate outcomes, or TradePlan outcomes cannot change results at or before `T`.
-- M5/H1/H4/D1/W1 close boundaries do not expose incomplete higher-timeframe candles.
-- A later news revision is invisible before its own `available_at`.
-- A quote is invisible until both its market timestamp and `observed_at` are at or before `T`.
-- Repeated identical runs are byte/semantically equivalent and use no wall clock, random IDs, or unordered iteration.
-- D1 resource ceilings fail closed before unbounded work or output.
-- Architecture tests prove no DB, live Risk Engine, Kill Switch, reservation, broker, network, filesystem-write,
-  external-AI, fill, PnL, persistence, API, or UI dependency.
+## Isolation Boundary
+- No RiskEngine, RiskDecision, Kill Switch, portfolio, reservation, database, SQLAlchemy, API, frontend,
+  background worker, broker, MT5, network, external AI, or filesystem-write dependency was added.
+- No entry-touch, fill, SL/TP outcome, trade lifecycle, cost application, PnL, metric, or equity logic exists.
+- Analysis, News, Strategy, Market Data, and Risk implementation files were not modified.
+- Trading safety remains PAPER with live automatic trading disabled and no broker execution authority.
 
-## Not Authorized
-- D2B pure Risk extraction and live-wrapper refactor.
-- D2C replay/Risk integration or risk-decision stream.
-- D3 fills, costs application, ambiguity resolution, trade/portfolio lifecycle, or ledgers.
-- D4 metrics, equity curve, drawdown, or performance dimensions.
-- D5 persistence, background execution/cancellation, API, ownership, or pagination.
-- D6 UI and D7 closure work.
-- Model Routing, Paper Trading, OMS, broker execution, live positions, and Live Trading.
+## Verification Evidence
+- D2A focused and architecture: 23 passed; 0 failed.
+- D1 focused and architecture: 80 passed; 0 failed.
+- Market Data regression: 33 passed; 0 failed.
+- Analysis regression: 54 passed; 0 failed.
+- News regression: 67 passed; 0 failed.
+- Strategy regression: 68 passed; 0 failed.
+- Ruff over every changed/new Python file: PASS.
+- `git diff --check`: PASS; line-ending notices only, no whitespace errors.
+- Existing deprecation warnings concern Starlette/httpx and the existing pytest-asyncio event-loop fixture.
 
-## Safety and Next Gate
-- `TRADING_MODE=PAPER` and `LIVE_AUTO_TRADING=false` remain mandatory.
-- Broker execution remains absent.
-- Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
-- Next task is D2A implementation only, recommended on GPT-5.6 Sol / Medium.
-- Causality ambiguity must escalate to GPT-5.6 Sol / High.
-- D2A requires independent GPT-5.6 Sol / High verification before governance may consider D2B.
-- Do not begin D2B or any later batch automatically.
+## Governance and Next Gate
+- D2A is **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**, not closed.
+- Next authorized task: D2A independent verification only using GPT-5.6 Sol / High.
+- D2B/D2C and D3–D7 remain **NOT AUTHORIZED**.
+- Do not implement Risk extraction, replay/Risk integration, fills, PnL/metrics, persistence, API, UI,
+  Model Routing, Paper Trading, OMS, broker execution, or live trading.

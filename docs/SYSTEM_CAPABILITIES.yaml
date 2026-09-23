@@ -10,8 +10,8 @@ governance:
   completed_sub_batches:
     - "D1"
   active_sub_batch: "D2A"
-  active_scope: "Causal replay foundation through existing Analysis, Strategy, and suggestion-only TradePlan output; no Risk evaluation or fills"
-  next_authorized_activity: "Implement and verify D2A only"
+  active_scope: "Independent verification of the implemented causal replay foundation; no Risk evaluation or fills"
+  next_authorized_activity: "D2A independent verification only (GPT-5.6 Sol / High)"
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -53,11 +53,11 @@ capabilities:
     status: implemented_verified
     details: "Batch B independently closed"
   backtesting:
-    status: foundation_verified_engine_not_implemented
-    governance: split_program_d1_closed_d2a_authorized
+    status: causal_replay_foundation_implemented_risk_fill_not_implemented
+    governance: split_program_d1_closed_d2a_pending_independent_verification
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 contracts and isolation are independently verified and closed; D2A causal replay is authorized but not implemented; D2B/D2C and D3-D7 are not authorized; no replay engine, fill simulation, PnL, persistence, API, or results UI exists"
+    details: "D1 is independently verified and closed; D2A pure causal replay through existing Analysis, News, Strategy, and suggestion-only TradePlan output is implemented and locally verified pending independent review; D2B/D2C and D3-D7 are not authorized; no Risk replay integration, fill simulation, PnL/metrics, persistence, API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:

@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from app.services.backtesting.domain import (
     BACKTEST_CONTRACT_VERSION,
     BACKTEST_FINGERPRINT_VERSION,
-    REPLAY_ENGINE_VERSION_PLACEHOLDER,
+    REPLAY_ENGINE_VERSION,
     BacktestProvenance,
     BacktestRunConfig,
     BacktestRunEnvelope,
@@ -689,15 +689,19 @@ def test_d1_versions_are_server_owned_while_strategy_and_risk_versions_remain_in
     item = manifest()
     assert item.contract_version == BACKTEST_CONTRACT_VERSION
     assert item.fingerprint_version == BACKTEST_FINGERPRINT_VERSION
-    assert item.provenance.replay_engine_version == REPLAY_ENGINE_VERSION_PLACEHOLDER
-    assert "not-implemented" in item.provenance.replay_engine_version
+    assert item.provenance.replay_engine_version == REPLAY_ENGINE_VERSION
+    assert item.provenance.replay_engine_version == "replay-engine-1.0.0"
 
     with pytest.raises(ValidationError):
         manifest(backtest_contract_version="backtest-contract-9.9.9")
     with pytest.raises(ValidationError):
         BacktestRunManifest(**{**item.model_dump(), "fingerprint_version": "backtest-fingerprint-9.9.9"})
     with pytest.raises(ValidationError):
-        manifest(replay_engine_version="replay-engine-implemented-9.9.9")
+        manifest(replay_engine_version="replay-engine-9.9.9")
+
+    former = item.model_dump(mode="python")
+    former["provenance"]["replay_engine_version"] = "replay-engine-not-implemented-d1"
+    assert semantic_fingerprint({"kind": "backtest-run-manifest", "value": former}) != run_input_fingerprint(item)
 
     assert run_input_fingerprint(manifest(strategy_version="strategy-9.9.9")) != run_input_fingerprint(item)
     assert run_input_fingerprint(manifest(risk_policy_version="risk-policy-9.9.9")) != run_input_fingerprint(item)
