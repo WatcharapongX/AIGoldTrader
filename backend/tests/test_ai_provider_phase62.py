@@ -74,6 +74,7 @@ from app.services.ai.provider import (
     ProviderWorkerTerminationError,
     SpawnSafeTestProvider,
     analyze_with_controls,
+    public_provider_failure_code,
 )
 
 TEST_MODEL_MAPPING = {"fast-advisory": "gpt-4o-mini"}
@@ -229,6 +230,95 @@ def test_config_rejects_external_mode_with_fixture_type():
     """P1-201: AI_PROVIDER_MODE=external with AI_PROVIDER_TYPE=fixture must fail configuration."""
     with pytest.raises(ValueError, match="cannot use ai_provider_type='fixture'"):
         Settings(ai_provider_mode="external", ai_provider_type="fixture")
+
+
+def test_c1_external_configuration_matrix_is_static_and_fail_closed(monkeypatch):
+    """C-ADR-005: mode selection is explicit and validation performs no network I/O."""
+    network_calls = 0
+
+    def forbidden_network(*_args, **_kwargs):
+        nonlocal network_calls
+        network_calls += 1
+        raise AssertionError("Settings validation must not perform network I/O")
+
+    monkeypatch.setattr(httpx, "AsyncClient", forbidden_network)
+    fixture = Settings(ai_provider_mode="fixture", ai_provider_type="fixture")
+    assert fixture.ai_provider_mode == "fixture"
+    valid = Settings(
+        ai_provider_mode="external",
+        ai_provider_type="openai_compatible",
+        ai_provider_api_key="configured-c1-secret",
+        ai_provider_base_url="https://api.openai.com/v1",
+        ai_model_mapping={"fast-advisory": "vendor-model-1"},
+    )
+    assert valid.ai_provider_type == "openai_compatible"
+    assert network_calls == 0
+
+    invalid_cases = (
+        {"ai_provider_mode": "external", "ai_provider_type": "fixture"},
+        {
+            "ai_provider_mode": "external",
+            "ai_provider_type": "openai_compatible",
+            "ai_provider_api_key": "",
+            "ai_model_mapping": {"fast-advisory": "vendor-model-1"},
+        },
+        {
+            "ai_provider_mode": "external",
+            "ai_provider_type": "openai_compatible",
+            "ai_provider_api_key": "configured-c1-secret",
+            "ai_model_mapping": {},
+        },
+        {
+            "ai_provider_mode": "external",
+            "ai_provider_type": "openai_compatible",
+            "ai_provider_api_key": "configured-c1-secret",
+            "ai_model_mapping": {"INVALID ALIAS": "vendor-model-1"},
+        },
+        {
+            "ai_provider_mode": "external",
+            "ai_provider_type": "openai_compatible",
+            "ai_provider_api_key": "configured-c1-secret",
+            "ai_model_mapping": {"fast-advisory": "https://invalid.example/model"},
+        },
+        {
+            "ai_provider_mode": "external",
+            "ai_provider_type": "openai_compatible",
+            "ai_provider_api_key": "configured-c1-secret",
+            "ai_provider_base_url": "http://provider.invalid/v1",
+            "ai_model_mapping": {"fast-advisory": "vendor-model-1"},
+        },
+        {
+            "ai_provider_mode": "external",
+            "ai_provider_type": "openai_compatible",
+            "ai_provider_api_key": "configured-c1-secret",
+            "ai_provider_base_url": "https://user:password@provider.example/v1",
+            "ai_model_mapping": {"fast-advisory": "vendor-model-1"},
+        },
+        {"ai_provider_mode": "fixture", "ai_provider_type": "openai_compatible"},
+    )
+    for values in invalid_cases:
+        with pytest.raises(ValueError):
+            Settings(**values)
+    assert network_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code"),
+    [
+        (ProviderAuthError("hostile"), "PROVIDER_AUTH_FAILED"),
+        (ProviderRateLimitError("hostile"), "PROVIDER_RATE_LIMITED"),
+        (ProviderTimeoutError("hostile"), "PROVIDER_TIMEOUT"),
+        (ProviderNetworkError("hostile"), "PROVIDER_NETWORK_ERROR"),
+        (ProviderCapacityExhausted("hostile"), "PROVIDER_CAPACITY_EXHAUSTED"),
+        (ProviderRequestError("hostile"), "PROVIDER_REQUEST_REJECTED"),
+        (ProviderSchemaError("hostile"), "PROVIDER_SCHEMA_INVALID"),
+        (ProviderBudgetExceeded("hostile"), "PROVIDER_BUDGET_EXCEEDED"),
+        (ProviderWorkerTerminationError("hostile"), "PROVIDER_WORKER_FAILURE"),
+        (ProviderInternalError("hostile"), "PROVIDER_INTERNAL_ERROR"),
+    ],
+)
+def test_c1_provider_failure_mapping_is_deterministic(error, expected_code):
+    assert public_provider_failure_code(error) == expected_code
 
 
 def test_provider_descriptor_defaults_and_immutability():
@@ -832,6 +922,69 @@ async def test_openai_adapter_server_error_500():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "error_type"),
+    [
+        (401, ProviderAuthError),
+        (403, ProviderAuthError),
+        (429, ProviderRateLimitError),
+        (400, ProviderRequestError),
+        (500, ProviderNetworkError),
+    ],
+)
+async def test_c1_http_error_body_and_secret_never_cross_adapter_boundary(status, error_type):
+    hostile = "SECRET_MARKER_C1 Bearer SECRET_MARKER_C1 http://internal-provider.invalid/private"
+
+    def mock_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, text=hostile)
+
+    provider = OpenAICompatibleProvider(
+        api_key="SECRET_MARKER_C1",
+        model_mapping=TEST_MODEL_MAPPING,
+        transport=httpx.MockTransport(mock_handler),
+    )
+    with pytest.raises(error_type) as exc_info:
+        await provider.analyze(
+            agent_id="test_agent",
+            system_prompt="system",
+            user_payload="{}",
+            model_config=ModelConfig(timeout_seconds=5.0),
+        )
+    public_error = str(exc_info.value)
+    assert "SECRET_MARKER_C1" not in public_error
+    assert "internal-provider.invalid" not in public_error
+    assert "Bearer" not in public_error
+
+
+@pytest.mark.asyncio
+async def test_c1_redirect_is_not_followed_and_location_is_not_exposed():
+    requests: list[httpx.Request] = []
+    location = "https://redirect-target.invalid/private?token=SECRET_MARKER_C1"
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(307, headers={"Location": location})
+
+    provider = OpenAICompatibleProvider(
+        api_key="SECRET_MARKER_C1",
+        model_mapping=TEST_MODEL_MAPPING,
+        transport=httpx.MockTransport(mock_handler),
+    )
+    with pytest.raises(ProviderRequestError) as exc_info:
+        await provider.analyze(
+            agent_id="test_agent",
+            system_prompt="system",
+            user_payload="{}",
+            model_config=ModelConfig(timeout_seconds=5.0),
+        )
+    assert len(requests) == 1
+    assert requests[0].url.host == "api.openai.com"
+    assert requests[0].headers["Authorization"] == "Bearer SECRET_MARKER_C1"
+    assert "redirect-target.invalid" not in str(exc_info.value)
+    assert "SECRET_MARKER_C1" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_openai_adapter_malformed_json_response():
     def mock_handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -923,7 +1076,7 @@ async def test_zero_secret_leakage_across_failure_modes():
         except Exception as exc:
             exc_str = str(exc)
             assert secret_key not in exc_str, f"Secret leaked in exception string: {exc_str}"
-            assert "***MASKED***" in exc_str
+            assert "Error containing" not in exc_str
 
 
 # ============================================================================
@@ -1975,5 +2128,3 @@ def test_static_descriptor_only_type_contract():
 
     sig_orch = inspect.signature(AIOrchestrator.__init__)
     assert "ProviderDescriptor" in str(sig_orch.parameters["provider"].annotation)
-
-

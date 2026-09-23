@@ -22,6 +22,7 @@ Covers all mandatory safety requirements:
 """
 
 import datetime as dt
+import json
 import uuid
 from decimal import Decimal
 
@@ -62,7 +63,14 @@ from app.services.ai.domain import (
 )
 from app.services.ai.orchestrator import AIOrchestrator
 from app.services.ai.prompts import wrap_untrusted_data
-from app.services.ai.provider import MIN_PROVIDER_TIMEOUT_SECONDS, FixtureAIProvider, ModelConfig
+from app.services.ai.provider import (
+    MIN_PROVIDER_TIMEOUT_SECONDS,
+    FixtureAIProvider,
+    ModelConfig,
+    ProviderDescriptor,
+    ProviderNetworkError,
+    ProviderResult,
+)
 from app.services.risk.domain import RiskDecision
 from app.services.users import create_user
 
@@ -197,6 +205,142 @@ def base_ai_input(now_time) -> AIAnalysisInput:
         input_versions={"ai": "1.0.0"},
         input_fingerprint=fp,
     )
+
+
+@pytest.mark.asyncio
+async def test_c1_agent_and_meta_public_errors_are_normalized(monkeypatch, base_ai_input, caplog):
+    """C-P2-001: hostile provider text never reaches advisory result fields."""
+    from app.services.ai import agents as agents_module
+    from app.services.ai.agents import MarketContextAgent, MetaController
+
+    hostile = "SECRET_MARKER_C1 Bearer SECRET_MARKER_C1 http://internal-provider.invalid/private"
+
+    async def fail_provider(*_args, **_kwargs):
+        raise ProviderNetworkError(hostile)
+
+    monkeypatch.setattr(agents_module, "analyze_with_controls", fail_provider)
+    descriptor = ProviderDescriptor(provider_id="fixture_c1")
+    config = ModelConfig()
+    agent_result = await MarketContextAgent().execute(base_ai_input, descriptor, config)
+    public_agent = " ".join(
+        (agent_result.summary_th, *agent_result.warnings_th, *agent_result.missing_context_th)
+    )
+    assert agent_result.status == "DEGRADED"
+    assert agent_result.directional_bias == "NO_BIAS"
+    assert agent_result.evidence_strength == "INSUFFICIENT"
+    assert agent_result.warnings_th == ("PROVIDER_NETWORK_ERROR",)
+    assert "SECRET_MARKER_C1" not in public_agent
+    assert "internal-provider.invalid" not in public_agent
+
+    meta_result = await MetaController().execute(
+        base_ai_input,
+        {"market_context": agent_result},
+        descriptor,
+        config,
+    )
+    public_meta = " ".join(
+        (meta_result.summary_th, *meta_result.warnings_th, *meta_result.risk_notes_th)
+    )
+    assert meta_result.status != "READY"
+    assert meta_result.warnings_th == ("PROVIDER_NETWORK_ERROR",)
+    assert "SECRET_MARKER_C1" not in public_meta
+    assert "internal-provider.invalid" not in public_meta
+    assert "SECRET_MARKER_C1" not in caplog.text
+    assert "internal-provider.invalid" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_c1_six_agent_and_meta_payload_semantic_allowlists(monkeypatch, base_ai_input):
+    """C-P3-003: provider payloads contain explicit role-minimized semantic fields."""
+    from app.services.ai import agents as agents_module
+    from app.services.ai.agents import MetaController, get_all_analytical_agents
+
+    captured: dict[str, dict] = {}
+
+    async def capture_provider(_provider, *, agent_id, user_payload, **_kwargs):
+        captured[agent_id] = json.loads(user_payload)
+        if agent_id == "meta_controller":
+            payload = {
+                "directional_bias": "LONG",
+                "evidence_strength": "STRONG",
+                "agent_agreement": "HIGH",
+                "summary_th": "safe meta",
+            }
+        else:
+            payload = {
+                "status": "READY",
+                "directional_bias": "LONG",
+                "evidence_strength": "STRONG",
+                "summary_th": f"safe {agent_id}",
+            }
+        return ProviderResult(
+            content=json.dumps(payload),
+            raw_payload=payload,
+            prompt_tokens=1,
+            completion_tokens=1,
+            total_tokens=2,
+            duration_ms=1,
+            provider_id="fixture_c1",
+            provider_type="fixture",
+            model_used="fixture-model",
+        )
+
+    monkeypatch.setattr(agents_module, "analyze_with_controls", capture_provider)
+    descriptor = ProviderDescriptor(provider_id="fixture_c1")
+    config = ModelConfig()
+    results = {}
+    for agent in get_all_analytical_agents():
+        results[agent.agent_id] = await agent.execute(base_ai_input, descriptor, config)
+    await MetaController().execute(base_ai_input, results, descriptor, config)
+
+    expected_role_fields = {
+        "market_context": {"quote", "regime", "sessions"},
+        "smc_ict": {
+            "internal_state",
+            "external_state",
+            "swings_count",
+            "events",
+            "liquidity",
+            "zones",
+            "dealing_range",
+        },
+        "macro_news": {
+            "news_state",
+            "in_blackout",
+            "in_pre_news_window",
+            "in_post_news_window",
+            "news_provenance",
+        },
+        "strategy_critic": {"candidate", "plan_summary"},
+        "risk_interpreter": {"risk_decision", "kill_switch_state"},
+        "trade_thesis": {"strategy_direction", "strategy_score", "risk_status", "kill_switch_state"},
+    }
+    common = {"agent_id", "symbol", "as_of"}
+    for agent_id, role_fields in expected_role_fields.items():
+        payload = captured[agent_id]
+        assert payload["schema"] == "ai-agent-input.v1"
+        assert set(payload["trusted_context"]) == common | role_fields
+        expected_untrusted = {"news_events"} if agent_id == "macro_news" else set()
+        assert set(payload["untrusted_evidence"]) == expected_untrusted
+        serialized = json.dumps(payload)
+        for forbidden in ("acc_adv_01", "res_adv_01", "dec_adv_01", "plan_adv_01", "ks_adv_01"):
+            assert forbidden not in serialized
+
+    meta = captured["meta_controller"]
+    assert set(meta["trusted_context"]) == {
+        "agent_id",
+        "symbol",
+        "as_of",
+        "risk_decision_status",
+        "kill_switch_status",
+        "agent_agreement",
+        "agent_summaries",
+    }
+    assert meta["untrusted_evidence"] == {}
+    meta_serialized = json.dumps(meta)
+    for forbidden in ("strategy_candidate", "provenance", "reservation_id", "account_id", "acc_adv_01", "res_adv_01"):
+        assert forbidden not in meta_serialized
+    assert "SECRET_MARKER_C1" not in json.dumps(captured)
 
 
 # 1. Kill Switch ACTIVE -> zero provider analytical calls -> BLOCKED_BY_KILL_SWITCH
@@ -526,7 +670,7 @@ async def test_21_provider_timeout_handled_safely(base_ai_input):
 
     res = await orchestrator.analyze(base_ai_input, config=config)
     assert res.agent_results["trade_thesis"].status == "DEGRADED"
-    assert "timeout" in res.agent_results["trade_thesis"].summary_th.lower()
+    assert res.agent_results["trade_thesis"].warnings_th == ("PROVIDER_TIMEOUT",)
 
 
 # 22. Token budget exceeded -> handled safely
@@ -537,7 +681,7 @@ async def test_22_token_budget_exceeded_handled_safely(base_ai_input):
 
     res = await orchestrator.analyze(base_ai_input)
     assert res.agent_results["smc_ict"].status == "DEGRADED"
-    assert "Token budget exceeded" in res.agent_results["smc_ict"].summary_th
+    assert res.agent_results["smc_ict"].warnings_th == ("PROVIDER_BUDGET_EXCEEDED",)
 
 
 # 23. AI completely unavailable while Risk remains unchanged (Total decoupling)
@@ -659,7 +803,7 @@ async def test_29_hanging_provider_hard_timeout_and_cancellation(base_ai_input):
 
     res = await orchestrator.analyze(base_ai_input, config=config)
     assert res.agent_results["macro_news"].status == "DEGRADED"
-    assert "timeout" in res.agent_results["macro_news"].summary_th.lower()
+    assert res.agent_results["macro_news"].warnings_th == ("PROVIDER_TIMEOUT",)
 
 
 # 30. Meta failure never returns READY

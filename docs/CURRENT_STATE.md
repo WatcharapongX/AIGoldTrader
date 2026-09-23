@@ -1,10 +1,10 @@
 # Canonical Current Operational State — AIGoldTrader
 
-- **Last Verified Date**: 2026-09-22
+- **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch C External AI Runtime Safety Architecture Planning completed — PLAN APPROVED WITH CONDITIONS
-- **Current Active Gate**: Batch C1 — External Boundary Closure Implementation
-- **Next Authorized Activity**: Implement C1 only using the approved architecture.
+- **Current Milestone**: Batch C1 External Boundary Closure implemented — PENDING INDEPENDENT SECURITY VERIFICATION
+- **Current Active Gate**: C1 Independent Security Verification
+- **Next Authorized Activity**: Independently verify C1 using GPT-5.6 Sol / High.
 - **Prohibited Next Activity**: C2; C3; model routing; trading execution work; live trading
 
 ---
@@ -53,11 +53,11 @@
 - **AUD-P2-002** (Browser-Safe Refresh Token & Session Security): **CLOSED**.
 - **B3.2-NEW-P2-001** (Stale 401 Token Resurrection after Logout): **CLOSED**.
 - **Batch B**: **CLOSED**.
-- **C-P2-001**: **OPEN — AUTHORIZED FOR C1 REMEDIATION**.
-- **C-ADR-005**: **OPEN — AUTHORIZED FOR C1 IMPLEMENTATION**.
-- **C-P3-003**: **OPEN — AUTHORIZED FOR C1 IMPLEMENTATION**.
-- **C-P3-006**: **OPEN — AUTHORIZED FOR C1 IMPLEMENTATION**.
-- **Batch C1**: **AUTHORIZED FOR IMPLEMENTATION**.
+- **C-P2-001**: **REMEDIATED — PENDING INDEPENDENT SECURITY VERIFICATION**.
+- **C-ADR-005**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
+- **C-P3-003**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
+- **C-P3-006**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
+- **Batch C1**: **IMPLEMENTED — PENDING INDEPENDENT SECURITY GATE**.
 - **Batch C**: **OPEN**.
 - **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
 

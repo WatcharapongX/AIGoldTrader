@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import unquote, urlsplit, urlunsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.services.ai.domain import (
     META_CONTROLLER_ID,
@@ -91,6 +91,29 @@ class ProviderInternalError(AIProviderError):
 
 class ProviderWorkerTerminationError(ProviderInternalError):
     """Worker process termination failure (process remained alive after SIGTERM/SIGKILL)."""
+
+
+def public_provider_failure_code(exc: BaseException) -> str:
+    """Map internal/provider failures to a stable, non-secret public code."""
+    if isinstance(exc, ProviderAuthError):
+        return "PROVIDER_AUTH_FAILED"
+    if isinstance(exc, ProviderRateLimitError):
+        return "PROVIDER_RATE_LIMITED"
+    if isinstance(exc, (ProviderTimeoutError, TimeoutError)):
+        return "PROVIDER_TIMEOUT"
+    if isinstance(exc, ProviderNetworkError):
+        return "PROVIDER_NETWORK_ERROR"
+    if isinstance(exc, ProviderCapacityExhausted):
+        return "PROVIDER_CAPACITY_EXHAUSTED"
+    if isinstance(exc, ProviderRequestError):
+        return "PROVIDER_REQUEST_REJECTED"
+    if isinstance(exc, (ProviderSchemaError, ValidationError)):
+        return "PROVIDER_SCHEMA_INVALID"
+    if isinstance(exc, ProviderBudgetExceeded):
+        return "PROVIDER_BUDGET_EXCEEDED"
+    if isinstance(exc, ProviderWorkerTerminationError):
+        return "PROVIDER_WORKER_FAILURE"
+    return "PROVIDER_INTERNAL_ERROR"
 
 
 class InputBudgetExceeded(ProviderBudgetExceeded, ValueError):
@@ -582,7 +605,9 @@ class FixtureAIProvider(SpawnSafeTestProvider):
 
         # 4. Simulate token budget exceeded
         if agent_id in self.token_budget_exceeded_agents:
-            raise ValueError(f"Token budget exceeded for agent {agent_id}: limit={model_config.max_output_tokens}")
+            raise ProviderBudgetExceeded(
+                f"Token budget exceeded for agent {agent_id}: limit={model_config.max_output_tokens}"
+            )
 
         # 5. Extract context from payload if possible
         direction = "LONG"

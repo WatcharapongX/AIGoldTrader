@@ -31,6 +31,7 @@ from app.services.ai.provider import (
     ProviderAuthError,
     ProviderCapacityExhausted,
     ProviderDescriptor,
+    public_provider_failure_code,
 )
 
 logger = logging.getLogger(__name__)
@@ -495,7 +496,13 @@ class AIOrchestrator:
                     token_usage=None,
                 )
             except ProviderCapacityExhausted as exc:
-                logger.warning("Agent %s provider capacity exhausted: %s", agent.agent_id, exc)
+                failure_code = public_provider_failure_code(exc)
+                logger.warning(
+                    "Agent provider capacity exhausted: agent_id=%s failure_code=%s exception_class=%s",
+                    agent.agent_id,
+                    failure_code,
+                    type(exc).__name__,
+                )
                 return AgentAnalysisResult(
                     agent_id=agent.agent_id,
                     agent_version="ai-1.0.0",
@@ -503,8 +510,8 @@ class AIOrchestrator:
                     directional_bias="NO_BIAS",
                     evidence_strength="INSUFFICIENT",
                     summary_th="ระบบ AI ไม่สามารถประมวลผลได้เนื่องจากคิว Provider เต็ม (Capacity Exhausted)",
-                    warnings_th=("PROVIDER_CAPACITY_EXHAUSTED", str(exc)),
-                    missing_context_th=(str(exc),),
+                    warnings_th=(failure_code,),
+                    missing_context_th=("PROVIDER_ANALYSIS_UNAVAILABLE",),
                     provider_provenance=actual_provenance,
                     prompt_version=agent.prompt_id,
                     generated_at=dt.datetime.now(dt.UTC),
@@ -512,7 +519,13 @@ class AIOrchestrator:
                     token_usage=None,
                 )
             except ProviderAuthError as exc:
-                logger.warning("Agent %s provider auth failed: %s", agent.agent_id, exc)
+                failure_code = public_provider_failure_code(exc)
+                logger.warning(
+                    "Agent provider authentication failed: agent_id=%s failure_code=%s exception_class=%s",
+                    agent.agent_id,
+                    failure_code,
+                    type(exc).__name__,
+                )
                 return AgentAnalysisResult(
                     agent_id=agent.agent_id,
                     agent_version="ai-1.0.0",
@@ -520,8 +533,8 @@ class AIOrchestrator:
                     directional_bias="NO_BIAS",
                     evidence_strength="INSUFFICIENT",
                     summary_th="ระบบ AI ไม่สามารถประมวลผลได้เนื่องจากปัญหาการยืนยันตัวตน Provider (Auth Error)",
-                    warnings_th=("PROVIDER_AUTH_ERROR", str(exc)),
-                    missing_context_th=(str(exc),),
+                    warnings_th=(failure_code,),
+                    missing_context_th=("PROVIDER_ANALYSIS_UNAVAILABLE",),
                     provider_provenance=actual_provenance,
                     prompt_version=agent.prompt_id,
                     generated_at=dt.datetime.now(dt.UTC),
@@ -529,16 +542,22 @@ class AIOrchestrator:
                     token_usage=None,
                 )
             except Exception as exc:
-                logger.warning("Agent %s execution raised unhandled exception: %s", agent.agent_id, exc)
+                failure_code = public_provider_failure_code(exc)
+                logger.warning(
+                    "Agent execution raised unhandled exception: agent_id=%s failure_code=%s exception_class=%s",
+                    agent.agent_id,
+                    failure_code,
+                    type(exc).__name__,
+                )
                 return AgentAnalysisResult(
                     agent_id=agent.agent_id,
                     agent_version="ai-1.0.0",
                     status="DEGRADED",
                     directional_bias="NO_BIAS",
                     evidence_strength="INSUFFICIENT",
-                    summary_th=f"การวิเคราะห์ของ {agent.agent_id} เกิดข้อผิดพลาด: {exc}",
-                    warnings_th=(str(exc),),
-                    missing_context_th=(str(exc),),
+                    summary_th=f"การวิเคราะห์ของ {agent.agent_id} ไม่พร้อมใช้งานชั่วคราว",
+                    warnings_th=(failure_code,),
+                    missing_context_th=("PROVIDER_ANALYSIS_UNAVAILABLE",),
                     provider_provenance=actual_provenance,
                     prompt_version=agent.prompt_id,
                     generated_at=dt.datetime.now(dt.UTC),

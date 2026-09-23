@@ -174,6 +174,7 @@ class OpenAIChatCompletionsProvider(AIProvider):
             async with httpx.AsyncClient(
                 transport=self.transport,
                 timeout=httpx.Timeout(timeout),
+                follow_redirects=False,
             ) as client:
                 async with client.stream("POST", url, headers=headers, json=body) as response:
                     response_status = response.status_code
@@ -186,8 +187,7 @@ class OpenAIChatCompletionsProvider(AIProvider):
                             )
                         chunks.append(chunk)
         except httpx.TimeoutException as exc:
-            msg = mask_secret_text(f"Provider request timed out after {timeout}s: {exc}", [self.api_key])
-            raise ProviderTimeoutError(msg) from exc
+            raise ProviderTimeoutError(f"Provider request timed out after {timeout}s") from exc
         except (httpx.ConnectError, httpx.NetworkError, httpx.ProtocolError) as exc:
             msg = mask_secret_text(
                 f"Provider network error: provider_id={self.provider_id}, error_type={type(exc).__name__}",
@@ -197,7 +197,7 @@ class OpenAIChatCompletionsProvider(AIProvider):
         except ProviderBudgetExceeded:
             raise
         except Exception as exc:
-            msg = mask_secret_text(f"Provider HTTP request failed: {exc}", [self.api_key])
+            msg = f"Provider HTTP request failed: error_type={type(exc).__name__}"
             raise ProviderNetworkError(msg) from exc
 
         duration_ms = (time.perf_counter() - t0) * 1000
@@ -205,39 +205,26 @@ class OpenAIChatCompletionsProvider(AIProvider):
         body_text = raw_body.decode("utf-8", errors="replace")
 
         # Handle HTTP status codes
+        if 300 <= response_status < 400:
+            raise ProviderRequestError(f"Provider redirect rejected (HTTP {response_status})")
+
         if response_status in (401, 403):
-            msg = mask_secret_text(
-                f"Provider authentication failure (HTTP {response_status}): {body_text[:200]}",
-                [self.api_key],
-            )
-            raise ProviderAuthError(msg)
+            raise ProviderAuthError(f"Provider authentication failure (HTTP {response_status})")
 
         if response_status == 429:
-            msg = mask_secret_text(
-                f"Provider rate limit exceeded (HTTP 429): {body_text[:200]}",
-                [self.api_key],
-            )
-            raise ProviderRateLimitError(msg)
+            raise ProviderRateLimitError("Provider rate limit exceeded (HTTP 429)")
 
         if 400 <= response_status < 500:
-            msg = mask_secret_text(
-                f"Provider rejected request with HTTP {response_status}: {body_text[:200]}",
-                [self.api_key],
-            )
-            raise ProviderRequestError(msg)
+            raise ProviderRequestError(f"Provider rejected request with HTTP {response_status}")
 
         if response_status >= 500:
-            msg = mask_secret_text(
-                f"Provider internal server error (HTTP {response_status}): {body_text[:200]}",
-                [self.api_key],
-            )
-            raise ProviderNetworkError(msg)
+            raise ProviderNetworkError(f"Provider server failure (HTTP {response_status})")
 
         # Parse valid 200 response
         try:
             resp_json = json.loads(body_text)
         except json.JSONDecodeError as exc:
-            raise ProviderSchemaError(f"Provider returned malformed JSON: {exc}") from exc
+            raise ProviderSchemaError("Provider returned malformed JSON") from exc
 
         if not isinstance(resp_json, dict):
             raise ProviderSchemaError("Provider response is not a JSON object")
@@ -271,7 +258,7 @@ class OpenAIChatCompletionsProvider(AIProvider):
             if not isinstance(raw_payload, dict):
                 raise ProviderSchemaError("Provider content is valid JSON but not a JSON object")
         except json.JSONDecodeError as exc:
-            raise ProviderSchemaError(f"Provider content failed JSON parsing: {exc}") from exc
+            raise ProviderSchemaError("Provider content failed JSON parsing") from exc
 
         raw_payload_bytes = len(
             json.dumps(raw_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode(

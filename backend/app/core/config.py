@@ -125,10 +125,21 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Invalid configuration: ai_provider_mode='external' cannot use ai_provider_type='fixture'"
             )
-        if self.ai_provider_mode == "external" and self.ai_provider_api_key:
-            from app.services.ai.provider import validate_provider_base_url
+        if self.ai_provider_mode == "fixture" and self.ai_provider_type != "fixture":
+            raise ValueError(
+                "Invalid configuration: ai_provider_mode='fixture' requires ai_provider_type='fixture'"
+            )
+        if self.ai_provider_mode == "external":
+            from app.services.ai.provider import ModelBinding, validate_provider_base_url
 
-            validate_provider_base_url(self.ai_provider_base_url, active_secret=self.ai_provider_api_key)
+            api_key = self.ai_provider_api_key.strip()
+            if not api_key:
+                raise ValueError("External AI provider requires non-empty ai_provider_api_key")
+            if not self.ai_model_mapping:
+                raise ValueError("External AI provider requires non-empty ai_model_mapping")
+            for alias, model in self.ai_model_mapping.items():
+                ModelBinding(alias=alias, model=model)
+            validate_provider_base_url(self.ai_provider_base_url, active_secret=api_key)
         return self
 
     @field_validator("ai_provider_base_url")

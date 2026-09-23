@@ -51,4 +51,4 @@ $$\text{Kill Switch} > \text{Risk Engine} > \text{Strategy Engine} > \text{AI Ad
 ## 4. Context Minimization & Prompt Security
 - **Context Minimization**: Feed only the minimal necessary structured features (price levels, candle summaries, news metrics) into agent prompts. Do not dump raw histories or logs into prompts.
 - **Prompt Injection Boundaries**: All external content (such as economic news headlines, event descriptions, or external provider commentary) is untrusted input. It must be escaped, wrapped in explicit XML/structural boundary tags, and never treated as execution instructions.
-- **Provider Isolation & Fail-Closed Behavior**: If an external provider call times out, errors, or fails schema validation, the system must fail closed to the local deterministic advisory fallback with explicit degradation provenance badging.
+- **Provider Isolation & Fail-Closed Behavior**: If an external provider call times out, errors, or fails schema validation, the affected analysis explicitly degrades or becomes unavailable. The system does not fabricate deterministic substitute analysis; degradation provenance remains explicit.

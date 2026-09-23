@@ -46,7 +46,7 @@ capabilities:
 
   external_ai:
     status: hardening
-    details: "Provider abstraction exists, fail-closed offline fallback, fixture mode default"
+    details: "C1 external boundary closure implemented pending independent security verification; fixture mode remains default and provider failures degrade without fabricated substitute analysis"
 
   browser_auth:
     status: implemented_verified

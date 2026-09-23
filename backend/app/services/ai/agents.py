@@ -28,6 +28,7 @@ from app.services.ai.provider import (
     ProviderDescriptor,
     ProviderRequestError,
     analyze_with_controls,
+    public_provider_failure_code,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,10 @@ class BaseAnalyticalAgent:
             "as_of": ai_input.as_of.isoformat(),
         }
 
+    def extract_untrusted_evidence(self, ai_input: AIAnalysisInput) -> dict[str, Any]:
+        """Return role evidence that must remain outside the trusted instruction context."""
+        return {}
+
     async def execute(
         self,
         ai_input: AIAnalysisInput,
@@ -99,18 +104,17 @@ class BaseAnalyticalAgent:
                 f"live {type(provider).__name__} instances are prohibited"
             )
         now_utc = dt.datetime.now(dt.UTC)
-        context = self.extract_context(ai_input)
         trusted_context = {
             "agent_id": self.agent_id,
             "symbol": ai_input.symbol,
             "as_of": ai_input.as_of.isoformat(),
-            "strategy_candidate": ai_input.strategy_context.model_dump(mode="json", exclude={"evidence"}),
-            "risk_decision": ai_input.risk_context.model_dump(mode="json"),
-            "kill_switch": ai_input.kill_switch_context.model_dump(mode="json"),
-            "provenance": ai_input.provenance.model_dump(mode="json"),
+            **self.extract_context(ai_input),
         }
         system_prompt = get_prompt(self.prompt_id)
-        structured_payload = build_structured_payload(trusted_context, context)
+        structured_payload = build_structured_payload(
+            trusted_context,
+            self.extract_untrusted_evidence(ai_input),
+        )
         actual_prov = provider.provider_id
         execution_provenance: AIProviderExecutionProvenance | None = None
 
@@ -143,19 +147,26 @@ class BaseAnalyticalAgent:
             return AgentAnalysisResult.model_validate(raw)
 
         except Exception as exc:
-            logger.warning("Agent %s execution failed: %s", self.agent_id, exc)
+            failure_code = public_provider_failure_code(exc)
+            logger.warning(
+                "Agent execution failed: agent_id=%s provider_id=%s failure_code=%s exception_class=%s",
+                self.agent_id,
+                actual_prov,
+                failure_code,
+                type(exc).__name__,
+            )
             return AgentAnalysisResult(
                 agent_id=self.agent_id,
                 agent_version="ai-1.0.0",
                 status="DEGRADED",
                 directional_bias="NO_BIAS",
                 evidence_strength="INSUFFICIENT",
-                summary_th=f"การวิเคราะห์ของ {self.agent_id} ไม่พร้อมใช้งาน: {exc}",
+                summary_th=f"การวิเคราะห์ของ {self.agent_id} ไม่พร้อมใช้งานชั่วคราว",
                 evidence_refs=(),
                 supporting_factors_th=(),
                 conflicting_factors_th=(),
-                warnings_th=(str(exc),),
-                missing_context_th=(f"Agent failure: {exc}",),
+                warnings_th=(failure_code,),
+                missing_context_th=("PROVIDER_ANALYSIS_UNAVAILABLE",),
                 provider_provenance=(
                     execution_provenance.provider_id if execution_provenance is not None else actual_prov
                 ),
@@ -173,8 +184,6 @@ class MarketContextAgent(BaseAnalyticalAgent):
 
     def extract_context(self, ai_input: AIAnalysisInput) -> dict[str, Any]:
         return {
-            "symbol": ai_input.symbol,
-            "as_of": ai_input.as_of.isoformat(),
             "quote": ai_input.quote_context.model_dump(mode="json"),
             "regime": ai_input.structure_context.regime,
             "sessions": list(ai_input.structure_context.current_sessions),
@@ -187,8 +196,6 @@ class SMCICTAnalyst(BaseAnalyticalAgent):
 
     def extract_context(self, ai_input: AIAnalysisInput) -> dict[str, Any]:
         return {
-            "symbol": ai_input.symbol,
-            "as_of": ai_input.as_of.isoformat(),
             "internal_state": ai_input.structure_context.internal_state,
             "external_state": ai_input.structure_context.external_state,
             "swings_count": len(ai_input.structure_context.swings),
@@ -209,13 +216,19 @@ class MacroNewsAnalyst(BaseAnalyticalAgent):
 
     def extract_context(self, ai_input: AIAnalysisInput) -> dict[str, Any]:
         return {
-            "symbol": ai_input.symbol,
-            "as_of": ai_input.as_of.isoformat(),
-            "news_context": ai_input.news_context.model_dump(mode="json"),
+            "news_state": ai_input.news_context.news_state,
+            "in_blackout": ai_input.news_context.in_blackout,
+            "in_pre_news_window": ai_input.news_context.in_pre_news_window,
+            "in_post_news_window": ai_input.news_context.in_post_news_window,
             "news_provenance": {
                 "provider": ai_input.provenance.news_provider,
                 "revision": ai_input.provenance.news_revision,
             },
+        }
+
+    def extract_untrusted_evidence(self, ai_input: AIAnalysisInput) -> dict[str, Any]:
+        return {
+            "news_events": [event.model_dump(mode="json") for event in ai_input.news_context.events],
         }
 
 
@@ -225,11 +238,21 @@ class StrategyCritic(BaseAnalyticalAgent):
 
     def extract_context(self, ai_input: AIAnalysisInput) -> dict[str, Any]:
         return {
-            "symbol": ai_input.symbol,
-            "as_of": ai_input.as_of.isoformat(),
-            "candidate": ai_input.strategy_context.model_dump(mode="json"),
+            "candidate": ai_input.strategy_context.model_dump(
+                mode="json",
+                include={
+                    "availability",
+                    "strategy_id",
+                    "strategy_version",
+                    "direction",
+                    "score",
+                    "detected_at",
+                    "confirmed_at",
+                    "status",
+                    "unavailable_reason",
+                },
+            ),
             "plan_summary": {
-                "plan_id": ai_input.trade_plan_context.plan_id,
                 "invalidation_th": ai_input.trade_plan_context.invalidation_th,
                 "risk_reward_ratio": str(ai_input.trade_plan_context.risk_reward_ratio)
                 if ai_input.trade_plan_context.risk_reward_ratio is not None
@@ -244,10 +267,10 @@ class RiskInterpreter(BaseAnalyticalAgent):
 
     def extract_context(self, ai_input: AIAnalysisInput) -> dict[str, Any]:
         return {
-            "symbol": ai_input.symbol,
-            "as_of": ai_input.as_of.isoformat(),
-            "risk_decision": ai_input.risk_context.model_dump(mode="json"),
-            "kill_switch_state": ai_input.kill_switch_context.model_dump(mode="json"),
+            "risk_decision": ai_input.risk_context.model_dump(
+                mode="json", exclude={"decision_id", "reservation_id", "account_id", "candidate_id"}
+            ),
+            "kill_switch_state": ai_input.kill_switch_context.state,
         }
 
 
@@ -257,8 +280,6 @@ class TradeThesisAgent(BaseAnalyticalAgent):
 
     def extract_context(self, ai_input: AIAnalysisInput) -> dict[str, Any]:
         return {
-            "symbol": ai_input.symbol,
-            "as_of": ai_input.as_of.isoformat(),
             "strategy_direction": ai_input.strategy_context.direction,
             "strategy_score": ai_input.strategy_context.score,
             "risk_status": ai_input.risk_context.decision,
@@ -332,7 +353,6 @@ class MetaController:
                     "strength": res.evidence_strength,
                     "status": res.status,
                     "summary_th": res.summary_th,
-                    "warnings_th": list(res.warnings_th),
                 }
                 for aid, res in agent_results.items()
             },
@@ -343,12 +363,11 @@ class MetaController:
                 "agent_id": self.agent_id,
                 "symbol": ai_input.symbol,
                 "as_of": ai_input.as_of.isoformat(),
-                "strategy_candidate": ai_input.strategy_context.model_dump(mode="json", exclude={"evidence"}),
-                "risk_decision": ai_input.risk_context.model_dump(mode="json"),
-                "kill_switch": ai_input.kill_switch_context.model_dump(mode="json"),
-                "provenance": ai_input.provenance.model_dump(mode="json"),
+                "risk_decision_status": ai_input.risk_context.decision,
+                "kill_switch_status": ai_input.kill_switch_context.state,
+                "agent_agreement": agreement,
+                "agent_summaries": meta_context["agent_summaries"],
             },
-            meta_context,
         )
         system_prompt = get_prompt(self.prompt_id)
 
@@ -377,15 +396,21 @@ class MetaController:
             warnings_th = validated.warnings_th
 
         except Exception as exc:
-            logger.warning("MetaController synthesis failed: %s", exc)
+            failure_code = public_provider_failure_code(exc)
+            logger.warning(
+                "MetaController synthesis failed: provider_id=%s failure_code=%s exception_class=%s",
+                provider.provider_id,
+                failure_code,
+                type(exc).__name__,
+            )
             meta_failed = True
             bias = "NEUTRAL"
             strength = "INSUFFICIENT"
-            summary_th = f"การประมวลผล Meta Controller เกิดข้อผิดพลาด: {exc}"
+            summary_th = "การประมวลผล Meta Controller ไม่พร้อมใช้งานชั่วคราว"
             key_evidence_th = ()
             conflicts_th = ()
-            risk_notes_th = ("Meta Controller failed",)
-            warnings_th = (str(exc),)
+            risk_notes_th = ("META_PROVIDER_UNAVAILABLE",)
+            warnings_th = (failure_code,)
 
         # 3. Derive meta status based on agent results AND meta controller health
         ready_count = sum(1 for r in agent_results.values() if r.status == "READY")
