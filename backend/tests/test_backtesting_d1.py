@@ -9,6 +9,8 @@ from pydantic import ValidationError
 
 from app.services.backtesting.domain import (
     BACKTEST_CONTRACT_VERSION,
+    BACKTEST_FINGERPRINT_VERSION,
+    REPLAY_ENGINE_VERSION_PLACEHOLDER,
     BacktestProvenance,
     BacktestRunConfig,
     BacktestRunEnvelope,
@@ -314,6 +316,35 @@ def test_resource_counter_boundaries_and_stable_rejections():
         usage(candidate_count=-1)
 
 
+@pytest.mark.parametrize(
+    ("changes", "accepted"),
+    [
+        ({"active_runs_for_user": 0}, True),
+        ({"active_runs_for_user": 1}, False),
+        ({"active_runs_system": 1}, True),
+        ({"active_runs_system": 2}, False),
+        ({"pending_runs": 7}, True),
+        ({"pending_runs": 8}, False),
+        ({"estimated_output_bytes": MAX_ESTIMATED_OUTPUT_BYTES}, True),
+        ({"estimated_output_bytes": MAX_ESTIMATED_OUTPUT_BYTES + 1}, False),
+    ],
+)
+def test_admission_counters_are_existing_pre_admission_counts(changes, accepted):
+    baseline = {
+        "primary_replay_events": 0,
+        "total_candle_inputs": 0,
+        "active_runs_for_user": 0,
+        "active_runs_system": 0,
+        "pending_runs": 0,
+        "candidate_count": 0,
+        "trade_count": 0,
+        "equity_point_count": 0,
+        "estimated_output_bytes": 0,
+    }
+    baseline.update(changes)
+    assert validate_resource_usage(ResourceUsage(**baseline)).accepted is accepted
+
+
 def test_typed_gap_validation_and_scheduled_closure():
     scheduled = CoverageGap(
         timeframe=Timeframe.M5,
@@ -387,12 +418,13 @@ def test_coverage_rejects_malformed_ranges_counts_and_frames():
         )
 
 
-def test_news_strategy_manifest_requires_available_causal_vintages():
-    cfg = config(strategy_id="STRAT05", profile_id="news")
+@pytest.mark.parametrize("strategy_id", ["STRAT05", "STRAT06"])
+def test_news_strategy_manifest_requires_full_causal_vintage_coverage(strategy_id):
+    cfg = config(strategy_id=strategy_id, profile_id="news")
+    with pytest.raises(ValidationError, match="causal historical news vintages"):
+        manifest(cfg=cfg, cov=coverage(news_vintages=news_coverage(required=False, available=True)))
     with pytest.raises(ValidationError, match="causal coverage shortfall"):
         manifest(cfg=cfg, cov=coverage(news_vintages=news_coverage(required=True, available=False)))
-    cov = coverage(news_vintages=news_coverage(required=True, available=True))
-    assert manifest(cfg=cfg, cov=cov).coverage.news_vintages.available
     with pytest.raises(ValidationError, match="cover the requested period"):
         coverage(
             news_vintages=NewsVintageCoverage(
@@ -404,6 +436,59 @@ def test_news_strategy_manifest_requires_available_causal_vintages():
                 availability_verified_at=END,
             )
         )
+    with pytest.raises(ValidationError, match="cover the requested period"):
+        coverage(
+            news_vintages=NewsVintageCoverage(
+                required=True,
+                available=True,
+                source="fixture_news_vintage_v1",
+                vintage_start=WARMUP,
+                vintage_end=END - dt.timedelta(days=1),
+                availability_verified_at=END,
+            )
+        )
+    accepted = manifest(cfg=cfg, cov=coverage(news_vintages=news_coverage(required=True, available=True)))
+    assert accepted.coverage.news_vintages.required
+    assert accepted.coverage.news_vintages.available
+
+
+def test_non_news_strategy_remains_valid_without_required_news():
+    assert manifest().config.strategy_id == "STRAT01"
+
+
+def test_manifest_rejects_primary_timeframe_mismatch_even_when_both_frames_are_covered():
+    m5 = TimeframeCoverage(
+        timeframe=Timeframe.M5,
+        available_start=WARMUP,
+        available_end=END,
+        requested_events=8_928,
+        available_events=8_928,
+        source="fixture_market_v1",
+    )
+    h1 = TimeframeCoverage(
+        timeframe=Timeframe.H1,
+        available_start=WARMUP,
+        available_end=END,
+        requested_events=744,
+        available_events=744,
+        source="fixture_market_v1",
+    )
+    cov = coverage(
+        timeframe=Timeframe.H1,
+        requested_primary_events=744,
+        available_primary_events=744,
+        total_candle_inputs=9_672,
+        required_timeframes=(Timeframe.M5, Timeframe.H1),
+        timeframe_coverage=(m5, h1),
+    )
+    with pytest.raises(ValidationError, match="primary timeframes must match"):
+        manifest(cfg=config(timeframe=Timeframe.M5), cov=cov)
+
+    matching = manifest(
+        cfg=config(timeframe=Timeframe.H1),
+        cov=cov,
+    )
+    assert matching.config.timeframe is matching.coverage.timeframe is Timeframe.H1
 
 
 def test_manifest_detects_fingerprint_and_provenance_mismatch():
@@ -493,7 +578,6 @@ def test_decimal_numeric_equivalence_and_key_order_are_non_semantic():
         lambda: manifest(cov=coverage(total_candle_inputs=44_641)),
         lambda: manifest(strategy_version="strategy-9.9.9"),
         lambda: manifest(risk_policy_version="risk-policy-9.9.9"),
-        lambda: manifest(backtest_contract_version="backtest-contract-9.9.9"),
     ],
 )
 def test_manifest_fingerprint_changes_for_semantic_mutations(mutation):
@@ -528,23 +612,6 @@ def test_lifecycle_is_bounded_and_terminal_metadata_is_consistent():
             status="COMPLETED_WITH_DATA_GAPS",
             created_at=START,
         )
-    with pytest.raises(ValidationError, match="FAILED requires"):
-        BacktestRunEnvelope(
-            run_id="bt_run_abcdefgh",
-            semantic_fingerprint=semantic,
-            status=RunLifecycle.FAILED,
-            created_at=START,
-            completed_at=END,
-        )
-    cancelled = BacktestRunEnvelope(
-        run_id="bt_run_abcdefgh",
-        semantic_fingerprint=semantic,
-        status=RunLifecycle.CANCELLED,
-        created_at=START,
-        completed_at=END,
-        failure_code=RunFailureCode.CANCELLED_BY_OWNER,
-    )
-    assert cancelled.status is RunLifecycle.CANCELLED
     with pytest.raises(ValidationError):
         BacktestRunEnvelope(
             run_id="live_run_abcdefgh",
@@ -554,8 +621,152 @@ def test_lifecycle_is_bounded_and_terminal_metadata_is_consistent():
         )
 
 
-def test_contract_version_is_explicit_semantic_input():
+@pytest.mark.parametrize(
+    ("status", "metadata"),
+    [
+        (RunLifecycle.CREATED, {"failure_code": RunFailureCode.INTERNAL_FAILURE}),
+        (RunLifecycle.CREATED, {"completed_at": END}),
+        (RunLifecycle.CREATED, {"started_at": START}),
+        (RunLifecycle.RUNNING, {}),
+        (RunLifecycle.RUNNING, {"started_at": START, "completed_at": END}),
+        (RunLifecycle.RUNNING, {"started_at": START, "failure_code": RunFailureCode.INTERNAL_FAILURE}),
+        (RunLifecycle.COMPLETED, {"completed_at": END}),
+        (RunLifecycle.COMPLETED, {"started_at": START}),
+        (
+            RunLifecycle.COMPLETED,
+            {"started_at": START, "completed_at": END, "failure_code": RunFailureCode.INTERNAL_FAILURE},
+        ),
+        (RunLifecycle.FAILED, {"completed_at": END}),
+        (RunLifecycle.FAILED, {"failure_code": RunFailureCode.INTERNAL_FAILURE}),
+        (
+            RunLifecycle.FAILED,
+            {"completed_at": END, "failure_code": RunFailureCode.CANCELLED_BY_OWNER},
+        ),
+        (RunLifecycle.CANCELLED, {"completed_at": END}),
+        (
+            RunLifecycle.CANCELLED,
+            {"completed_at": END, "failure_code": RunFailureCode.INTERNAL_FAILURE},
+        ),
+        (RunLifecycle.CANCELLED, {"failure_code": RunFailureCode.CANCELLED_BY_OWNER}),
+    ],
+)
+def test_lifecycle_matrix_rejects_contradictory_metadata(status, metadata):
+    with pytest.raises(ValidationError):
+        BacktestRunEnvelope(
+            run_id="bt_run_abcdefgh",
+            semantic_fingerprint=run_input_fingerprint(manifest()),
+            status=status,
+            created_at=START,
+            **metadata,
+        )
+
+
+@pytest.mark.parametrize(
+    ("status", "metadata"),
+    [
+        (RunLifecycle.CREATED, {}),
+        (RunLifecycle.RUNNING, {"started_at": START}),
+        (RunLifecycle.COMPLETED, {"started_at": START, "completed_at": END}),
+        (RunLifecycle.FAILED, {"completed_at": END, "failure_code": RunFailureCode.INTERNAL_FAILURE}),
+        (
+            RunLifecycle.CANCELLED,
+            {"completed_at": END, "failure_code": RunFailureCode.CANCELLED_BY_SYSTEM},
+        ),
+    ],
+)
+def test_lifecycle_matrix_accepts_coherent_metadata_including_pre_start_terminal_states(status, metadata):
+    item = BacktestRunEnvelope(
+        run_id="bt_run_abcdefgh",
+        semantic_fingerprint=run_input_fingerprint(manifest()),
+        status=status,
+        created_at=START,
+        **metadata,
+    )
+    assert item.status is status
+
+
+def test_d1_versions_are_server_owned_while_strategy_and_risk_versions_remain_inputs():
     item = manifest()
     assert item.contract_version == BACKTEST_CONTRACT_VERSION
-    changed = item.model_copy(update={"contract_version": "backtest-contract-9.9.9"})
-    assert run_input_fingerprint(changed) != run_input_fingerprint(item)
+    assert item.fingerprint_version == BACKTEST_FINGERPRINT_VERSION
+    assert item.provenance.replay_engine_version == REPLAY_ENGINE_VERSION_PLACEHOLDER
+    assert "not-implemented" in item.provenance.replay_engine_version
+
+    with pytest.raises(ValidationError):
+        manifest(backtest_contract_version="backtest-contract-9.9.9")
+    with pytest.raises(ValidationError):
+        BacktestRunManifest(**{**item.model_dump(), "fingerprint_version": "backtest-fingerprint-9.9.9"})
+    with pytest.raises(ValidationError):
+        manifest(replay_engine_version="replay-engine-implemented-9.9.9")
+
+    assert run_input_fingerprint(manifest(strategy_version="strategy-9.9.9")) != run_input_fingerprint(item)
+    assert run_input_fingerprint(manifest(risk_policy_version="risk-policy-9.9.9")) != run_input_fingerprint(item)
+
+
+def test_set_like_coverage_and_provenance_order_is_canonical_and_fingerprint_invariant():
+    m5 = TimeframeCoverage(
+        timeframe=Timeframe.M5,
+        available_start=WARMUP,
+        available_end=END,
+        requested_events=8_928,
+        available_events=8_928,
+        source="fixture_market_v1",
+    )
+    h1 = TimeframeCoverage(
+        timeframe=Timeframe.H1,
+        available_start=WARMUP,
+        available_end=END,
+        requested_events=744,
+        available_events=744,
+        source="fixture_market_v1",
+    )
+    gap_m5 = CoverageGap(
+        timeframe=Timeframe.M5,
+        gap_start=START,
+        gap_end=START + dt.timedelta(hours=1),
+        code=CoverageGapCode.SCHEDULED_MARKET_CLOSURE,
+        expectation=GapExpectation.EXPECTED_SCHEDULED_CLOSURE,
+    )
+    gap_h1 = CoverageGap(
+        timeframe=Timeframe.H1,
+        gap_start=START + dt.timedelta(days=1),
+        gap_end=START + dt.timedelta(days=2),
+        code=CoverageGapCode.SCHEDULED_MARKET_CLOSURE,
+        expectation=GapExpectation.EXPECTED_SCHEDULED_CLOSURE,
+    )
+    common = {
+        "total_candle_inputs": 9_672,
+        "required_timeframes": (Timeframe.M5, Timeframe.H1),
+        "timeframe_coverage": (m5, h1),
+        "gaps": (gap_m5, gap_h1),
+    }
+    forward = coverage(**common)
+    reversed_coverage = coverage(
+        **{
+            **common,
+            "required_timeframes": tuple(reversed(common["required_timeframes"])),
+            "timeframe_coverage": tuple(reversed(common["timeframe_coverage"])),
+            "gaps": tuple(reversed(common["gaps"])),
+        }
+    )
+    assert forward == reversed_coverage
+    assert coverage_fingerprint(forward) == coverage_fingerprint(reversed_coverage)
+
+    forward_manifest = manifest(cov=forward)
+    reverse_values = forward_manifest.provenance.model_dump()
+    reverse_values["timeframes"] = tuple(reversed(forward_manifest.provenance.timeframes))
+    reverse_values["data_coverage_fingerprint"] = coverage_fingerprint(reversed_coverage)
+    reverse_provenance = BacktestProvenance(**reverse_values)
+    reverse_manifest = BacktestRunManifest(
+        config=forward_manifest.config,
+        coverage=reversed_coverage,
+        provenance=reverse_provenance,
+        resource_policy_fingerprint=forward_manifest.resource_policy_fingerprint,
+    )
+    assert forward_manifest.provenance == reverse_manifest.provenance
+    assert run_input_fingerprint(forward_manifest) == run_input_fingerprint(reverse_manifest)
+    assert coverage_fingerprint(coverage(**{**common, "total_candle_inputs": 9_673})) != coverage_fingerprint(forward)
+
+
+def test_canonical_json_preserves_genuinely_ordered_sequences():
+    assert canonical_json({"events": ("second", "first")}) != canonical_json({"events": ("first", "second")})

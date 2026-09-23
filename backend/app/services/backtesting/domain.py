@@ -20,6 +20,8 @@ BACKTEST_CONTRACT_VERSION = "backtest-contract-1.0.0"
 BACKTEST_FINGERPRINT_VERSION = "backtest-fingerprint-1.0.0"
 REPLAY_ENGINE_VERSION_PLACEHOLDER = "replay-engine-not-implemented-d1"
 
+_TIMEFRAME_ORDER = {timeframe: index for index, timeframe in enumerate(Timeframe)}
+
 StrategyId = Literal["STRAT01", "STRAT02", "STRAT03", "STRAT04", "STRAT05", "STRAT06"]
 ProfileId = Literal["research", "smc", "trend", "liquidity", "breakout", "range", "news"]
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -198,6 +200,34 @@ class DataCoverage(FrozenContract):
     def utc_clock(cls, value: dt.datetime) -> dt.datetime:
         return _utc(value)
 
+    @field_validator("required_timeframes")
+    @classmethod
+    def canonical_required_timeframes(cls, value: tuple[Timeframe, ...]) -> tuple[Timeframe, ...]:
+        return tuple(sorted(value, key=_TIMEFRAME_ORDER.__getitem__))
+
+    @field_validator("timeframe_coverage")
+    @classmethod
+    def canonical_timeframe_coverage(
+        cls, value: tuple[TimeframeCoverage, ...]
+    ) -> tuple[TimeframeCoverage, ...]:
+        return tuple(sorted(value, key=lambda item: _TIMEFRAME_ORDER[item.timeframe]))
+
+    @field_validator("gaps")
+    @classmethod
+    def canonical_gaps(cls, value: tuple[CoverageGap, ...]) -> tuple[CoverageGap, ...]:
+        return tuple(
+            sorted(
+                value,
+                key=lambda gap: (
+                    _TIMEFRAME_ORDER[gap.timeframe],
+                    gap.gap_start,
+                    gap.gap_end,
+                    gap.code.value,
+                    gap.expectation.value,
+                ),
+            )
+        )
+
     @model_validator(mode="after")
     def valid_coverage(self):
         if not self.warmup_start <= self.usable_start <= self.requested_start < self.usable_end <= self.requested_end:
@@ -264,8 +294,8 @@ class BacktestProvenance(FrozenContract):
     strategy_version: BoundedReference
     profile_id: ProfileId
     risk_policy_version: BoundedReference
-    backtest_contract_version: BoundedReference = BACKTEST_CONTRACT_VERSION
-    replay_engine_version: BoundedReference = REPLAY_ENGINE_VERSION_PLACEHOLDER
+    backtest_contract_version: Literal["backtest-contract-1.0.0"] = BACKTEST_CONTRACT_VERSION
+    replay_engine_version: Literal["replay-engine-not-implemented-d1"] = REPLAY_ENGINE_VERSION_PLACEHOLDER
     costs: CostAssumptions
     data_coverage_fingerprint: Sha256
     data_fingerprint: Sha256
@@ -275,6 +305,11 @@ class BacktestProvenance(FrozenContract):
     @classmethod
     def utc_clock(cls, value: dt.datetime) -> dt.datetime:
         return _utc(value)
+
+    @field_validator("timeframes")
+    @classmethod
+    def canonical_timeframes(cls, value: tuple[Timeframe, ...]) -> tuple[Timeframe, ...]:
+        return tuple(sorted(value, key=_TIMEFRAME_ORDER.__getitem__))
 
     @model_validator(mode="after")
     def valid_ranges(self):
@@ -290,8 +325,8 @@ class BacktestRunManifest(FrozenContract):
     coverage: DataCoverage
     provenance: BacktestProvenance
     resource_policy_fingerprint: Sha256
-    contract_version: BoundedReference = BACKTEST_CONTRACT_VERSION
-    fingerprint_version: BoundedReference = BACKTEST_FINGERPRINT_VERSION
+    contract_version: Literal["backtest-contract-1.0.0"] = BACKTEST_CONTRACT_VERSION
+    fingerprint_version: Literal["backtest-fingerprint-1.0.0"] = BACKTEST_FINGERPRINT_VERSION
 
     @model_validator(mode="after")
     def fail_closed_and_consistent(self):
@@ -310,8 +345,8 @@ class BacktestRunManifest(FrozenContract):
             raise ValueError("Manifest requested period mismatch")
         if self.config.start != self.provenance.requested_start or self.config.end != self.provenance.requested_end:
             raise ValueError("Manifest provenance period mismatch")
-        if self.config.timeframe not in self.coverage.required_timeframes:
-            raise ValueError("Primary timeframe is absent from coverage")
+        if self.config.timeframe != self.coverage.timeframe:
+            raise ValueError("Configuration and coverage primary timeframes must match")
         if self.provenance.market_source != self.coverage.source:
             raise ValueError("Manifest market source mismatch")
         if set(self.provenance.timeframes) != set(self.coverage.required_timeframes):
@@ -332,8 +367,19 @@ class BacktestRunManifest(FrozenContract):
             raise ValueError("Resource policy fingerprint is not the governed D1 policy")
         if self.contract_version != self.provenance.backtest_contract_version:
             raise ValueError("Backtest contract version mismatch")
-        if self.config.strategy_id in ("STRAT05", "STRAT06") and not self.coverage.news_vintages.available:
-            raise ValueError("News strategies require causal historical news vintages")
+        if self.config.strategy_id in ("STRAT05", "STRAT06"):
+            news = self.coverage.news_vintages
+            if not news.required or not news.available:
+                raise ValueError("News strategies require causal historical news vintages")
+            if (
+                news.source is None
+                or news.vintage_start is None
+                or news.vintage_end is None
+                or news.availability_verified_at is None
+                or news.vintage_start > self.config.start
+                or news.vintage_end < self.config.end
+            ):
+                raise ValueError("News strategies require vintages covering the requested period")
         return self
 
 
@@ -355,18 +401,25 @@ class BacktestRunEnvelope(FrozenContract):
 
     @model_validator(mode="after")
     def valid_lifecycle_metadata(self):
-        if self.status == RunLifecycle.FAILED and self.failure_code is None:
-            raise ValueError("FAILED requires a bounded failure code")
-        if self.status == RunLifecycle.CANCELLED and self.failure_code not in (
+        cancellation_codes = (
             RunFailureCode.CANCELLED_BY_OWNER,
             RunFailureCode.CANCELLED_BY_SYSTEM,
-        ):
-            raise ValueError("CANCELLED requires cancellation provenance")
-        if self.status == RunLifecycle.COMPLETED and self.failure_code is not None:
-            raise ValueError("COMPLETED cannot have a failure code")
-        if self.status in (RunLifecycle.COMPLETED, RunLifecycle.FAILED, RunLifecycle.CANCELLED):
-            if self.completed_at is None:
-                raise ValueError("Terminal lifecycle state requires completed_at")
+        )
+        if self.status == RunLifecycle.CREATED:
+            if self.started_at is not None or self.completed_at is not None or self.failure_code is not None:
+                raise ValueError("CREATED cannot have start, completion, or failure metadata")
+        elif self.status == RunLifecycle.RUNNING:
+            if self.started_at is None or self.completed_at is not None or self.failure_code is not None:
+                raise ValueError("RUNNING requires only started_at")
+        elif self.status == RunLifecycle.COMPLETED:
+            if self.started_at is None or self.completed_at is None or self.failure_code is not None:
+                raise ValueError("COMPLETED requires start and completion without failure")
+        elif self.status == RunLifecycle.FAILED:
+            if self.completed_at is None or self.failure_code is None or self.failure_code in cancellation_codes:
+                raise ValueError("FAILED requires completion and a non-cancellation failure code")
+        elif self.status == RunLifecycle.CANCELLED:
+            if self.completed_at is None or self.failure_code not in cancellation_codes:
+                raise ValueError("CANCELLED requires completion and cancellation provenance")
         if self.started_at is not None and self.started_at < self.created_at:
             raise ValueError("started_at cannot precede created_at")
         if self.completed_at is not None and self.completed_at < (self.started_at or self.created_at):

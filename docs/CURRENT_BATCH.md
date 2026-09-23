@@ -6,9 +6,9 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D1 — IMPLEMENTED, PENDING INDEPENDENT VERIFICATION.**
+**Current gate: D1 — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.**
 
-**Current executable scope: D1 independent verification only.**
+**Current executable scope: D1 independent re-verification only.**
 
 D2–D7 are planned but are **NOT AUTHORIZED** until the preceding sub-batch is implemented,
 verified, documented, and separately advanced by governance. Do not automatically progress.
@@ -138,7 +138,7 @@ initial balance, spread, slippage, commission), lifecycle/status, KPI summary, e
 trade list, and strategy/direction filters. Backend truth and provenance badges come first; no broader redesign.
 
 ## Gated Sub-Batches
-1. **D1 — IMPLEMENTED / PENDING INDEPENDENT VERIFICATION**: immutable domain contracts; run configuration and
+1. **D1 — REMEDIATED / PENDING INDEPENDENT RE-VERIFICATION**: immutable domain contracts; run configuration and
    lifecycle; canonical input,
    version, and provenance fingerprints; data-coverage contract; server-owned resource policy; explicit
    simulation/live isolation contracts; hand-calculable fixtures and contract/architecture tests. No runner,
@@ -179,6 +179,7 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 - Batch B and Batch C protections must not be weakened.
 
 ## Required Gates
-- Next authorized task: D1 independent verification only.
+- D1-IV-001 through D1-IV-006 are **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- Next authorized task: D1 independent re-verification only.
 - Required verification runtime: GPT-5.6 Sol / High.
 - D2–D7 remain not authorized. Do not begin the next sub-batch automatically.

@@ -50,15 +50,20 @@ class BacktestResourcePolicy(BaseModel):
 
 
 class ResourceUsage(BaseModel):
-    """Declared counters for future enforcement; it allocates no run output."""
+    """Declared counters for future enforcement; it allocates no run output.
+
+    Active-user, active-system, and pending counters are existing counts before
+    admitting the candidate run. All other counters are declared or accumulated
+    usage for the candidate run itself.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     primary_replay_events: int = Field(ge=0)
     total_candle_inputs: int = Field(ge=0)
-    active_runs_for_user: int = Field(ge=0)
-    active_runs_system: int = Field(ge=0)
-    pending_runs: int = Field(ge=0)
+    active_runs_for_user: int = Field(ge=0, description="Existing active user runs before admission")
+    active_runs_system: int = Field(ge=0, description="Existing active system runs before admission")
+    pending_runs: int = Field(ge=0, description="Existing pending runs before admission")
     candidate_count: int = Field(ge=0)
     trade_count: int = Field(ge=0)
     equity_point_count: int = Field(ge=0)
@@ -75,7 +80,12 @@ class ResourceValidationResult(BaseModel):
 def validate_resource_usage(
     usage: ResourceUsage, policy: BacktestResourcePolicy | None = None
 ) -> ResourceValidationResult:
-    """Return all stable rejection codes without infrastructure side effects."""
+    """Return stable rejections using pre-admission concurrency/queue counts.
+
+    Existing active and pending counts reject at ``>=`` their ceiling because
+    admission would add one run. Per-run usage counters accept their exact
+    maxima and reject only values above them.
+    """
 
     limits = policy or BacktestResourcePolicy()
     checks = (
