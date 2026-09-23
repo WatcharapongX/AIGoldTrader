@@ -6,7 +6,9 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current executable scope: D1 — Domain Contracts, Reproducibility, and Isolation Boundary.**
+**Current gate: D1 — IMPLEMENTED, PENDING INDEPENDENT VERIFICATION.**
+
+**Current executable scope: D1 independent verification only.**
 
 D2–D7 are planned but are **NOT AUTHORIZED** until the preceding sub-batch is implemented,
 verified, documented, and separately advanced by governance. Do not automatically progress.
@@ -15,7 +17,7 @@ verified, documented, and separately advanced by governance. Do not automaticall
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
 - External AI: **HARDENING**; deterministic fixture mode remains the default.
-- Backtesting: **PLANNED / AUTHORIZED, NOT IMPLEMENTED**.
+- Backtesting: **FOUNDATION CONTRACTS IMPLEMENTED; ENGINE NOT IMPLEMENTED**.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
 
@@ -136,7 +138,8 @@ initial balance, spread, slippage, commission), lifecycle/status, KPI summary, e
 trade list, and strategy/direction filters. Backend truth and provenance badges come first; no broader redesign.
 
 ## Gated Sub-Batches
-1. **D1 — ACTIVE / AUTHORIZED**: immutable domain contracts; run configuration and lifecycle; canonical input,
+1. **D1 — IMPLEMENTED / PENDING INDEPENDENT VERIFICATION**: immutable domain contracts; run configuration and
+   lifecycle; canonical input,
    version, and provenance fingerprints; data-coverage contract; server-owned resource policy; explicit
    simulation/live isolation contracts; hand-calculable fixtures and contract/architecture tests. No runner,
    migration, API, UI, background task, or simulated fill implementation.
@@ -176,6 +179,6 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 - Batch B and Batch C protections must not be weakened.
 
 ## Required Gates
-- Future implementation runtime: GPT-5.6 Sol / Medium.
-- Sol / High is reserved for causal/Risk/concurrency ambiguity and is mandatory for independent verification.
-- Completion of D1 does not authorize D2. Do not begin the next sub-batch automatically.
+- Next authorized task: D1 independent verification only.
+- Required verification runtime: GPT-5.6 Sol / High.
+- D2–D7 remain not authorized. Do not begin the next sub-batch automatically.

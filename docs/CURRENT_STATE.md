@@ -2,9 +2,9 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch D governance authorized as a split deterministic-backtesting program.
-- **Current Active Gate**: D1 — Domain Contracts, Reproducibility, and Isolation Boundary.
-- **Next Authorized Activity**: Implement D1 only within `docs/CURRENT_BATCH.md`.
+- **Current Milestone**: Batch D is open as a split deterministic-backtesting program.
+- **Current Active Gate**: D1 — IMPLEMENTED, PENDING INDEPENDENT VERIFICATION.
+- **Next Authorized Activity**: D1 independent verification only using GPT-5.6 Sol / High.
 - **Prohibited Progression**: D2–D7 remain unapproved until the preceding gate is independently closed.
 
 ---
@@ -34,9 +34,10 @@
 ### Hardening
 - External AI provider infrastructure: C1–C3 independently verified; Batch C closed; fixture mode default.
 
-### Planned / Authorized, Not Implemented
-- **Deterministic Backtesting Core**: Batch D is authorized only as a split program. D1 is the sole active
-  implementation scope. No replay runner, execution simulator, persisted run, API, or results UI exists yet.
+### Foundation Implemented — Pending Independent Verification
+- **Deterministic Backtesting D1**: immutable configuration/lifecycle, coverage/provenance, resource-policy,
+  canonical fingerprint, and simulation/live isolation contracts are implemented. The backtesting engine is
+  not implemented. No replay runner, execution simulator, persisted run, API, or results UI exists yet.
 - The current `/backtesting` page renders Strategy Lab historical evaluation snapshots. These are not trades,
   fills, PnL, an equity curve, or a real backtest.
 
@@ -61,8 +62,9 @@ The approved staged data flow is:
 ## 4. Current Governance
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
-- Batch D: **AUTHORIZED AS A SPLIT PROGRAM; D1 ACTIVE ONLY**.
-- Backtesting: **PLANNED / AUTHORIZED, NOT IMPLEMENTED**.
+- Batch D: **OPEN; D1 IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
+- D2–D7: **NOT AUTHORIZED**.
+- Backtesting: **FOUNDATION CONTRACTS IMPLEMENTED; ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
 - Paper Trading: **NOT AUTHORIZED**.
 - Broker Execution: **NOT AUTHORIZED**.

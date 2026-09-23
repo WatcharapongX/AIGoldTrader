@@ -8,7 +8,9 @@ governance:
   current_batch: "D"
   decision: plan_requires_split
   active_sub_batch: "D1"
-  active_scope: "domain contracts, reproducibility, data coverage, resource policy, and simulation/live isolation"
+  active_sub_batch_status: implemented_pending_independent_verification
+  active_scope: "D1 independent verification only"
+  next_authorized_activity: "D1 independent verification using GPT-5.6 Sol / High"
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -50,11 +52,11 @@ capabilities:
     status: implemented_verified
     details: "Batch B independently closed"
   backtesting:
-    status: planned_authorized_not_implemented
+    status: foundation_contracts_implemented_engine_not_implemented
     governance: split_program_d1_only
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "Strategy Lab snapshots are not backtesting; D1 contracts/isolation is the only active implementation scope"
+    details: "D1 contracts and isolation are implemented pending independent verification; no replay, fills, PnL, persistence, API, or results UI"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:
