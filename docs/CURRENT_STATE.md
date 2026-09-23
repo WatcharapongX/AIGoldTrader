@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch C1 External Boundary Closure implemented — PENDING INDEPENDENT SECURITY VERIFICATION
-- **Current Active Gate**: C1 Independent Security Verification
-- **Next Authorized Activity**: Independently verify C1 using GPT-5.6 Sol / High.
-- **Prohibited Next Activity**: C2; C3; model routing; trading execution work; live trading
+- **Current Milestone**: Batch C1 External Boundary Closure independently verified and CLOSED.
+- **Current Active Gate**: C1 Security Closure Complete
+- **Next Authorized Activity**: C2 Governance Authorization ONLY.
+- **Prohibited Next Activity**: C2 implementation; C3; model routing; trading execution work; live trading
 
 ---
 
@@ -36,7 +36,7 @@
    - Canonical terminal invalidation, `sessionEpoch`/request-epoch protections, WebSocket first-frame authentication, and global legacy-storage cutover.
 
 ### B. Partially Implemented / Hardening
-- **External AI Provider Infrastructure**: Provider integration abstraction exists in `backend/app/services/ai/`; operates in deterministic fixture/mock mode by default when external credentials are not supplied. External provider hardening is in progress.
+- **External AI Provider Infrastructure**: **HARDENING**. C1 external trust-boundary closure is independently verified; deterministic fixture/mock mode remains the default. Batch C2 and C3 remain incomplete.
 
 ### C. NOT Implemented (Do Not Claim or Assume)
 - **Real Backtesting Engine**: Strategy Lab displays historical evaluation snapshots only; a walk-forward backtest simulation engine is **NOT IMPLEMENTED**.
@@ -53,11 +53,11 @@
 - **AUD-P2-002** (Browser-Safe Refresh Token & Session Security): **CLOSED**.
 - **B3.2-NEW-P2-001** (Stale 401 Token Resurrection after Logout): **CLOSED**.
 - **Batch B**: **CLOSED**.
-- **C-P2-001**: **REMEDIATED — PENDING INDEPENDENT SECURITY VERIFICATION**.
-- **C-ADR-005**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
-- **C-P3-003**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
-- **C-P3-006**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
-- **Batch C1**: **IMPLEMENTED — PENDING INDEPENDENT SECURITY GATE**.
+- **C-P2-001**: **CLOSED**.
+- **C-ADR-005**: **CLOSED — independently accepted**.
+- **C-P3-003**: **CLOSED**.
+- **C-P3-006**: **CLOSED**.
+- **Batch C1**: **CLOSED**.
 - **Batch C**: **OPEN**.
 - **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
 

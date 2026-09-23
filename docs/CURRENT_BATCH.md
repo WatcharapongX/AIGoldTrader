@@ -1,28 +1,28 @@
 # Current Active Batch — AIGoldTrader
 
 ## Batch Identifier
-**Batch C1 — External Boundary Closure**
+**Batch C — External AI Runtime Safety**
 
-## Status
-**IMPLEMENTED — PENDING INDEPENDENT SECURITY GATE**
+## Completed Sub-Batch
+**C1 — External Boundary Closure: CLOSED** following independent security verification.
 
-## Primary Objective
-Implement the approved external-provider trust-boundary hardening without changing AI authority or trading capability.
+## Current Status
+**AWAITING C2 GOVERNANCE AUTHORIZATION**
 
-## Authorized Scope
-- **C-P2-001**: Public/internal provider error separation.
-- **C-ADR-005**: External-mode static startup validation.
-- **C-P3-003**: Role-specific provider payload minimization.
-- **C-P3-006**: Explicit external-provider redirect policy.
-- Focused deterministic C1 security and regression tests.
+## Next Permitted Task
+Governance authorization for **C2 — Aggregate Runtime Control** only.
 
-## Implementation Runtime
-**GPT-5.6 Sol / Medium**
+## Authorization Boundary
+**C2 IMPLEMENTATION IS NOT AUTHORIZED.**
 
-## Required Next Gate After Implementation
-**C1 Independent Security Verification — GPT-5.6 Sol / High**
+**C3 IMPLEMENTATION IS NOT AUTHORIZED.**
 
-Implementation is complete. This document does not authorize self-verification or progression to C2.
+Model routing remains deferred and is not authorized.
+
+## C2 Reference Only
+The approved Batch C architecture conceptually identifies C2 as Aggregate Runtime Control. Potential future scope includes request-scoped aggregate analysis budget, aggregate deadline, call/token/byte reservation and reconciliation, Meta skip/degradation on budget exhaustion, and bounded retry integration.
+
+This document does not activate, authorize, or define C2 implementation.
 
 ## Architecture and Safety Constraints
 - Preserve the FastAPI modular monolith, exactly six canonical analytical agents, Meta Controller, and ProviderDescriptor abstraction.
@@ -31,12 +31,8 @@ Implementation is complete. This document does not authorize self-verification o
 - `TRADING_MODE=PAPER` remains enforced and `LIVE_AUTO_TRADING=false` remains enforced.
 - Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
 
-## Authorization Boundary
-**C2 IS NOT AUTHORIZED.**
-
-**C3 IS NOT AUTHORIZED.**
-
-**Batch C remains open.**
+## Batch Boundary
+**Batch C remains open.** C1 is closed; C2 governance authorization is the only next permitted task.
 
 ## Strictly Out of Scope
 - C2 aggregate runtime budget, AnalysisBudget, or seven-call aggregate token, cost, or deadline controls.
