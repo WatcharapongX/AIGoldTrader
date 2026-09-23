@@ -103,6 +103,14 @@ class Settings(BaseSettings):
     )
     ai_max_concurrent_provider_calls: int = Field(default=6, ge=1, le=32)
     ai_provider_queue_timeout_seconds: float = Field(default=15.0, gt=0.0, le=60.0)
+    # C2 request-scoped ceiling. Defaults fund 7 logical calls (six agents +
+    # Meta), each with the default one permitted retry, while remaining finite.
+    ai_analysis_max_provider_attempts: int = Field(default=14, ge=1, le=256)
+    ai_analysis_max_prompt_tokens: int = Field(default=114_688, ge=1, le=16_000_000)
+    ai_analysis_max_completion_tokens: int = Field(default=14_336, ge=1, le=2_000_000)
+    ai_analysis_max_total_tokens: int = Field(default=129_024, ge=1, le=18_000_000)
+    ai_analysis_max_measured_bytes: int = Field(default=560_000, ge=1, le=64_000_000)
+    ai_analysis_deadline_seconds: float = Field(default=30.0, ge=0.01, le=300.0)
 
     # Logging
     log_level: str = "INFO"

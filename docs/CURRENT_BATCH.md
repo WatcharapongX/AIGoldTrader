@@ -7,10 +7,10 @@
 **C1 — External Boundary Closure: CLOSED** following independent security verification.
 
 ## Current Status
-**Batch C2 — Aggregate Runtime Control: AUTHORIZED FOR IMPLEMENTATION**
+**Batch C2 — Aggregate Runtime Control: IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
 
 ## Primary Objective
-Implement bounded request-scoped aggregate runtime control for the six-agent + Meta analysis lifecycle.
+Independently verify the implemented bounded request-scoped aggregate runtime control for the six-agent + Meta analysis lifecycle.
 
 ## Authorized Scope
 - Request-scoped `AnalysisBudget` or equivalent.
@@ -23,15 +23,15 @@ Implement bounded request-scoped aggregate runtime control for the six-agent + M
 - Deterministic C2 tests.
 
 ## Implementation Runtime and Required Gate
-- **Implementation runtime**: GPT-5.6 Sol / Medium.
-- **Required post-implementation gate**: C2 Independent Verification — GPT-5.6 Sol / High.
+- **Implementation runtime**: GPT-5.6 Sol / Medium — complete.
+- **Next authorized activity**: C2 Independent Verification — GPT-5.6 Sol / High.
 
 ## Authorization Boundary
 **C3 IS NOT AUTHORIZED.**
 
 **Model routing IS NOT AUTHORIZED.**
 
-C2 implementation is authorized only within the scope above.
+C2 is not independently accepted or closed. Verification is authorized only within the scope above.
 
 ## Architecture and Safety Constraints
 - Preserve the FastAPI modular monolith, exactly six canonical analytical agents, Meta Controller, and ProviderDescriptor abstraction.
@@ -41,7 +41,7 @@ C2 implementation is authorized only within the scope above.
 - Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
 
 ## Batch Boundary
-**Batch C remains open.** C1 is closed; C2 Aggregate Runtime Control implementation is authorized.
+**Batch C remains open.** C1 is closed; C2 Aggregate Runtime Control awaits independent verification.
 
 ## Strictly Out of Scope
 - C3 observability or contract-hardening implementation.

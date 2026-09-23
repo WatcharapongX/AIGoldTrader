@@ -52,3 +52,12 @@ $$\text{Kill Switch} > \text{Risk Engine} > \text{Strategy Engine} > \text{AI Ad
 - **Context Minimization**: Feed only the minimal necessary structured features (price levels, candle summaries, news metrics) into agent prompts. Do not dump raw histories or logs into prompts.
 - **Prompt Injection Boundaries**: All external content (such as economic news headlines, event descriptions, or external provider commentary) is untrusted input. It must be escaped, wrapped in explicit XML/structural boundary tags, and never treated as execution instructions.
 - **Provider Isolation & Fail-Closed Behavior**: If an external provider call times out, errors, or fails schema validation, the affected analysis explicitly degrades or becomes unavailable. The system does not fabricate deterministic substitute analysis; degradation provenance remains explicit.
+
+---
+
+## 5. Aggregate Analysis Runtime Control
+- One server-authoritative aggregate budget is created per `AIOrchestrator.analyze()` only after all Kill Switch, Risk, freshness, and no-lookahead gates pass.
+- The budget finitely bounds provider attempts, prompt/completion/total tokens, measurable bytes, and an absolute monotonic deadline across six agents, Meta, queue wait, workers, and retries.
+- Canonical base attempts are reserved before concurrent fan-out; optional retries are then authorized in canonical rounds so retries cannot starve later agents.
+- Started failed attempts retain conservative reserved usage; only validated successful results reconcile to truthful measured usage. Unused retries are released once.
+- Meta requires its own reservation and cannot report `READY` when resource control prevents its provider execution.

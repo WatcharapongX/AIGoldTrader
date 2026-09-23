@@ -46,7 +46,7 @@ capabilities:
 
   external_ai:
     status: hardening
-    details: "C1 external trust-boundary closure independently verified and closed; fixture mode remains default, provider failures degrade without fabricated substitute analysis, and C2/C3 remain incomplete"
+    details: "C1 independently verified and closed; C2 request-scoped aggregate attempt, token, byte, retry, and monotonic-deadline control implemented pending independent verification; fixture mode remains default; C3 not authorized"
 
   browser_auth:
     status: implemented_verified

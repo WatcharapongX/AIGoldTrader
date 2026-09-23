@@ -4,9 +4,11 @@ All agents perform context minimization, strict output validation,
 and adhere strictly to advisory-only boundaries.
 """
 
+from __future__ import annotations
+
 import datetime as dt
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -32,6 +34,9 @@ from app.services.ai.provider import (
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from app.services.ai.budget import AnalysisReservation
 
 
 def _execution_provenance(res: Any, config: ModelConfig) -> AIProviderExecutionProvenance:
@@ -96,6 +101,7 @@ class BaseAnalyticalAgent:
         provider: ProviderDescriptor,
         config: ModelConfig,
         timeout_seconds: float | None = None,
+        analysis_reservation: AnalysisReservation | None = None,
     ) -> AgentAnalysisResult:
         """Execute agent analysis with strict error isolation and schema validation."""
         if not isinstance(provider, ProviderDescriptor):
@@ -126,6 +132,7 @@ class BaseAnalyticalAgent:
                 user_payload=structured_payload,
                 model_config=config,
                 timeout_seconds=timeout_seconds,
+                analysis_reservation=analysis_reservation,
             )
             raw = dict(res.raw_payload)
             execution_provenance = _execution_provenance(res, config)
@@ -328,6 +335,7 @@ class MetaController:
         provider: ProviderDescriptor,
         config: ModelConfig,
         timeout_seconds: float | None = None,
+        analysis_reservation: AnalysisReservation | None = None,
     ) -> AIAnalysisResult:
         if not isinstance(provider, ProviderDescriptor):
             raise ProviderRequestError(
@@ -381,6 +389,7 @@ class MetaController:
                 user_payload=structured_payload,
                 model_config=config,
                 timeout_seconds=timeout_seconds,
+                analysis_reservation=analysis_reservation,
             )
             raw = dict(res.raw_payload)
             meta_execution_provenance = _execution_provenance(res, config)

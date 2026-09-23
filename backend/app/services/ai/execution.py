@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from app.core.masking import mask_secret_text
 
 if TYPE_CHECKING:
+    from app.services.ai.budget import AnalysisReservation
     from app.services.ai.provider import ProviderDescriptor
 
 _POLL_SECONDS = 0.005
@@ -334,6 +335,7 @@ class ProviderExecutor:
         user_payload: str,
         model_config: Any,
         timeout_seconds: float | None = None,
+        analysis_reservation: AnalysisReservation | None = None,
     ) -> Any:
         from app.services.ai.provider import ProviderDescriptor, ProviderRequestError
 
@@ -352,6 +354,7 @@ class ProviderExecutor:
             user_payload=user_payload,
             model_config=model_config,
             timeout_seconds=timeout_seconds,
+            analysis_reservation=analysis_reservation,
         )
 
     async def _execute_test_provider_instance(
@@ -363,6 +366,7 @@ class ProviderExecutor:
         user_payload: str,
         model_config: Any,
         timeout_seconds: float | None = None,
+        analysis_reservation: AnalysisReservation | None = None,
     ) -> Any:
         """Internal test-only execution method for deterministic SpawnSafeTestProvider instances."""
         _validate_test_provider_instance(provider)
@@ -376,6 +380,7 @@ class ProviderExecutor:
             user_payload=user_payload,
             model_config=model_config,
             timeout_seconds=timeout_seconds,
+            analysis_reservation=analysis_reservation,
         )
 
     async def _execute_internal(
@@ -388,11 +393,13 @@ class ProviderExecutor:
         user_payload: str,
         model_config: Any,
         timeout_seconds: float | None = None,
+        analysis_reservation: AnalysisReservation | None = None,
     ) -> Any:
         from app.services.ai.provider import (
             MAX_INPUT_BYTES_PER_AGENT,
             MAX_PROVIDER_OUTPUT_BYTES,
             MIN_PROVIDER_TIMEOUT_SECONDS,
+            AnalysisDeadlineExceeded,
             InputBudgetExceeded,
             OutputBudgetExceeded,
             ProviderAuthError,
@@ -410,12 +417,22 @@ class ProviderExecutor:
 
         input_bytes = len(system_prompt.encode("utf-8")) + len(user_payload.encode("utf-8"))
         if input_bytes > MAX_INPUT_BYTES_PER_AGENT:
+            if analysis_reservation is not None:
+                await analysis_reservation.reconcile_failure()
             raise InputBudgetExceeded(
                 f"Provider input budget exceeded for {agent_id}: {input_bytes}>{MAX_INPUT_BYTES_PER_AGENT}"
             )
 
         timeout = timeout_seconds if timeout_seconds is not None else model_config.timeout_seconds
+        if analysis_reservation is not None:
+            remaining = analysis_reservation.deadline_remaining()
+            if remaining < MIN_PROVIDER_TIMEOUT_SECONDS:
+                await analysis_reservation.reconcile_failure()
+                raise AnalysisDeadlineExceeded(f"Aggregate analysis deadline exhausted before {agent_id}")
+            timeout = min(timeout, remaining)
         if not MIN_PROVIDER_TIMEOUT_SECONDS <= timeout <= 60.0:
+            if analysis_reservation is not None:
+                await analysis_reservation.reconcile_failure()
             raise ValueError(
                 f"Provider execution timeout must be between {MIN_PROVIDER_TIMEOUT_SECONDS}s and 60.0s"
             )
@@ -429,9 +446,35 @@ class ProviderExecutor:
 
         # 1. Reap any surviving processes that have died, then acquire concurrency slot
         reap_surviving_processes(self.limiter)
-        await self.limiter.acquire()
+        queue_timeout = self.limiter.queue_timeout_seconds
+        aggregate_bounded_queue = False
+        if analysis_reservation is not None:
+            remaining = analysis_reservation.deadline_remaining()
+            if remaining <= 0:
+                await analysis_reservation.reconcile_failure()
+                raise AnalysisDeadlineExceeded(f"Aggregate analysis deadline exhausted before queueing {agent_id}")
+            aggregate_bounded_queue = remaining <= queue_timeout
+            queue_timeout = min(queue_timeout, remaining)
+        try:
+            await self.limiter.acquire(timeout_seconds=queue_timeout)
+        except ProviderCapacityExhausted as exc:
+            if analysis_reservation is not None:
+                deadline_exhausted = aggregate_bounded_queue or analysis_reservation.deadline_remaining() <= 0
+                await analysis_reservation.reconcile_failure()
+                if deadline_exhausted:
+                    raise AnalysisDeadlineExceeded(
+                        f"Aggregate analysis deadline exhausted while queued for {agent_id}"
+                    ) from exc
+            raise
         acquired = True
         loop = asyncio.get_running_loop()
+        if analysis_reservation is not None:
+            remaining = analysis_reservation.deadline_remaining()
+            if remaining < MIN_PROVIDER_TIMEOUT_SECONDS:
+                self.limiter.release()
+                await analysis_reservation.reconcile_failure()
+                raise AnalysisDeadlineExceeded(f"Aggregate analysis deadline exhausted before worker {agent_id}")
+            timeout = min(timeout, remaining)
         deadline = loop.time() + timeout
 
         recv_pipe: Any = None
@@ -440,6 +483,7 @@ class ProviderExecutor:
         seen_attempts: set[int] = set()
         message: tuple[Any, ...] | None = None
         termination_failure: ProviderWorkerTerminationError | None = None
+        reservation_reconciled = False
 
         try:
             context = mp.get_context("spawn")
@@ -448,9 +492,18 @@ class ProviderExecutor:
                 target=_provider_worker_entry, args=(target, request, send_pipe), daemon=True
             )
             if loop.time() >= deadline:
+                if analysis_reservation is not None and analysis_reservation.deadline_remaining() <= 0:
+                    raise AnalysisDeadlineExceeded(
+                        f"Aggregate analysis deadline exhausted during process setup for {agent_id}"
+                    )
                 raise ProviderTimeoutError(f"Provider execution timeout during process setup for {agent_id}")
             process.start()
             _ACTIVE_PROCESSES.add(process)
+            if analysis_reservation is not None:
+                # Process start is the conservative parent boundary: cancellation after
+                # this point may race the worker's first attempt event, so attempt 1 is
+                # retained rather than incorrectly refunded as unstarted work.
+                analysis_reservation.mark_attempt_started(1)
             attempts = getattr(provider_for_state, "attempts", None)
             if isinstance(attempts, int):
                 try:
@@ -467,6 +520,8 @@ class ProviderExecutor:
                         candidate = recv_pipe.recv()
                         if candidate[0] == "attempt":
                             _record_attempt(provider_for_state, request, int(candidate[1]), seen_attempts)
+                            if analysis_reservation is not None:
+                                analysis_reservation.mark_attempt_started(int(candidate[1]))
                         else:
                             message = candidate
                             break
@@ -489,6 +544,10 @@ class ProviderExecutor:
                             provider_for_state.cancelled = True
                         except (AttributeError, ValueError):
                             pass
+                    if analysis_reservation is not None and analysis_reservation.deadline_remaining() <= 0:
+                        raise AnalysisDeadlineExceeded(
+                            f"Aggregate analysis deadline exhausted during provider execution for {agent_id}"
+                        )
                     raise ProviderTimeoutError(f"Provider hard timeout: deadline exhausted for {agent_id}")
                 if process is not None and not process.is_alive():
                     try:
@@ -496,6 +555,8 @@ class ProviderExecutor:
                             candidate = recv_pipe.recv()
                             if candidate[0] == "attempt":
                                 _record_attempt(provider_for_state, request, int(candidate[1]), seen_attempts)
+                                if analysis_reservation is not None:
+                                    analysis_reservation.mark_attempt_started(int(candidate[1]))
                             else:
                                 message = candidate
                     except (EOFError, BrokenPipeError, OSError):
@@ -521,6 +582,10 @@ class ProviderExecutor:
                 _merge_observed_state(provider_for_state, message[3])
                 error_name, error_message = str(message[1]), str(message[2])
                 if error_name in {"TimeoutError", "CancelledError", "ProviderTimeoutError"}:
+                    if analysis_reservation is not None and analysis_reservation.deadline_remaining() <= 0:
+                        raise AnalysisDeadlineExceeded(
+                            f"Aggregate analysis deadline exhausted during provider execution for {agent_id}"
+                        )
                     raise ProviderTimeoutError(error_message)
                 if error_name == "ProviderAuthError":
                     raise ProviderAuthError(error_message)
@@ -585,6 +650,13 @@ class ProviderExecutor:
                     f"Provider token accounting inconsistent for {agent_id}: "
                     f"total={result.total_tokens},prompt={result.prompt_tokens},completion={result.completion_tokens}"
                 )
+            if analysis_reservation is not None:
+                await analysis_reservation.reconcile_success(
+                    result,
+                    input_bytes=input_bytes,
+                    output_bytes=content_bytes + raw_bytes,
+                )
+                reservation_reconciled = True
             return result
         except asyncio.CancelledError:
             if process is not None and process.is_alive():
@@ -628,6 +700,9 @@ class ProviderExecutor:
             # Release slot ONLY if the worker is confirmed dead
             if acquired and not worker_survived:
                 self.limiter.release()
+
+            if analysis_reservation is not None and not reservation_reconciled:
+                await analysis_reservation.reconcile_failure()
 
             if termination_failure is not None:
                 raise termination_failure

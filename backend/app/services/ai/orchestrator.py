@@ -17,8 +17,10 @@ import logging
 from app.services.ai.agents import (
     BaseAnalyticalAgent,
     MetaController,
+    compute_agent_agreement,
     get_all_analytical_agents,
 )
+from app.services.ai.budget import AnalysisBudget, AnalysisBudgetLimits, AnalysisReservation
 from app.services.ai.domain import (
     AgentAnalysisResult,
     AIAnalysisInput,
@@ -45,6 +47,7 @@ class AIOrchestrator:
         provider: ProviderDescriptor | None = None,
         default_config: ModelConfig | None = None,
         descriptor: ProviderDescriptor | None = None,
+        budget_limits: AnalysisBudgetLimits | None = None,
     ):
         from app.core.config import get_settings
 
@@ -87,8 +90,87 @@ class AIOrchestrator:
 
         prov_name = self.provider.provider_id
         self.default_config = default_config or ModelConfig(provider=prov_name)
+        self.budget_limits = budget_limits or AnalysisBudgetLimits(
+            max_provider_attempts=settings.ai_analysis_max_provider_attempts,
+            max_prompt_tokens=settings.ai_analysis_max_prompt_tokens,
+            max_completion_tokens=settings.ai_analysis_max_completion_tokens,
+            max_total_tokens=settings.ai_analysis_max_total_tokens,
+            max_measured_bytes=settings.ai_analysis_max_measured_bytes,
+            deadline_seconds=settings.ai_analysis_deadline_seconds,
+        )
         self.agents = get_all_analytical_agents()
         self.meta_controller = MetaController()
+
+    def _resource_controlled_agent_result(
+        self,
+        ai_input: AIAnalysisInput,
+        agent: BaseAnalyticalAgent,
+        warning: str,
+    ) -> AgentAnalysisResult:
+        return AgentAnalysisResult(
+            agent_id=agent.agent_id,
+            agent_version="ai-1.0.0",
+            status="UNAVAILABLE",
+            directional_bias="NO_BIAS",
+            evidence_strength="INSUFFICIENT",
+            summary_th=f"การวิเคราะห์ของ {agent.agent_id} ไม่พร้อมใช้งานภายใต้ขีดจำกัดของคำขอนี้",
+            warnings_th=(warning,),
+            missing_context_th=(warning,),
+            provider_provenance=self.provider.provider_id,
+            prompt_version=agent.prompt_id,
+            generated_at=dt.datetime.now(dt.UTC),
+            as_of=ai_input.as_of,
+            token_usage=None,
+        )
+
+    def _meta_not_executed_result(
+        self,
+        ai_input: AIAnalysisInput,
+        agent_results: dict[str, AgentAnalysisResult],
+        warning: str,
+    ) -> AIAnalysisResult:
+        """Build a truthful server envelope without claiming provider synthesis."""
+        ready_count = sum(result.status == "READY" for result in agent_results.values())
+        status = "DEGRADED" if ready_count else "UNAVAILABLE"
+        agreement = compute_agent_agreement(
+            [result.directional_bias for result in agent_results.values() if result.status == "READY"]
+        )
+        semantic_data = {
+            "symbol": ai_input.symbol,
+            "as_of": ai_input.as_of.isoformat(),
+            "status": status,
+            "warning": warning,
+            "agent_biases": {key: value.directional_bias for key, value in sorted(agent_results.items())},
+            "input_fingerprint": ai_input.input_fingerprint,
+        }
+        analysis_fp = fingerprint(semantic_data)
+        return AIAnalysisResult(
+            analysis_id=ai_input.analysis_id or f"ai_{analysis_fp[:32]}",
+            symbol=ai_input.symbol,
+            as_of=ai_input.as_of,
+            status=status,
+            directional_bias="NEUTRAL",
+            evidence_strength="INSUFFICIENT",
+            agent_agreement=agreement,
+            summary_th="Meta Controller ไม่ได้ทำงานเนื่องจากขีดจำกัดทรัพยากรของคำขอ",
+            key_evidence_th=(),
+            conflicts_th=(),
+            risk_notes_th=("META_CONTROLLER_NOT_EXECUTED",),
+            warnings_th=(warning,),
+            agent_results=agent_results,
+            strategy_id=ai_input.strategy_context.strategy_id,
+            strategy_version=ai_input.strategy_context.strategy_version,
+            risk_decision_id=ai_input.risk_context.decision_id,
+            risk_decision_status=ai_input.risk_context.decision,
+            kill_switch_state=ai_input.kill_switch_context.state,
+            provider_provenance=self.provider.provider_id,
+            execution_provenance=None,
+            prompt_versions={result.agent_id: result.prompt_version for result in agent_results.values()},
+            generated_at=dt.datetime.now(dt.UTC),
+            input_fingerprint=ai_input.input_fingerprint,
+            analysis_fingerprint=analysis_fp,
+            execution_disclaimer="ADVISORY_ONLY_NO_EXECUTION_AUTHORITY",
+        )
 
     @classmethod
     def validate_no_lookahead(cls, ai_input: AIAnalysisInput) -> None:
@@ -454,14 +536,18 @@ class AIOrchestrator:
                 execution_disclaimer="ADVISORY_ONLY_NO_EXECUTION_AUTHORITY",
             )
 
-        # ---------------------------------------------------------
-        # EXECUTE EXACTLY SIX ANALYTICAL AGENTS CONCURRENTLY
-        # ENFORCE HARD ORCHESTRATOR TIMEOUTS AND CANCEL HANGING CALLS
-        # ---------------------------------------------------------
-        async def _run_agent_with_hard_timeout(agent: BaseAnalyticalAgent) -> AgentAnalysisResult:
-            timeout = effective_config.timeout_seconds
+        # All authority gates have passed. Start the request-scoped monotonic
+        # deadline here so blocked requests consume no AI runtime budget.
+        budget = AnalysisBudget(self.budget_limits)
+
+        # Deterministically pre-reserve in canonical agent order. Coroutines never
+        # race for the final aggregate slot, but funded agents still run concurrently.
+        agent_results_map: dict[str, AgentAnalysisResult] = {}
+        base_funded: list[tuple[BaseAnalyticalAgent, AnalysisReservation]] = []
+        base_config = effective_config.model_copy(update={"max_retries": 0})
+        for agent in self.agents:
             if agent.agent_id == "macro_news" and ai_input.news_context.availability != "AVAILABLE":
-                return AgentAnalysisResult(
+                agent_results_map[agent.agent_id] = AgentAnalysisResult(
                     agent_id=agent.agent_id,
                     agent_version="ai-1.0.0",
                     status="UNAVAILABLE",
@@ -476,8 +562,56 @@ class AIOrchestrator:
                     as_of=as_of,
                     token_usage=None,
                 )
+                continue
+            reservation = await budget.reserve(agent.agent_id, base_config)
+            if reservation is None:
+                warning = (
+                    "ANALYSIS_DEADLINE_EXHAUSTED"
+                    if budget.deadline_remaining() <= 0
+                    else "ANALYSIS_BUDGET_EXHAUSTED"
+                )
+                agent_results_map[agent.agent_id] = self._resource_controlled_agent_result(
+                    ai_input, agent, warning
+                )
+                continue
+            base_funded.append((agent, reservation))
+
+        # Only after every eligible agent has had a canonical chance at its base
+        # attempt are optional retries distributed in stable canonical rounds.
+        for _ in range(effective_config.max_retries):
+            for _, reservation in base_funded:
+                await budget.authorize_additional_attempt(reservation, effective_config)
+        funded = [
+            (
+                agent,
+                reservation,
+                effective_config.model_copy(
+                    update={"max_retries": reservation.authorized_attempts - 1}
+                ),
+            )
+            for agent, reservation in base_funded
+        ]
+
+        # ---------------------------------------------------------
+        # EXECUTE FUNDED ANALYTICAL AGENTS CONCURRENTLY
+        # ---------------------------------------------------------
+        async def _run_agent_with_hard_timeout(
+            agent: BaseAnalyticalAgent,
+            reservation: AnalysisReservation,
+            bounded_config: ModelConfig,
+        ) -> AgentAnalysisResult:
+            timeout = min(bounded_config.timeout_seconds, reservation.deadline_remaining())
             try:
-                return await agent.execute(ai_input, self.provider, effective_config, timeout_seconds=timeout)
+                return await agent.execute(
+                    ai_input,
+                    self.provider,
+                    bounded_config,
+                    timeout_seconds=timeout,
+                    analysis_reservation=reservation,
+                )
+            except asyncio.CancelledError:
+                await reservation.reconcile_failure()
+                raise
             except TimeoutError:
                 logger.warning("Agent %s timed out after %s seconds (hard cancel)", agent.agent_id, timeout)
                 return AgentAnalysisResult(
@@ -564,51 +698,86 @@ class AIOrchestrator:
                     as_of=as_of,
                     token_usage=None,
                 )
+            finally:
+                if not reservation.terminal:
+                    await reservation.reconcile_failure()
 
-        tasks = [_run_agent_with_hard_timeout(agent) for agent in self.agents]
-        results_list = await asyncio.gather(*tasks)
-        agent_results_map = {res.agent_id: res for res in results_list}
+        task_pairs = [
+            (
+                agent,
+                asyncio.create_task(_run_agent_with_hard_timeout(agent, reservation, bounded_config)),
+            )
+            for agent, reservation, bounded_config in funded
+        ]
+        if task_pairs:
+            all_tasks = [task for _, task in task_pairs]
+            try:
+                _, pending = await asyncio.wait(
+                    all_tasks,
+                    timeout=budget.deadline_remaining(),
+                )
+            except asyncio.CancelledError:
+                for task in all_tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*all_tasks, return_exceptions=True)
+                raise
+            if pending:
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+            for agent, task in task_pairs:
+                if task.cancelled():
+                    agent_results_map[agent.agent_id] = self._resource_controlled_agent_result(
+                        ai_input, agent, "ANALYSIS_DEADLINE_EXHAUSTED"
+                    )
+                else:
+                    agent_results_map[agent.agent_id] = task.result()
+
+        # Restore canonical order regardless of completion order.
+        agent_results_map = {
+            agent.agent_id: agent_results_map[agent.agent_id] for agent in self.agents
+        }
 
         # ---------------------------------------------------------
-        # EXECUTE META CONTROLLER WITH HARD TIMEOUT
+        # EXECUTE META CONTROLLER ONLY WITH A FRESH AGGREGATE RESERVATION
         # ---------------------------------------------------------
-        meta_timeout = effective_config.timeout_seconds
+        meta_reservation = await budget.reserve(self.meta_controller.agent_id, effective_config)
+        if meta_reservation is None:
+            warning = (
+                "ANALYSIS_DEADLINE_EXHAUSTED"
+                if budget.deadline_remaining() <= 0
+                else "ANALYSIS_BUDGET_EXHAUSTED"
+            )
+            return self._meta_not_executed_result(ai_input, agent_results_map, warning)
+
+        meta_config = effective_config.model_copy(
+            update={"max_retries": meta_reservation.authorized_attempts - 1}
+        )
+        meta_timeout = min(meta_config.timeout_seconds, meta_reservation.deadline_remaining())
         try:
-            meta_result = await self.meta_controller.execute(
-                ai_input=ai_input,
-                agent_results=agent_results_map,
-                provider=self.provider,
-                config=effective_config,
-                timeout_seconds=meta_timeout,
+            meta_result = await asyncio.wait_for(
+                self.meta_controller.execute(
+                    ai_input=ai_input,
+                    agent_results=agent_results_map,
+                    provider=self.provider,
+                    config=meta_config,
+                    timeout_seconds=meta_timeout,
+                    analysis_reservation=meta_reservation,
+                ),
+                timeout=meta_reservation.deadline_remaining(),
             )
         except TimeoutError:
-            logger.warning("MetaController timed out after %s seconds (hard cancel)", meta_timeout)
-            meta_result = AIAnalysisResult(
-                analysis_id=ai_input.analysis_id or f"ai_meta_to_{now_utc.timestamp()}",
-                symbol=ai_input.symbol,
-                as_of=as_of,
-                status="DEGRADED",
-                directional_bias="NEUTRAL",
-                evidence_strength="INSUFFICIENT",
-                agent_agreement="UNAVAILABLE",
-                summary_th=f"Meta Controller เกินกำหนดเวลา timeout ({meta_timeout}s)",
-                key_evidence_th=(),
-                conflicts_th=(),
-                risk_notes_th=("Meta Controller timeout",),
-                warnings_th=(f"MetaController hard timeout after {meta_timeout}s",),
-                agent_results=agent_results_map,
-                strategy_id=ai_input.strategy_context.strategy_id,
-                strategy_version=ai_input.strategy_context.strategy_version,
-                risk_decision_id=ai_input.risk_context.decision_id,
-                risk_decision_status=ai_input.risk_context.decision,
-                kill_switch_state=ks_state,
-                provider_provenance=actual_provenance,
-                prompt_versions={},
-                generated_at=now_utc,
-                input_fingerprint=ai_input.input_fingerprint,
-                analysis_fingerprint=fingerprint({"symbol": ai_input.symbol, "status": "DEGRADED"}),
-                execution_disclaimer="ADVISORY_ONLY_NO_EXECUTION_AUTHORITY",
+            await meta_reservation.reconcile_failure()
+            return self._meta_not_executed_result(
+                ai_input, agent_results_map, "ANALYSIS_DEADLINE_EXHAUSTED"
             )
+        except asyncio.CancelledError:
+            await meta_reservation.reconcile_failure()
+            raise
+        finally:
+            if not meta_reservation.terminal:
+                await meta_reservation.reconcile_failure()
 
         return meta_result
 

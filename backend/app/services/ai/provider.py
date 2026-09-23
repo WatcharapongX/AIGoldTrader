@@ -85,6 +85,14 @@ class ProviderBudgetExceeded(AIProviderError):
     """Provider exceeded token or byte limits."""
 
 
+class AnalysisBudgetExceeded(ProviderBudgetExceeded):
+    """Request-scoped aggregate analysis budget was exhausted or violated."""
+
+
+class AnalysisDeadlineExceeded(ProviderTimeoutError):
+    """Request-scoped absolute analysis deadline was exhausted."""
+
+
 class ProviderInternalError(AIProviderError):
     """Unhandled internal provider or worker error."""
 
@@ -95,6 +103,10 @@ class ProviderWorkerTerminationError(ProviderInternalError):
 
 def public_provider_failure_code(exc: BaseException) -> str:
     """Map internal/provider failures to a stable, non-secret public code."""
+    if isinstance(exc, AnalysisDeadlineExceeded):
+        return "ANALYSIS_DEADLINE_EXHAUSTED"
+    if isinstance(exc, AnalysisBudgetExceeded):
+        return "ANALYSIS_BUDGET_EXHAUSTED"
     if isinstance(exc, ProviderAuthError):
         return "PROVIDER_AUTH_FAILED"
     if isinstance(exc, ProviderRateLimitError):
@@ -475,6 +487,7 @@ async def analyze_with_controls(
     user_payload: str,
     model_config: ModelConfig,
     timeout_seconds: float | None = None,
+    analysis_reservation: Any | None = None,
 ) -> ProviderResult:
     """Execute through the killable provider boundary with one overall deadline."""
     if not isinstance(provider, ProviderDescriptor):
@@ -491,6 +504,7 @@ async def analyze_with_controls(
         user_payload=user_payload,
         model_config=model_config,
         timeout_seconds=timeout_seconds,
+        analysis_reservation=analysis_reservation,
     )
 
 

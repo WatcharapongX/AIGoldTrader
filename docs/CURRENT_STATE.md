@@ -2,9 +2,9 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch C1 External Boundary Closure independently verified and CLOSED; Batch C2 authorized.
-- **Current Active Gate**: Batch C2 — Aggregate Runtime Control Implementation
-- **Next Authorized Activity**: Implement C2 only.
+- **Current Milestone**: Batch C2 Aggregate Runtime Control implemented and pending independent verification.
+- **Current Active Gate**: Batch C2 — Independent Verification
+- **Next Authorized Activity**: Independently verify C2 using GPT-5.6 Sol / High.
 - **Prohibited Next Activity**: C3; model routing; trading execution; broker execution; live trading
 
 ---
@@ -36,7 +36,7 @@
    - Canonical terminal invalidation, `sessionEpoch`/request-epoch protections, WebSocket first-frame authentication, and global legacy-storage cutover.
 
 ### B. Partially Implemented / Hardening
-- **External AI Provider Infrastructure**: **HARDENING**. C1 external trust-boundary closure is independently verified; deterministic fixture/mock mode remains the default. Batch C2 and C3 remain incomplete.
+- **External AI Provider Infrastructure**: **HARDENING**. C1 is independently verified; C2 aggregate request runtime control is implemented pending independent verification; deterministic fixture/mock mode remains the default; C3 is not authorized.
 
 ### C. NOT Implemented (Do Not Claim or Assume)
 - **Real Backtesting Engine**: Strategy Lab displays historical evaluation snapshots only; a walk-forward backtest simulation engine is **NOT IMPLEMENTED**.
@@ -58,7 +58,7 @@
 - **C-P3-003**: **CLOSED**.
 - **C-P3-006**: **CLOSED**.
 - **Batch C1**: **CLOSED**.
-- **Batch C2**: **AUTHORIZED FOR IMPLEMENTATION**.
+- **Batch C2**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
 - **Batch C**: **OPEN**.
 - **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
 
