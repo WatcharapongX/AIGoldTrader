@@ -3,13 +3,14 @@
 ## Current Governance State
 
 - **Authoritative branch**: `main`.
-- **Authoritative pre-C3 governance baseline**: `e6b12325fe41f5c3037ca5447f91c564bdaeb575`.
+- **C3 implementation starting HEAD**: `959e0ee8a562046fd4fb8b5fd4c28b6e62dfc432`.
 - **Latest completed gate**: C2 Independent Verification — GPT-5.6 Sol / High — **PASS**.
 - **Batch C1 — External Boundary Closure**: **CLOSED**.
 - **Batch C2 — Aggregate Runtime Control**: **CLOSED**.
 - **Batch C**: **OPEN**.
 - **external_ai**: **HARDENING**.
-- **Batch C3 — Output Contract & Safe Observability Hardening**: **AUTHORIZED FOR IMPLEMENTATION**.
+- **Batch C3 — Output Contract & Safe Observability Hardening**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
+- **Latest implementation acceptance**: normal Windows host C3 and full relevant C1+C2+C3 regression passed; independent gate remains pending.
 - **Model routing**: **NOT AUTHORIZED**.
 - **Trading execution**: **NOT AUTHORIZED**.
 
@@ -48,11 +49,11 @@
 - Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
 - Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
 
-## C3 Authorized Scope
+## C3 Implemented Scope
 
 - Bound model-controlled AI output strings and collection cardinality.
 - Preserve strict schema validation with AI-local safe degradation.
-- Verify compromised model-generated agent summaries remain inert data at the Meta trust boundary; make only the minimum targeted containment change if a verified finding requires it.
+- Model-generated agent summaries remain inert data under Meta `untrusted_evidence`, separate from server-owned authority context.
 - Add bounded, non-secret structured AI-runtime telemetry using existing logging only.
 - Add focused telemetry-redaction, adversarial, and output-contract regression tests.
 
@@ -65,7 +66,22 @@
 - Do not add observability infrastructure, a telemetry backend, Redis, Kafka, Celery, Kubernetes, or microservices.
 - Do not alter trading authority, Risk Engine decisions, Kill Switch state, TradePlan geometry, or execution boundaries.
 
+## C3 Implementation and Acceptance Evidence
+
+- Added strict Unicode character and collection limits to agent, Meta, and final analytical result contracts: summary 2048; text/evidence items 512; collections 12.
+- Moved all model-derived `agent_summaries` from Meta `trusted_context` to `untrusted_evidence`; retained server Risk, Kill Switch, symbol, clock, and agreement metadata in trusted context.
+- Tightened the Meta system prompt to treat agent summaries as inert data and ignore embedded commands.
+- Added small allowlisted AI telemetry for agent completion/degradation and Meta completion/degradation/resource skip. Emission errors are isolated from results.
+- Added focused C3 tests for exact limits, Thai Unicode, forbidden authority fields, safe degradation, JSON delimiter injection, and log redaction; updated the C1 Meta payload expectation.
+- C3 focused suite on normal Windows host: **29 passed**, exit code 0.
+- Windows host spawn/Pipe preflight: **PASS** (`C3_SPAWN_OK spawn`, `C3_PIPE_OK`). The earlier Codex sandbox `WinError 5` was environment-specific.
+- Full relevant C1+C2+C3 host regression: **PASS**, exit code 0, no failures or errors. The authoritative output did not provide an exact combined count.
+- Local non-worker regression before host run: **134 passed, 32 deselected** (29 C3, 91 selected C1, 14 selected C2).
+- Ruff over changed/new Python files: **PASS**. `git diff --check`: **PASS**.
+- C1 protections and C2 aggregate runtime controls remain intact; fixture mode remains default.
+- Implementation acceptance does not close C3; independent GPT-5.6 Sol / High verification is required.
+
 ## Next Authorized Activity
 
-- **Batch C3 Implementation** only.
+- **C3 Independent Verification** with GPT-5.6 Sol / High only.
 - Do not implement model routing, backtesting, paper execution, OMS, broker execution, or live trading.

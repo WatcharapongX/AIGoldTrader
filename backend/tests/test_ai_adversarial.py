@@ -334,9 +334,9 @@ async def test_c1_six_agent_and_meta_payload_semantic_allowlists(monkeypatch, ba
         "risk_decision_status",
         "kill_switch_status",
         "agent_agreement",
-        "agent_summaries",
     }
-    assert meta["untrusted_evidence"] == {}
+    assert set(meta["untrusted_evidence"]) == {"agent_summaries"}
+    assert set(meta["untrusted_evidence"]["agent_summaries"]) == set(expected_role_fields)
     meta_serialized = json.dumps(meta)
     for forbidden in ("strategy_candidate", "provenance", "reservation_id", "account_id", "acc_adv_01", "res_adv_01"):
         assert forbidden not in meta_serialized

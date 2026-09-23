@@ -9,12 +9,22 @@ import datetime as dt
 import hashlib
 import json
 from decimal import Decimal
-from typing import Any, Final, Literal
+from typing import Annotated, Any, Final, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 VERSION = "ai-1.0.0"
 PROMPT_SCHEMA_VERSION = "prompt-1.0.0"
+
+# Model-controlled analytical output limits (Unicode characters, not UTF-8 bytes).
+SUMMARY_MAX_CHARS: Final = 2048
+TEXT_ITEM_MAX_CHARS: Final = 512
+EVIDENCE_REF_MAX_CHARS: Final = 512
+AGENT_COLLECTION_MAX_ITEMS: Final = 12
+META_COLLECTION_MAX_ITEMS: Final = 12
+SummaryText = Annotated[str, StringConstraints(strict=True, max_length=SUMMARY_MAX_CHARS)]
+TextItem = Annotated[str, StringConstraints(strict=True, max_length=TEXT_ITEM_MAX_CHARS)]
+EvidenceRef = Annotated[str, StringConstraints(strict=True, max_length=EVIDENCE_REF_MAX_CHARS)]
 
 DirectionalBias = Literal["LONG", "SHORT", "NEUTRAL", "NO_BIAS"]
 EvidenceStrength = Literal["STRONG", "MODERATE", "WEAK", "INSUFFICIENT"]
@@ -113,12 +123,12 @@ class AgentAnalysisResult(BaseModel):
     status: AgentStatus
     directional_bias: DirectionalBias
     evidence_strength: EvidenceStrength
-    summary_th: str
-    evidence_refs: tuple[str, ...] = ()
-    supporting_factors_th: tuple[str, ...] = ()
-    conflicting_factors_th: tuple[str, ...] = ()
-    warnings_th: tuple[str, ...] = ()
-    missing_context_th: tuple[str, ...] = ()
+    summary_th: SummaryText
+    evidence_refs: tuple[EvidenceRef, ...] = Field(default=(), max_length=AGENT_COLLECTION_MAX_ITEMS)
+    supporting_factors_th: tuple[TextItem, ...] = Field(default=(), max_length=AGENT_COLLECTION_MAX_ITEMS)
+    conflicting_factors_th: tuple[TextItem, ...] = Field(default=(), max_length=AGENT_COLLECTION_MAX_ITEMS)
+    warnings_th: tuple[TextItem, ...] = Field(default=(), max_length=AGENT_COLLECTION_MAX_ITEMS)
+    missing_context_th: tuple[TextItem, ...] = Field(default=(), max_length=AGENT_COLLECTION_MAX_ITEMS)
     provider_provenance: str = "fixture"
     execution_provenance: AIProviderExecutionProvenance | None = None
     prompt_version: str = "v1"
@@ -676,11 +686,11 @@ class AIAnalysisResult(BaseModel):
     evidence_strength: EvidenceStrength
     agent_agreement: AgentAgreement
 
-    summary_th: str
-    key_evidence_th: tuple[str, ...] = ()
-    conflicts_th: tuple[str, ...] = ()
-    risk_notes_th: tuple[str, ...] = ()
-    warnings_th: tuple[str, ...] = ()
+    summary_th: SummaryText
+    key_evidence_th: tuple[TextItem, ...] = Field(default=(), max_length=META_COLLECTION_MAX_ITEMS)
+    conflicts_th: tuple[TextItem, ...] = Field(default=(), max_length=META_COLLECTION_MAX_ITEMS)
+    risk_notes_th: tuple[TextItem, ...] = Field(default=(), max_length=META_COLLECTION_MAX_ITEMS)
+    warnings_th: tuple[TextItem, ...] = Field(default=(), max_length=META_COLLECTION_MAX_ITEMS)
 
     # Exactly six analytical agent results
     agent_results: dict[str, AgentAnalysisResult] = Field(default_factory=dict)

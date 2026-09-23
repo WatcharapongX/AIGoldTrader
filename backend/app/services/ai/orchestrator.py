@@ -35,6 +35,7 @@ from app.services.ai.provider import (
     ProviderDescriptor,
     public_provider_failure_code,
 )
+from app.services.ai.telemetry import emit_ai_event
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,8 @@ class AIOrchestrator:
         agent: BaseAnalyticalAgent,
         warning: str,
     ) -> AgentAnalysisResult:
+        emit_ai_event("ai_agent_degraded", agent_id=agent.agent_id,
+                      provider_id=self.provider.provider_id, failure_code=warning)
         return AgentAnalysisResult(
             agent_id=agent.agent_id,
             agent_version="ai-1.0.0",
@@ -130,6 +133,8 @@ class AIOrchestrator:
         warning: str,
     ) -> AIAnalysisResult:
         """Build a truthful server envelope without claiming provider synthesis."""
+        emit_ai_event("ai_meta_skipped", agent_id=self.meta_controller.agent_id,
+                      provider_id=self.provider.provider_id, failure_code=warning)
         ready_count = sum(result.status == "READY" for result in agent_results.values())
         status = "DEGRADED" if ready_count else "UNAVAILABLE"
         agreement = compute_agent_agreement(

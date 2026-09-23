@@ -46,7 +46,7 @@ capabilities:
 
   external_ai:
     status: hardening
-    details: "C1 and C2 independently verified and closed; C2 request-scoped aggregate attempt, token, byte, retry, and monotonic-deadline controls verified; fixture mode remains default; C3 remains incomplete and not authorized"
+    details: "C1 and C2 independently verified and closed; C3 output contracts, Meta trust boundary, and safe telemetry implemented with host regression passing; C3 independent verification pending; fixture mode remains default; model routing and trading execution not authorized"
 
   browser_auth:
     status: implemented_verified

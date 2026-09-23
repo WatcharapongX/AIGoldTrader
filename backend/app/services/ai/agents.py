@@ -10,9 +10,10 @@ import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.ai.domain import (
+    META_COLLECTION_MAX_ITEMS,
     META_CONTROLLER_ID,
     AgentAgreement,
     AgentAnalysisResult,
@@ -22,6 +23,8 @@ from app.services.ai.domain import (
     DirectionalBias,
     EvidenceStrength,
     MetaStatus,
+    SummaryText,
+    TextItem,
     fingerprint,
 )
 from app.services.ai.prompts import build_structured_payload, get_prompt
@@ -32,6 +35,7 @@ from app.services.ai.provider import (
     analyze_with_controls,
     public_provider_failure_code,
 )
+from app.services.ai.telemetry import emit_ai_event
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +155,9 @@ class BaseAnalyticalAgent:
                 "total_tokens": res.total_tokens,
             }
 
-            return AgentAnalysisResult.model_validate(raw)
+            validated = AgentAnalysisResult.model_validate(raw)
+            emit_ai_event("ai_agent_completed", agent_id=self.agent_id, provider_id=actual_prov)
+            return validated
 
         except Exception as exc:
             failure_code = public_provider_failure_code(exc)
@@ -162,6 +168,8 @@ class BaseAnalyticalAgent:
                 failure_code,
                 type(exc).__name__,
             )
+            emit_ai_event("ai_agent_degraded", agent_id=self.agent_id, provider_id=actual_prov,
+                          failure_code=failure_code)
             return AgentAnalysisResult(
                 agent_id=self.agent_id,
                 agent_version="ai-1.0.0",
@@ -314,11 +322,11 @@ class MetaSynthesisOutput(BaseModel):
     directional_bias: DirectionalBias = "NEUTRAL"
     evidence_strength: EvidenceStrength = "MODERATE"
     agent_agreement: AgentAgreement = "LOW"
-    summary_th: str = "สรุปผลการวิเคราะห์ภาพรวมโดย AI"
-    key_evidence_th: tuple[str, ...] = ()
-    conflicts_th: tuple[str, ...] = ()
-    risk_notes_th: tuple[str, ...] = ()
-    warnings_th: tuple[str, ...] = ()
+    summary_th: SummaryText = "สรุปผลการวิเคราะห์ภาพรวมโดย AI"
+    key_evidence_th: tuple[TextItem, ...] = Field(default=(), max_length=META_COLLECTION_MAX_ITEMS)
+    conflicts_th: tuple[TextItem, ...] = Field(default=(), max_length=META_COLLECTION_MAX_ITEMS)
+    risk_notes_th: tuple[TextItem, ...] = Field(default=(), max_length=META_COLLECTION_MAX_ITEMS)
+    warnings_th: tuple[TextItem, ...] = Field(default=(), max_length=META_COLLECTION_MAX_ITEMS)
 
 
 class MetaController:
@@ -349,21 +357,14 @@ class MetaController:
         agreement = compute_agent_agreement(biases)
 
         # 2. Prepare meta synthesis payload
-        meta_context = {
-            "symbol": ai_input.symbol,
-            "as_of": ai_input.as_of.isoformat(),
-            "risk_decision": ai_input.risk_context.decision,
-            "kill_switch_state": ai_input.kill_switch_context.state,
-            "agent_agreement": agreement,
-            "agent_summaries": {
-                aid: {
-                    "bias": res.directional_bias,
-                    "strength": res.evidence_strength,
-                    "status": res.status,
-                    "summary_th": res.summary_th,
-                }
-                for aid, res in agent_results.items()
-            },
+        agent_summaries = {
+            aid: {
+                "bias": res.directional_bias,
+                "strength": res.evidence_strength,
+                "status": res.status,
+                "summary_th": res.summary_th,
+            }
+            for aid, res in agent_results.items()
         }
 
         structured_payload = build_structured_payload(
@@ -374,8 +375,8 @@ class MetaController:
                 "risk_decision_status": ai_input.risk_context.decision,
                 "kill_switch_status": ai_input.kill_switch_context.state,
                 "agent_agreement": agreement,
-                "agent_summaries": meta_context["agent_summaries"],
             },
+            {"agent_summaries": agent_summaries},
         )
         system_prompt = get_prompt(self.prompt_id)
 
@@ -403,6 +404,7 @@ class MetaController:
             conflicts_th = validated.conflicts_th
             risk_notes_th = validated.risk_notes_th
             warnings_th = validated.warnings_th
+            emit_ai_event("ai_meta_completed", agent_id=self.agent_id, provider_id=provider.provider_id)
 
         except Exception as exc:
             failure_code = public_provider_failure_code(exc)
@@ -412,6 +414,8 @@ class MetaController:
                 failure_code,
                 type(exc).__name__,
             )
+            emit_ai_event("ai_meta_degraded", agent_id=self.agent_id, provider_id=provider.provider_id,
+                          failure_code=failure_code)
             meta_failed = True
             bias = "NEUTRAL"
             strength = "INSUFFICIENT"

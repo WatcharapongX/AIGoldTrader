@@ -2,9 +2,9 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: C1 and C2 independently verified and CLOSED; C3 authorized for implementation.
-- **Current Active Gate**: Batch C3 — Output Contract & Safe Observability Hardening Implementation.
-- **Next Authorized Activity**: Implement C3 only.
+- **Current Milestone**: C1 and C2 independently verified and CLOSED; C3 implemented pending independent verification.
+- **Current Active Gate**: Batch C3 — Output Contract & Safe Observability Hardening Independent Verification.
+- **Next Authorized Activity**: C3 Independent Verification (GPT-5.6 Sol / High) only.
 - **Prohibited Next Activity**: model routing; trading execution; broker execution; backtesting; live trading
 
 ---
@@ -36,7 +36,7 @@
    - Canonical terminal invalidation, `sessionEpoch`/request-epoch protections, WebSocket first-frame authentication, and global legacy-storage cutover.
 
 ### B. Partially Implemented / Hardening
-- **External AI Provider Infrastructure**: **HARDENING**. C1 and C2 are independently verified and closed; C3 — Output Contract & Safe Observability Hardening is authorized for implementation. Deterministic fixture/mock mode remains the default. C3 is not implemented or verified.
+- **External AI Provider Infrastructure**: **HARDENING**. C1 and C2 are independently verified and closed; C3 output contracts, Meta trust boundary, and safe telemetry are implemented and host regression passed. C3 awaits independent verification. Deterministic fixture/mock mode remains the default.
 
 ### C. NOT Implemented (Do Not Claim or Assume)
 - **Real Backtesting Engine**: Strategy Lab displays historical evaluation snapshots only; a walk-forward backtest simulation engine is **NOT IMPLEMENTED**.
@@ -59,7 +59,7 @@
 - **C-P3-006**: **CLOSED**.
 - **Batch C1**: **CLOSED**.
 - **Batch C2**: **CLOSED**.
-- **Batch C3**: **AUTHORIZED FOR IMPLEMENTATION**.
+- **Batch C3**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
 - **Batch C**: **OPEN**.
 - **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
 
