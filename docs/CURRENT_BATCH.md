@@ -9,17 +9,32 @@
 **C2 — Aggregate Runtime Control: CLOSED** following independent verification.
 
 ## Current Status
-**AWAITING C3 GOVERNANCE AUTHORIZATION**
+**Batch C3 — Output Contract & Safe Observability Hardening**
+
+**Status: AUTHORIZED FOR IMPLEMENTATION**
 
 ## Next Permitted Task
-Governance authorization for C3 only.
+Implement C3 only.
 
 ## Authorization Boundary
-**C3 IMPLEMENTATION IS NOT AUTHORIZED.**
+Primary objective: bound model-controlled analytical outputs, harden Meta handling of model-generated summaries, add non-secret structured runtime telemetry, and close focused adversarial contract-test gaps.
+
+### Authorized Scope
+- Model-controlled field length bounds and collection cardinality bounds.
+- Schema validation and safe degradation behavior.
+- Compromised-summary / Meta trust-boundary tests and the minimum containment required by a verified finding.
+- Safe structured AI-runtime logging and telemetry redaction tests.
+- Focused C3 adversarial and regression tests.
+
+### Required Implementation and Verification
+- **Implementation runtime**: GPT-5.6 Sol / Medium.
+- **Required independent gate**: GPT-5.6 Sol / High.
 
 **Model routing IS NOT AUTHORIZED.**
 
-Batch C remains **OPEN**. C3 is the next separately gated hardening stage; this closure does not authorize its implementation.
+**Trading execution IS NOT AUTHORIZED.**
+
+Batch C remains **OPEN**. C3 is authorized for implementation but is not yet implemented or verified.
 
 ## Architecture and Safety Constraints
 - Preserve the FastAPI modular monolith, exactly six canonical analytical agents, Meta Controller, and ProviderDescriptor abstraction.
@@ -29,10 +44,9 @@ Batch C remains **OPEN**. C3 is the next separately gated hardening stage; this 
 - Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
 
 ## Batch Boundary
-**Batch C remains open.** C1 and C2 are closed. C3 implementation remains unauthorized pending a separate governance authorization.
+**Batch C remains open.** C1 and C2 are closed. C3 is authorized for implementation and requires an independent post-implementation gate before closure.
 
 ## Strictly Out of Scope
-- C3 observability or contract-hardening implementation.
 - Role-based model routing, new AI agents, Hermes, MCP, TradingView, or additional agent frameworks.
 - Live trading, broker execution, OMS, position management, paper execution, or Backtesting Engine implementation.
 - Redis, Kafka, Celery, Kubernetes, microservices, Vector DB, or ML pipelines.

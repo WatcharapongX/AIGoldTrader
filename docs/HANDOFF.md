@@ -3,16 +3,15 @@
 ## Current Governance State
 
 - **Authoritative branch**: `main`.
-- **Authoritative C2 implementation commit**: `26af358984a1dd66efbf394a4528833d1c71c29e`.
-- **Latest completed gate**: C2 Independent Verification.
-- **Reviewer**: GPT-5.6 Sol / High.
-- **Result**: **PASS**.
+- **Authoritative pre-C3 governance baseline**: `e6b12325fe41f5c3037ca5447f91c564bdaeb575`.
+- **Latest completed gate**: C2 Independent Verification — GPT-5.6 Sol / High — **PASS**.
 - **Batch C1 — External Boundary Closure**: **CLOSED**.
 - **Batch C2 — Aggregate Runtime Control**: **CLOSED**.
 - **Batch C**: **OPEN**.
 - **external_ai**: **HARDENING**.
-- **C3 implementation**: **NOT AUTHORIZED**.
+- **Batch C3 — Output Contract & Safe Observability Hardening**: **AUTHORIZED FOR IMPLEMENTATION**.
 - **Model routing**: **NOT AUTHORIZED**.
+- **Trading execution**: **NOT AUTHORIZED**.
 
 ## C2 Verified Runtime Controls
 
@@ -49,8 +48,24 @@
 - Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
 - Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
 
+## C3 Authorized Scope
+
+- Bound model-controlled AI output strings and collection cardinality.
+- Preserve strict schema validation with AI-local safe degradation.
+- Verify compromised model-generated agent summaries remain inert data at the Meta trust boundary; make only the minimum targeted containment change if a verified finding requires it.
+- Add bounded, non-secret structured AI-runtime telemetry using existing logging only.
+- Add focused telemetry-redaction, adversarial, and output-contract regression tests.
+
+## C3 Implementation Constraints
+
+- Required implementation runtime: **GPT-5.6 Sol / Medium**.
+- Required independent post-implementation gate: **GPT-5.6 Sol / High**.
+- Preserve C1 provider-boundary protections and C2 aggregate resource controls.
+- Preserve exactly six canonical agents plus the Meta Controller; no routing, new agents, providers, or frameworks.
+- Do not add observability infrastructure, a telemetry backend, Redis, Kafka, Celery, Kubernetes, or microservices.
+- Do not alter trading authority, Risk Engine decisions, Kill Switch state, TradePlan geometry, or execution boundaries.
+
 ## Next Authorized Activity
 
-- **C3 Governance Authorization ONLY**.
-- Do not implement C3 from this handoff.
+- **Batch C3 Implementation** only.
 - Do not implement model routing, backtesting, paper execution, OMS, broker execution, or live trading.

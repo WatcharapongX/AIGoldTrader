@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch C2 Aggregate Runtime Control independently verified and CLOSED.
-- **Current Active Gate**: C2 Security / Runtime Closure Complete
-- **Next Authorized Activity**: C3 Governance Authorization ONLY.
-- **Prohibited Next Activity**: C3 implementation; model routing; trading execution; broker execution; live trading
+- **Current Milestone**: C1 and C2 independently verified and CLOSED; C3 authorized for implementation.
+- **Current Active Gate**: Batch C3 — Output Contract & Safe Observability Hardening Implementation.
+- **Next Authorized Activity**: Implement C3 only.
+- **Prohibited Next Activity**: model routing; trading execution; broker execution; backtesting; live trading
 
 ---
 
@@ -36,7 +36,7 @@
    - Canonical terminal invalidation, `sessionEpoch`/request-epoch protections, WebSocket first-frame authentication, and global legacy-storage cutover.
 
 ### B. Partially Implemented / Hardening
-- **External AI Provider Infrastructure**: **HARDENING**. C1 and C2 are independently verified and closed; C2 aggregate request runtime controls are verified; deterministic fixture/mock mode remains the default; C3 remains incomplete and is not authorized.
+- **External AI Provider Infrastructure**: **HARDENING**. C1 and C2 are independently verified and closed; C3 — Output Contract & Safe Observability Hardening is authorized for implementation. Deterministic fixture/mock mode remains the default. C3 is not implemented or verified.
 
 ### C. NOT Implemented (Do Not Claim or Assume)
 - **Real Backtesting Engine**: Strategy Lab displays historical evaluation snapshots only; a walk-forward backtest simulation engine is **NOT IMPLEMENTED**.
@@ -59,6 +59,7 @@
 - **C-P3-006**: **CLOSED**.
 - **Batch C1**: **CLOSED**.
 - **Batch C2**: **CLOSED**.
+- **Batch C3**: **AUTHORIZED FOR IMPLEMENTATION**.
 - **Batch C**: **OPEN**.
 - **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
 
