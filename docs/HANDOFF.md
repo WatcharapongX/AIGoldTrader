@@ -3,10 +3,11 @@
 ## Current Governance State
 
 - **Authoritative branch**: `main`.
-- **Authoritative implementation commit**: `d104409bae8149e850db0d5118000fdcd2d55b62`.
-- **Latest completed gate**: C1 Independent Security Verification.
-- **Reviewer**: GPT-5.6 Sol / High.
-- **Result**: **PASS**.
+- **Authoritative pre-C2 authorization HEAD**: `8bf3e2ffd5122bdeab17b32366317069476bf493`.
+- **Latest completed gate**: C1 Independent Security Verification — GPT-5.6 Sol / High — **PASS**.
+- **Batch C1 — External Boundary Closure**: **CLOSED**.
+- **Batch C2 — Aggregate Runtime Control**: **AUTHORIZED FOR IMPLEMENTATION**.
+- **Batch C**: **OPEN**.
 
 ## Closed C1 Scope
 
@@ -14,42 +15,36 @@
 - **C-ADR-005**: CLOSED — independently accepted.
 - **C-P3-003**: CLOSED.
 - **C-P3-006**: CLOSED.
-- **Batch C1 — External Boundary Closure**: CLOSED.
-- **Batch C**: OPEN.
 
-## Independently Verified C1 Controls
+## C2 Authorized Purpose and Scope
 
-- Provider/public errors are safely normalized and redact raw provider bodies and secrets.
-- Agent and Meta failures normalize without fabricated substitute analysis.
+- C2 creates bounded aggregate runtime control across the six analytical agents and Meta Controller.
+- Authorized controls: request-scoped budget, aggregate provider-call and token/byte budgets, aggregate deadline, concurrent reservation/reconciliation, retry integration, Meta exhaustion behavior, and deterministic tests.
+- **Recommended implementation runtime**: GPT-5.6 Sol / Medium.
+- **Required independent gate**: GPT-5.6 Sol / High.
+
+## C1 Verification Evidence to Preserve
+
+- Provider/public errors are normalized without raw provider body or secret disclosure.
+- Agent and Meta failures remain explicit degradation and do not fabricate substitute analysis.
 - External static configuration validates without startup network calls.
-- Runtime provider 401/403 failures remain AI-local degradation.
-- Six-agent payloads are role-minimized; Meta receives a minimized payload.
-- External HTTP redirects are explicitly refused; redirect destinations are never called.
-- Authorization is not forwarded and redirect locations are not disclosed.
-- Worker-local secrets, ProviderDescriptor, disposable workers, schemas, budgets, timeouts, retries, and concurrency protections remain preserved.
+- Runtime 401/403 provider failures remain AI-local degradation.
+- Six-agent and Meta payloads are role-minimized.
+- External HTTP redirects are refused; redirect destinations are never called.
+- Worker-local credential isolation, disposable workers, schema validation, per-call budgets, timeouts, retries, and concurrency protections remain preserved.
+- Independent C1 review passed public-error, malformed-response, configuration-matrix, startup-network, payload-minimization, redirect, secret-nondisclosure, and authority-preservation checks.
+- The worker-backed regression suite completed 202 tests without failures or errors; focused non-worker checks had 19 passes.
 
-## Verification Evidence
+## Preserved C1 and Capability State
 
-- Independent review passed provider/public-error, provider-body, malformed-response, configuration-matrix, zero-startup-network, payload-minimization, redirect, secret-nondisclosure, and authority-preservation checks.
-- Host worker-backed regression suite: 202 tests completed without failures or errors.
-- Independent focused non-worker checks: 19 passed.
-- Ruff and `git diff --check`: PASS.
-
-## Capability Status
-
-- `external_ai`: **HARDENING**.
-- C1 hardens the external trust boundary, but C2 and C3 remain incomplete; external AI is not yet fully hardened or production-ready.
-- Fixture provider remains the default.
-
-## Preserved Safety Boundaries
-
-- AI remains advisory-only.
-- Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
+- `external_ai`: **HARDENING**. C1 external trust-boundary closure is independently verified; fixture mode remains default; C2 and C3 are incomplete.
+- Preserve normalized public provider errors, payload minimization, worker-local credential isolation, redirect refusal, and secret non-disclosure.
+- AI remains advisory-only. Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
 - `TRADING_MODE=PAPER` and `LIVE_AUTO_TRADING=false` remain unchanged.
 - Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
 
-## Next Authorized Task
+## Explicit Boundaries
 
-- **C2 GOVERNANCE AUTHORIZATION ONLY**.
-- Do **NOT** implement C2 from this handoff.
-- C3 implementation and model routing remain unauthorized.
+- Do **NOT** start C3.
+- Do **NOT** implement model routing.
+- Do not implement trading execution, broker execution, paper execution, OMS, or live trading.

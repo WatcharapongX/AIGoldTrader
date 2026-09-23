@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch C1 External Boundary Closure independently verified and CLOSED.
-- **Current Active Gate**: C1 Security Closure Complete
-- **Next Authorized Activity**: C2 Governance Authorization ONLY.
-- **Prohibited Next Activity**: C2 implementation; C3; model routing; trading execution work; live trading
+- **Current Milestone**: Batch C1 External Boundary Closure independently verified and CLOSED; Batch C2 authorized.
+- **Current Active Gate**: Batch C2 — Aggregate Runtime Control Implementation
+- **Next Authorized Activity**: Implement C2 only.
+- **Prohibited Next Activity**: C3; model routing; trading execution; broker execution; live trading
 
 ---
 
@@ -58,6 +58,7 @@
 - **C-P3-003**: **CLOSED**.
 - **C-P3-006**: **CLOSED**.
 - **Batch C1**: **CLOSED**.
+- **Batch C2**: **AUTHORIZED FOR IMPLEMENTATION**.
 - **Batch C**: **OPEN**.
 - **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
 
