@@ -8,33 +8,22 @@
 
 **C2 — Aggregate Runtime Control: CLOSED** following independent verification.
 
+**C3 — Output Contract & Safe Observability Hardening: CLOSED** following independent verification.
+
 ## Current Status
-**Batch C3 — Output Contract & Safe Observability Hardening**
+**BATCH C — CLOSED**
 
-**Status: IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
+All defined C1–C3 external-AI runtime-safety hardening gates completed independent verification.
 
-## Next Permitted Task
-Perform C3 Independent Verification only (GPT-5.6 Sol / High).
+## Next Permitted Activity
+Separate governance authorization for the next roadmap batch only. No implementation is authorized by this document.
 
 ## Authorization Boundary
-Primary objective: bound model-controlled analytical outputs, harden Meta handling of model-generated summaries, add non-secret structured runtime telemetry, and close focused adversarial contract-test gaps.
-
-### Authorized Scope
-- Model-controlled field length bounds and collection cardinality bounds.
-- Schema validation and safe degradation behavior.
-- Compromised-summary / Meta trust-boundary tests and the minimum containment required by a verified finding.
-- Safe structured AI-runtime logging and telemetry redaction tests.
-- Focused C3 adversarial and regression tests.
-
-### Required Implementation and Verification
-- **Implementation runtime**: GPT-5.6 Sol / Medium.
-- **Required independent gate**: GPT-5.6 Sol / High.
-
 **Model routing IS NOT AUTHORIZED.**
 
 **Trading execution IS NOT AUTHORIZED.**
 
-Batch C remains **OPEN**. C3 implementation acceptance passed on the normal Windows host; independent verification is pending.
+**Backtesting implementation IS NOT AUTHORIZED by this closure.**
 
 ## Architecture and Safety Constraints
 - Preserve the FastAPI modular monolith, exactly six canonical analytical agents, Meta Controller, and ProviderDescriptor abstraction.
@@ -44,7 +33,7 @@ Batch C remains **OPEN**. C3 implementation acceptance passed on the normal Wind
 - Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
 
 ## Batch Boundary
-**Batch C remains open.** C1 and C2 are closed. C3 is implemented and requires an independent post-implementation gate before closure.
+**Batch C is CLOSED.** C1, C2, and C3 are independently verified and closed. This closure does not authorize a subsequent implementation phase.
 
 ## Strictly Out of Scope
 - Role-based model routing, new AI agents, Hermes, MCP, TradingView, or additional agent frameworks.

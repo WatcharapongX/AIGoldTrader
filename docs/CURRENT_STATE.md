@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: C1 and C2 independently verified and CLOSED; C3 implemented pending independent verification.
-- **Current Active Gate**: Batch C3 — Output Contract & Safe Observability Hardening Independent Verification.
-- **Next Authorized Activity**: C3 Independent Verification (GPT-5.6 Sol / High) only.
-- **Prohibited Next Activity**: model routing; trading execution; broker execution; backtesting; live trading
+- **Current Milestone**: Batch C — External AI Runtime Safety independently verified and CLOSED.
+- **Current Active Gate**: Batch C Governance Closure Complete.
+- **Next Authorized Activity**: Separate governance authorization for the next roadmap batch only.
+- **Prohibited Next Activity**: model routing implementation; trading execution; broker execution; paper execution; OMS; live trading
 
 ---
 
@@ -36,7 +36,7 @@
    - Canonical terminal invalidation, `sessionEpoch`/request-epoch protections, WebSocket first-frame authentication, and global legacy-storage cutover.
 
 ### B. Partially Implemented / Hardening
-- **External AI Provider Infrastructure**: **HARDENING**. C1 and C2 are independently verified and closed; C3 output contracts, Meta trust boundary, and safe telemetry are implemented and host regression passed. C3 awaits independent verification. Deterministic fixture/mock mode remains the default.
+- **External AI Provider Infrastructure**: **HARDENING**. C1, C2, and C3 are independently verified and closed; Batch C external-AI runtime-safety hardening is complete. Deterministic fixture/mock mode remains the default. This does not authorize model routing or trading execution.
 
 ### C. NOT Implemented (Do Not Claim or Assume)
 - **Real Backtesting Engine**: Strategy Lab displays historical evaluation snapshots only; a walk-forward backtest simulation engine is **NOT IMPLEMENTED**.
@@ -59,8 +59,8 @@
 - **C-P3-006**: **CLOSED**.
 - **Batch C1**: **CLOSED**.
 - **Batch C2**: **CLOSED**.
-- **Batch C3**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
-- **Batch C**: **OPEN**.
+- **Batch C3**: **CLOSED**.
+- **Batch C**: **CLOSED**.
 - **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
 
 ---

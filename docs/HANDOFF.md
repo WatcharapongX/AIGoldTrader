@@ -3,14 +3,14 @@
 ## Current Governance State
 
 - **Authoritative branch**: `main`.
-- **C3 implementation starting HEAD**: `959e0ee8a562046fd4fb8b5fd4c28b6e62dfc432`.
-- **Latest completed gate**: C2 Independent Verification — GPT-5.6 Sol / High — **PASS**.
+- **Authoritative C3 implementation**: `4ee8acdc13d75420e90195b0636f254f3eb10d22`.
+- **Latest completed gate**: C3 Independent Verification — GPT-5.6 Sol / High — **PASS**.
 - **Batch C1 — External Boundary Closure**: **CLOSED**.
 - **Batch C2 — Aggregate Runtime Control**: **CLOSED**.
-- **Batch C**: **OPEN**.
+- **Batch C3 — Output Contract & Safe Observability Hardening**: **CLOSED**.
+- **Batch C**: **CLOSED**.
 - **external_ai**: **HARDENING**.
-- **Batch C3 — Output Contract & Safe Observability Hardening**: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
-- **Latest implementation acceptance**: normal Windows host C3 and full relevant C1+C2+C3 regression passed; independent gate remains pending.
+- **Latest independent verification**: C3 focused and full relevant C1+C2+C3 host regression passed.
 - **Model routing**: **NOT AUTHORIZED**.
 - **Trading execution**: **NOT AUTHORIZED**.
 
@@ -66,7 +66,7 @@
 - Do not add observability infrastructure, a telemetry backend, Redis, Kafka, Celery, Kubernetes, or microservices.
 - Do not alter trading authority, Risk Engine decisions, Kill Switch state, TradePlan geometry, or execution boundaries.
 
-## C3 Implementation and Acceptance Evidence
+## C3 Independent Verification Evidence
 
 - Added strict Unicode character and collection limits to agent, Meta, and final analytical result contracts: summary 2048; text/evidence items 512; collections 12.
 - Moved all model-derived `agent_summaries` from Meta `trusted_context` to `untrusted_evidence`; retained server Risk, Kill Switch, symbol, clock, and agreement metadata in trusted context.
@@ -74,14 +74,13 @@
 - Added small allowlisted AI telemetry for agent completion/degradation and Meta completion/degradation/resource skip. Emission errors are isolated from results.
 - Added focused C3 tests for exact limits, Thai Unicode, forbidden authority fields, safe degradation, JSON delimiter injection, and log redaction; updated the C1 Meta payload expectation.
 - C3 focused suite on normal Windows host: **29 passed**, exit code 0.
-- Windows host spawn/Pipe preflight: **PASS** (`C3_SPAWN_OK spawn`, `C3_PIPE_OK`). The earlier Codex sandbox `WinError 5` was environment-specific.
-- Full relevant C1+C2+C3 host regression: **PASS**, exit code 0, no failures or errors. The authoritative output did not provide an exact combined count.
-- Local non-worker regression before host run: **134 passed, 32 deselected** (29 C3, 91 selected C1, 14 selected C2).
-- Ruff over changed/new Python files: **PASS**. `git diff --check`: **PASS**.
+- Full relevant C1+C2+C3 host regression: **250 tests executed**, **0 failed**, **0 errors**, exit code 0.
+- Windows host spawn/Pipe: **PASS**. The earlier Codex sandbox `WinError 5` was environment-specific.
+- Ruff: **PASS**. `git diff --check`: **PASS**.
 - C1 protections and C2 aggregate runtime controls remain intact; fixture mode remains default.
-- Implementation acceptance does not close C3; independent GPT-5.6 Sol / High verification is required.
+- Independent GPT-5.6 Sol / High verification passed; C3 and Batch C are closed.
 
 ## Next Authorized Activity
 
-- **C3 Independent Verification** with GPT-5.6 Sol / High only.
-- Do not implement model routing, backtesting, paper execution, OMS, broker execution, or live trading.
+- **Separate governance authorization for the next roadmap batch only.**
+- Do not implement or authorize model routing, backtesting, paper execution, OMS, broker execution, or live trading.
