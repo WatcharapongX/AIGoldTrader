@@ -1,41 +1,181 @@
 # Current Active Batch — AIGoldTrader
 
 ## Batch Identifier
-**Batch C — External AI Runtime Safety**
+**Batch D — Deterministic Backtesting Core**
 
-## Completed Sub-Batches
-**C1 — External Boundary Closure: CLOSED** following independent security verification.
+## Governance Decision
+**PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**C2 — Aggregate Runtime Control: CLOSED** following independent verification.
+**Current executable scope: D1 — Domain Contracts, Reproducibility, and Isolation Boundary.**
 
-**C3 — Output Contract & Safe Observability Hardening: CLOSED** following independent verification.
+D2–D7 are planned but are **NOT AUTHORIZED** until the preceding sub-batch is implemented,
+verified, documented, and separately advanced by governance. Do not automatically progress.
 
-## Current Status
-**BATCH C — CLOSED**
+## Current State
+- Batch B: **CLOSED**.
+- Batch C: **CLOSED**.
+- External AI: **HARDENING**; deterministic fixture mode remains the default.
+- Backtesting: **PLANNED / AUTHORIZED, NOT IMPLEMENTED**.
+- The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
+  Those snapshots are not a backtest engine and must not be described as one.
 
-All defined C1–C3 external-AI runtime-safety hardening gates completed independent verification.
+## Objective
+Create a deterministic, reproducible, single-symbol historical simulation engine for XAUUSD
+that reuses existing causal Market Data, Market Structure, STRAT01–STRAT06, TradePlan, and Risk
+policy semantics. The engine must produce auditable candidate, risk, simulated-trade, equity, and
+metric results without an external LLM and without any live trading side effect.
 
-## Next Permitted Activity
-Separate governance authorization for the next roadmap batch only. No implementation is authorized by this document.
+## Non-Negotiable Architecture
+```
+authoritative historical candles/news vintages
+  -> chronological closed-event replay clock
+  -> existing causal analysis/market structure
+  -> existing Strategy Engine and TradePlan geometry
+  -> side-effect-free shared Risk policy evaluation
+  -> isolated deterministic execution simulator
+  -> candidate/risk ledger + simulated trade ledger
+  -> equity curve + canonical metrics
+```
 
-## Authorization Boundary
-**Model routing IS NOT AUTHORIZED.**
+Do not create backtesting-only copies of STRAT01–STRAT06 or market-structure rules.
 
-**Trading execution IS NOT AUTHORIZED.**
+The existing live `RiskEngine.evaluate_candidate()` path is not safe to call from a backtest:
+it acquires account locks and reads/writes live Kill Switch, data-health, decision, and reservation
+state. Batch D must extract or introduce a side-effect-free shared risk-policy decision seam while
+preserving current live Risk behavior and tests. Historical adapters may supply only isolated
+simulation account, exposure, Kill Switch, quote/cost, and point-in-time news state.
 
-**Backtesting implementation IS NOT AUTHORIZED by this closure.**
+## No-Lookahead Authority Model
+- The replay clock `T` is an aware UTC timestamp advanced monotonically by closed market events.
+- At `T`, a candle is visible only when `open_time + timeframe_duration <= T`.
+- Higher-timeframe bars remain unavailable until their own close; partial bars cannot be treated as closed.
+- Swings, structure events, zones, sessions, and patterns are visible only when `confirmed_at <= T`.
+- Later invalidation or outcome state is visible only after its causal `ended_at`/event time.
+- News values and revisions are visible only when `available_at <= T`; later revisions are excluded.
+- Quotes/observations must have both market timestamp and observation availability at or before `T`.
+- Strategy context, candidate, TradePlan, risk decision, and simulated account snapshot use the same `T`.
+- A plan created from the close at `T` cannot fill from that candle's already-consumed range; the earliest
+  eligible trigger is the next chronological event after `T`.
+- Wall-clock time, future data, completed-run outcomes, and external AI are never inputs to core replay.
 
-## Architecture and Safety Constraints
-- Preserve the FastAPI modular monolith, exactly six canonical analytical agents, Meta Controller, and ProviderDescriptor abstraction.
-- Preserve worker-local credential resolution, disposable provider workers, fixture-provider default, and existing timeout, retry, and concurrency containment.
-- AI remains advisory-only. Kill Switch pre-flight and Risk Engine authority remain above Strategy Engine and AI Advisory.
+Prefix-invariance is the acceptance oracle: replaying a full dataset with cutoff `T` must produce the
+same state and decisions as replaying only the causal prefix available through `T`.
+
+## Historical Data and Quality Policy
+- Initial symbol scope is exactly `XAUUSD`; use only existing canonical timeframes M1–W1.
+- Validate requested period, actual usable period, warm-up period, source, and provenance before RUNNING.
+- Reject duplicate, reversed/non-monotonic, misbucketed, mixed-source/timeframe, invalid-OHLC, and stale data.
+- Classify scheduled market closures separately from unexpected gaps. Never manufacture missing prices.
+- Default policy is fail-closed on any required unexpected gap or insufficient strategy/news warm-up.
+- `COMPLETED_WITH_DATA_GAPS` is not authorized. A materially incomplete run is `FAILED` with coverage evidence.
+- STRAT05/STRAT06 require causal historical news vintages. If unavailable, the run fails coverage validation;
+  fixture news or later-revised values cannot be presented as historical truth.
+
+## Deterministic Execution Policy
+- Execution is historical simulation only: no broker API, MT5 `order_send`, Paper Engine, OMS, or live position.
+- Entry triggers only after plan creation, when an eligible future event touches the complete entry rule.
+- Apply configured spread and slippage adversely and deterministically; commission is explicit and deterministic.
+- Cost assumptions are scenario inputs and provenance, never mislabeled as observed market quotes.
+- Stops and targets use adjusted executable prices. Gaps through a stop fill at the worse available price.
+- Gaps through a target do not receive unobserved favorable price improvement beyond the configured rule.
+- If SL and TP are both reachable in one candle, use complete causal lower-timeframe data when available;
+  otherwise resolve SL first (worst-case), set an ambiguity flag, and include the trade in headline metrics.
+- Expiry and strategy invalidation cancel an unfilled plan at their causal event time.
+- An open trade at end of range is closed by an explicit `END_OF_RUN` rule at the last usable executable price.
+
+## Minimal Simulation State
+One isolated account context contains initial/current balance, equity, peak equity, realized/unrealized PnL,
+open and reserved risk, drawdown, consecutive losses, cooldown, and bounded active simulated positions.
+Existing account/symbol/directional/concurrent risk policy semantics remain authoritative. Simulation objects
+must use backtest-specific types and identifiers and must never write live account, reservation, candidate,
+Kill Switch, order, position, or exposure state.
+
+## Persistence Boundary
+PostgreSQL remains authoritative. The approved minimal future entities are:
+- `backtest_runs`: owner, lifecycle, canonical request/config JSON, fingerprints/versions, data coverage and
+  provenance, resource counters, timestamps, error/cancellation reason, and final metrics JSON.
+- `backtest_candidates`: candidate/TradePlan evidence and fingerprints, risk decision APPROVED/REDUCED/BLOCKED,
+  reasons, requested/approved risk, and whether entry was reached.
+- `backtest_trades`: immutable simulated lifecycle, prices, size/risk, exit reason, gross/cost/net PnL, R,
+  ambiguity/provenance, and result status.
+- `backtest_equity_points`: bounded UTC equity/drawdown points sufficient for UI charting.
+
+No event sourcing, analytics database, Vector DB, or reuse of live order/position/risk-reservation tables.
+
+## Canonical Metrics
+Total trades, wins, losses, breakeven, win/loss rates, gross profit/loss, net profit, profit factor,
+average win/loss, average R, expectancy, maximum drawdown and percentage, return percentage,
+consecutive wins/losses, long/short results, and strategy breakdown. Day/week/month/session/regime/
+strategy/direction dimensions must remain derivable from immutable trade evidence; avoid cosmetic metrics.
+
+## Resource Bounds
+Server validation must enforce all bounds. Initial hard ceilings for implementation are:
+- requested period: 366 days;
+- primary replay events: 250,000; total candle inputs across required frames: 1,000,000;
+- active runs: 1 per user and 2 system-wide; bounded pending queue: 8;
+- persisted candidates/trades: 100,000 each per run; equity points: 250,000 per run;
+- estimated persisted output: 128 MiB per run; list page size: 500.
+
+D1 must encode these as server-owned policy and document rejection semantics. Later reduction is allowed after
+profiling; increases require a governance review. Requests must never allocate unbounded memory or output.
+
+## Planned API Boundary (Not Yet Authorized for Implementation)
+- `POST /api/backtests`
+- `GET /api/backtests/{id}` (includes lifecycle and canonical metrics)
+- `GET /api/backtests/{id}/trades`
+- `GET /api/backtests/{id}/equity`
+- `POST /api/backtests/{id}/cancel`
+
+Use existing authentication, ownership, Pydantic validation, error envelopes, correlation IDs, and pagination.
+No Risk bypass control is exposed. Cancellation is cooperative and may transition only RUNNING/CREATED to
+CANCELLED; partial output can remain diagnostic but cannot be labeled authoritative COMPLETED.
+
+## Planned Minimal UI (Not Yet Authorized for Implementation)
+The existing route may later receive a configuration panel (date range, XAUUSD, timeframe, strategy, profile,
+initial balance, spread, slippage, commission), lifecycle/status, KPI summary, equity/drawdown chart, paginated
+trade list, and strategy/direction filters. Backend truth and provenance badges come first; no broader redesign.
+
+## Gated Sub-Batches
+1. **D1 — ACTIVE / AUTHORIZED**: immutable domain contracts; run configuration and lifecycle; canonical input,
+   version, and provenance fingerprints; data-coverage contract; server-owned resource policy; explicit
+   simulation/live isolation contracts; hand-calculable fixtures and contract/architecture tests. No runner,
+   migration, API, UI, background task, or simulated fill implementation.
+2. **D2 — PLANNED / NOT AUTHORIZED**: chronological replay and prefix-invariance; causal multi-timeframe/news
+   inputs; shared side-effect-free risk-policy seam. Requires independent Sol/High verification before D3.
+3. **D3 — PLANNED / NOT AUTHORIZED**: deterministic fills, costs, ambiguity, isolated portfolio lifecycle,
+   candidate/risk/trade in-memory ledgers.
+4. **D4 — PLANNED / NOT AUTHORIZED**: canonical metrics, equity/drawdown, and derivable period dimensions.
+5. **D5 — PLANNED / NOT AUTHORIZED**: additive PostgreSQL persistence, bounded in-process execution/cancellation,
+   authenticated API, ownership and output pagination. No Celery/Redis/Kafka.
+6. **D6 — PLANNED / NOT AUTHORIZED**: minimal Backtesting UI consuming authoritative D5 APIs.
+7. **D7 — PLANNED / NOT AUTHORIZED**: determinism, no-lookahead, security/resource, migration, API, browser,
+   and full regression independent closure gate.
+
+## Required Test Program
+- Same code/config/data/request produces byte-equivalent canonical results and fingerprints.
+- Prefix/full-input equality at every replay cutoff; future candle/swing/confirmation/news revision/evidence/
+  TradePlan/outcome mutations cannot change the prefix result.
+- Entry missed/reached, SL, TP, gaps, same-candle SL+TP, expiry, invalidation, blocked/reduced Risk decision,
+  missing data, end-of-run close, cancellation, restart/failure, and limit rejection.
+- Small hand-calculated fixtures for PnL, costs, R, rates, profit factor, expectancy, drawdown, and return.
+- Architecture tests prove zero imports/calls/writes to broker execution, live orders/positions/reservations,
+  production candidate lifecycle, global Kill Switch mutation, and external AI from Backtesting Core.
+- Preserve all Batch B authentication and Batch C external-AI regression gates.
+
+## Strictly Out of Scope / Not Authorized
+- Model routing or any new AI agent/framework; external LLM calls in core replay.
+- Walk-forward optimization, Monte Carlo, genetic optimization, parameter tuning, ML/AI strategy discovery.
+- Multi-symbol portfolio backtesting in Batch D.
+- Paper trading execution, real OMS, live position management, broker adapters, MT5 `order_send`, live trading.
+- Redis, Kafka, Celery, Kubernetes, microservices, Vector DB, GPU, or ML pipelines.
+
+## Safety Invariants
 - `TRADING_MODE=PAPER` remains enforced and `LIVE_AUTO_TRADING=false` remains enforced.
-- Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
+- Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
+- AI remains advisory-only and has zero execution authority.
+- Batch B and Batch C protections must not be weakened.
 
-## Batch Boundary
-**Batch C is CLOSED.** C1, C2, and C3 are independently verified and closed. This closure does not authorize a subsequent implementation phase.
-
-## Strictly Out of Scope
-- Role-based model routing, new AI agents, Hermes, MCP, TradingView, or additional agent frameworks.
-- Live trading, broker execution, OMS, position management, paper execution, or Backtesting Engine implementation.
-- Redis, Kafka, Celery, Kubernetes, microservices, Vector DB, or ML pipelines.
+## Required Gates
+- Future implementation runtime: GPT-5.6 Sol / Medium.
+- Sol / High is reserved for causal/Risk/concurrency ambiguity and is mandatory for independent verification.
+- Completion of D1 does not authorize D2. Do not begin the next sub-batch automatically.

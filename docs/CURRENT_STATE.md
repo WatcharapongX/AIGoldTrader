@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch C — External AI Runtime Safety independently verified and CLOSED.
-- **Current Active Gate**: Batch C Governance Closure Complete.
-- **Next Authorized Activity**: Separate governance authorization for the next roadmap batch only.
-- **Prohibited Next Activity**: model routing implementation; trading execution; broker execution; paper execution; OMS; live trading
+- **Current Milestone**: Batch D governance authorized as a split deterministic-backtesting program.
+- **Current Active Gate**: D1 — Domain Contracts, Reproducibility, and Isolation Boundary.
+- **Next Authorized Activity**: Implement D1 only within `docs/CURRENT_BATCH.md`.
+- **Prohibited Progression**: D2–D7 remain unapproved until the preceding gate is independently closed.
 
 ---
 
@@ -13,62 +13,67 @@
 - **Trading Mode**: `TRADING_MODE=PAPER` (enforced across all configurations)
 - **Live Automatic Trading**: `LIVE_AUTO_TRADING=false` (strictly disabled)
 - **Broker Execution**: `NONE` (`order_send` absent from codebase)
-- **Authority Hierarchy**:
-  $$\text{Kill Switch} > \text{Risk Engine} > \text{Strategy Engine} > \text{AI Advisory} > \text{Human Operator}$$
-- **AI Authority**: Advisory only. Suggestion-only trade plans. AI has zero order execution authority, cannot modify Risk Engine decisions, and cannot bypass Kill Switch.
+- **Authority Hierarchy**: Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator
+- **AI Authority**: Advisory only; zero order execution authority and no Risk/Kill Switch override.
 
 ---
 
-## 2. Capability Implementation Status
+## 2. Capability Status
 
-### A. Fully Implemented & Verified
-1. **Market Data Engine**: Real-time quotes, M1 through W1 candle stream aggregation, multi-provider abstraction, WebSocket streaming.
-2. **Market Structure Engine**: Swing High/Low, BOS, CHoCH, MSS, Internal Liquidity, Order Blocks, Fair Value Gaps (FVG).
-3. **SMC/ICT Confluence Engine**: Multi-timeframe structural bias, confluence scoring, target projection.
-4. **Strategy Engine**: Strategies STRAT01–STRAT06, 7 Trader Profiles, 8 canonical candidate states (`DETECTED` through `SUPERSEDED`), fail-closed risk binding.
-5. **Risk Engine**: Server-authoritative policy parser, gross directional exposure limits, portfolio risk reservation ledger, fail-closed Kill Switch.
-6. **AI Analysis Engine**: 6 canonical domain analytical agents (`market_context`, `smc_ict`, `macro_news`, `strategy_critic`, `risk_interpreter`, `trade_thesis`) and Meta Controller.
-7. **Frontend Command Center**: Next.js 16 (Turbopack) decoupled screens (`/dashboard`, `/trading`, `/analysis`, `/signals`, `/backtesting`, `/calendar`, `/scanner`, `/analytics`, `/journal`, `/settings`, `/risk`), strict data provenance badging, failure isolation.
-8. **Browser Authentication & Session Security (Batch B, independently verified)**:
-   - Atomic PostgreSQL refresh rotation and user-authority serialization of concurrent refresh/logout operations.
-   - Host-only, HttpOnly refresh cookie with strict Origin CSRF validation and terminal concurrent logout.
-   - Volatile memory-only access token, origin-wide Web Locks, and non-secret BroadcastChannel synchronization.
-   - Canonical terminal invalidation, `sessionEpoch`/request-epoch protections, WebSocket first-frame authentication, and global legacy-storage cutover.
+### Implemented and Verified
+1. Market Data: canonical UTC quotes/candles, M1–W1 aggregation, provider abstraction, persistence and streaming.
+2. Market Structure: causal closed-candle swing, BOS, CHoCH, MSS, liquidity, OB/FVG, regime and indicators.
+3. Strategy Engine: deterministic STRAT01–STRAT06, seven profiles, immutable causal contexts/candidates,
+   suggestion-only TradePlan geometry, eight canonical candidate states and point-in-time news handling.
+4. Risk Engine: server-authoritative policies, position sizing, gross exposure/reservation controls,
+   deterministic dependency fingerprints and fail-closed Kill Switch authority.
+5. AI Analysis: six canonical analytical agents and Meta Controller, advisory only.
+6. Frontend Command Center: decoupled screens including `/backtesting`.
+7. Batch B browser authentication/session security: independently verified and closed.
 
-### B. Partially Implemented / Hardening
-- **External AI Provider Infrastructure**: **HARDENING**. C1, C2, and C3 are independently verified and closed; Batch C external-AI runtime-safety hardening is complete. Deterministic fixture/mock mode remains the default. This does not authorize model routing or trading execution.
+### Hardening
+- External AI provider infrastructure: C1–C3 independently verified; Batch C closed; fixture mode default.
 
-### C. NOT Implemented (Do Not Claim or Assume)
-- **Real Backtesting Engine**: Strategy Lab displays historical evaluation snapshots only; a walk-forward backtest simulation engine is **NOT IMPLEMENTED**.
-- **Paper Trading Execution**: Simulation execution engine (spread/slippage/fill modeling) is **NOT IMPLEMENTED**.
-- **Order Management System (OMS)**: Order state machine, lifecycle, and idempotency ledger are **NOT IMPLEMENTED**.
-- **Position Management**: Live position tracking and P&L reconciliation are **NOT IMPLEMENTED**.
-- **Broker Integration**: MT5 demo/live order routing adapters are **NOT IMPLEMENTED**.
-- **Live Automatic Trading**: Prohibited and disabled.
+### Planned / Authorized, Not Implemented
+- **Deterministic Backtesting Core**: Batch D is authorized only as a split program. D1 is the sole active
+  implementation scope. No replay runner, execution simulator, persisted run, API, or results UI exists yet.
+- The current `/backtesting` page renders Strategy Lab historical evaluation snapshots. These are not trades,
+  fills, PnL, an equity curve, or a real backtest.
 
----
-
-## 3. Current Open Findings & Governance
-- **R0-P2-001** (Terminal Logout / Refresh Authority): **CLOSED**.
-- **AUD-P2-002** (Browser-Safe Refresh Token & Session Security): **CLOSED**.
-- **B3.2-NEW-P2-001** (Stale 401 Token Resurrection after Logout): **CLOSED**.
-- **Batch B**: **CLOSED**.
-- **C-P2-001**: **CLOSED**.
-- **C-ADR-005**: **CLOSED — independently accepted**.
-- **C-P3-003**: **CLOSED**.
-- **C-P3-006**: **CLOSED**.
-- **Batch C1**: **CLOSED**.
-- **Batch C2**: **CLOSED**.
-- **Batch C3**: **CLOSED**.
-- **Batch C**: **CLOSED**.
-- **R0-P3-001** (Lock-timeout API semantics): **OPEN — NON-BLOCKING P3**. Advisory-lock timeout fails closed; operational response mapping remains an improvement candidate.
+### Not Implemented / Not Authorized
+- Paper trading execution, OMS, live position management, broker order routing, and live automatic trading.
+- Model routing, walk-forward optimization, Monte Carlo, optimization/tuning, and AI strategy generation.
 
 ---
 
-## 4. Key Reference Documents
-- Operational Context Hierarchy: [`AGENTS.md`](file:///c:/AI%20Gold%20Trader/AGENTS.md)
-- Active Task Scope: [`docs/CURRENT_BATCH.md`](file:///c:/AI%20Gold%20Trader/docs/CURRENT_BATCH.md)
-- Machine-Readable Capabilities: [`docs/SYSTEM_CAPABILITIES.yaml`](file:///c:/AI%20Gold%20Trader/docs/SYSTEM_CAPABILITIES.yaml)
-- Document Directory & Reading Guide: [`docs/README.md`](file:///c:/AI%20Gold%20Trader/docs/README.md)
-- Detailed Remediation History: [`docs/REMEDIATION_STATUS.md`](file:///c:/AI%20Gold%20Trader/docs/REMEDIATION_STATUS.md)
-- Historical Freeze Baseline: [`docs/FEATURE_FREEZE.md`](file:///c:/AI%20Gold%20Trader/docs/FEATURE_FREEZE.md)
+## 3. Batch D Architecture Finding
+Existing causal Market Data, Analysis, Strategy, TradePlan, and Risk contracts are reusable. The current live
+Risk evaluation orchestration is not directly reusable by historical replay because it acquires database locks
+and interacts with live Kill Switch, data-health, decisions, and reservations. Batch D requires a shared,
+side-effect-free policy seam and isolated simulation state; no live table or authority state may be mutated.
+
+The approved staged data flow is:
+
+`historical data -> UTC replay -> structure -> strategy/TradePlan -> isolated Risk policy -> simulated execution -> ledgers -> metrics`
+
+---
+
+## 4. Current Governance
+- Batch B: **CLOSED**.
+- Batch C: **CLOSED**.
+- Batch D: **AUTHORIZED AS A SPLIT PROGRAM; D1 ACTIVE ONLY**.
+- Backtesting: **PLANNED / AUTHORIZED, NOT IMPLEMENTED**.
+- Model Routing: **NOT AUTHORIZED**.
+- Paper Trading: **NOT AUTHORIZED**.
+- Broker Execution: **NOT AUTHORIZED**.
+- Live Trading: **NOT AUTHORIZED**.
+- R0-P3-001 lock-timeout API semantics remains open, non-blocking P3, and outside D1.
+
+---
+
+## 5. Authoritative References
+- Working rules: `AGENTS.md`
+- Active scope and exact boundaries: `docs/CURRENT_BATCH.md`
+- Machine-readable registry: `docs/SYSTEM_CAPABILITIES.yaml`
+- Documentation index: `docs/README.md`
+- Rolling handoff: `docs/HANDOFF.md`

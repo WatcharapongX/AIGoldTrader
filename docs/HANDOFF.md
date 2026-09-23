@@ -1,86 +1,97 @@
 # Rolling Agent Handoff — AIGoldTrader
 
-## Current Governance State
+## Governance Result
+- Date: 2026-09-23.
+- Branch at review start: `main`.
+- Starting HEAD and origin/main: `e2099bb8d10409231c2a640b096cbbabba9d4ade`.
+- Starting worktree: clean.
+- Decision: **PLAN REQUIRES SPLIT**.
+- Batch D is authorized as a gated deterministic-backtesting program.
+- D1 is the only active implementation scope; D2–D7 are not authorized.
+- No backend, frontend, test, migration, runtime, or dependency file changed in governance.
 
-- **Authoritative branch**: `main`.
-- **Authoritative C3 implementation**: `4ee8acdc13d75420e90195b0636f254f3eb10d22`.
-- **Latest completed gate**: C3 Independent Verification — GPT-5.6 Sol / High — **PASS**.
-- **Batch C1 — External Boundary Closure**: **CLOSED**.
-- **Batch C2 — Aggregate Runtime Control**: **CLOSED**.
-- **Batch C3 — Output Contract & Safe Observability Hardening**: **CLOSED**.
-- **Batch C**: **CLOSED**.
-- **external_ai**: **HARDENING**.
-- **Latest independent verification**: C3 focused and full relevant C1+C2+C3 host regression passed.
-- **Model routing**: **NOT AUTHORIZED**.
-- **Trading execution**: **NOT AUTHORIZED**.
+## Current State
+- Batch B is closed.
+- Batch C is closed; external AI remains HARDENING with fixture mode default.
+- Backtesting remains not implemented.
+- `/backtesting` currently renders Strategy Lab evaluation snapshots only.
+- There is no historical fill engine, simulated trade ledger, equity curve, metrics engine, BacktestRun API,
+  persistence, cancellation, or backtest-results UI.
+- Paper trading, OMS, position management, broker routing, live trading, and model routing remain unauthorized.
 
-## C2 Verified Runtime Controls
+## Reusable Architecture
+- Market Candle is a strict UTC-aware Decimal contract with OHLC, canonical bucket, source, and closed state.
+- Market persistence can query bounded source/symbol/timeframe ranges in ascending order.
+- AnalysisEngine is deterministic, closed-candle-only, rejects duplicate/reversed input, and timestamps
+  swing/structure/zone availability with `confirmed_at`.
+- Strategy `build_context()` filters each timeframe to bars closed by an aware UTC cutoff.
+- Existing tests prove future-candle prefix invariance and candle-by-candle strategy equality.
+- Strategy contexts/candidates and TradePlans are immutable, versioned, fingerprinted, and evidence-bearing.
+- STRAT01–STRAT06 and seven profiles must be reused unchanged.
+- Risk policies, sizing, dependency fingerprints, account/directional limits, and APPROVED/REDUCED/BLOCKED
+  semantics are reusable domain rules.
 
-- One request-scoped aggregate budget is created only after Kill Switch, Risk, reservation, stale, no-lookahead, and TradePlan authority gates pass.
-- Aggregate ceilings cover provider attempts, prompt/completion/total tokens, measurable bytes, and an absolute monotonic deadline.
-- Canonical base reservations and retry allocation are deterministic; retry use cannot starve later base calls.
-- Actual worker retries count against the aggregate budget; unknown failed-attempt usage remains conservatively charged.
-- Successful `ProviderResult` usage is reconciled truthfully, with safe terminal reservation finalization and no negative counters, oversubscription, or double refund.
-- Queue wait is included in the aggregate deadline; remaining time is recomputed after admission and caps worker execution.
-- Funded agents remain concurrent; cancellation and worker cleanup are safe, with no orphan worker reproduced in focused evidence.
-- Meta receives a fresh reservation after agent reconciliation and safely skips rather than fabricating synthesis or becoming `READY` when aggregate resources are insufficient.
+## Critical Risk Boundary
+- Do not call the existing live `RiskEngine.evaluate_candidate()` directly from Backtesting Core.
+- That orchestration acquires PostgreSQL advisory locks and reads/writes live Kill Switch, data health,
+  decisions, and reservations.
+- D2 must introduce/extract a side-effect-free shared risk-policy seam while preserving the live path.
+- Historical evaluation uses only isolated simulation account/exposure/Kill Switch/news/quote-cost state.
+- Architecture tests must prove no writes to live account, reservation, candidate, Kill Switch, order,
+  position, or broker state and no external-AI dependency.
 
-## C2 Verification Evidence
+## Causal Replay Decision
+- Replay time is a monotonic aware UTC `T` advanced by closed events.
+- A bar is visible only after its timeframe close; higher-timeframe partial bars remain invisible.
+- Every structural object, news revision, candidate, plan, and decision must be available by `T`.
+- A plan created at candle close cannot fill from that already-consumed candle.
+- Full-input-with-cutoff and causal-prefix replay must be identical at each `T`.
+- Unexpected gaps, missing warm-up/news vintages, duplicates, reversed times, invalid OHLC, mixed sources,
+  and timeframe mismatch fail closed. Prices are never manufactured.
 
-- C2 focused suite: **19 passed**.
-- Combined C1+C2 suite: **221 passed**.
-- Ruff: **PASS**.
-- `git diff --check`: **PASS**.
-- The earlier Codex sandbox `WinError 5` was an execution-environment restriction only; normal Windows host worker verification passed.
+## Execution Decision
+- Execution is an isolated historical simulator, not Paper Engine, OMS, or broker execution.
+- Spread, slippage, and commission are explicit server-validated deterministic assumptions.
+- Same-candle SL+TP uses complete causal lower-timeframe order when available; otherwise SL-first worst-case.
+- Gap-through-stop uses the worse available fill; favorable target improvement is not assumed.
+- Ambiguity is recorded and remains in headline performance.
+- End-of-run open positions close explicitly at the last usable executable price.
 
-## C1 Protections Preserved
+## Persistence Decision
+- Future minimal tables: backtest_runs, backtest_candidates, backtest_trades, backtest_equity_points.
+- Run stores canonical config, versions/fingerprints, coverage/provenance, lifecycle, limits, and metrics JSON.
+- Candidate ledger stores plan and risk evidence, including blocked/reduced reasons.
+- Trade ledger is immutable simulated evidence; equity points are bounded chart data.
+- Do not reuse live execution/risk-reservation tables or add event sourcing/analytics infrastructure.
 
-- **C-P2-001**: **CLOSED** — public provider failures remain normalized and secret-safe.
-- **C-ADR-005**: **CLOSED** — external static configuration validates without startup provider network calls.
-- **C-P3-003**: **CLOSED** — provider payloads remain role-minimized.
-- **C-P3-006**: **CLOSED** — external redirects remain refused.
-- ProviderDescriptor isolation, worker-local credential resolution, per-call limits, fixture default, and global provider concurrency remain intact.
+## Resource Decision
+- Maximum requested period: 366 days.
+- Maximum primary events: 250,000; maximum total candle inputs: 1,000,000.
+- Active runs: 1 per user, 2 system-wide; pending queue: 8.
+- Candidate/trade rows: 100,000 each; equity points: 250,000; estimated output: 128 MiB/run.
+- Page size maximum: 500. Increases require governance review.
 
-## Trading Safety Preserved
+## Active D1 Scope
+- Define immutable run/config/lifecycle/result/provenance/coverage contracts.
+- Define engine/config/data fingerprints and version fields.
+- Encode server-owned resource ceilings and fail-closed validation/error semantics.
+- Define simulation/live isolation interfaces and import/write architecture tests.
+- Add small hand-calculable fixtures and contract tests only.
+- D1 must not add a replay runner, fill simulator, migration, API, UI, background task, or external AI call.
 
-- `TRADING_MODE=PAPER` remains unchanged.
-- `LIVE_AUTO_TRADING=false` remains unchanged.
-- AI remains advisory-only with zero execution authority.
-- Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
-- Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
+## Planned Gates
+- D2: replay, no-lookahead, causal news, and pure Risk seam; not authorized.
+- D3: fills, costs, ambiguity, portfolio/trade ledgers; not authorized.
+- D4: metrics/equity/period dimensions; not authorized.
+- D5: PostgreSQL, bounded in-process jobs/cancellation, authenticated API; not authorized.
+- D6: minimal Backtesting UI; not authorized.
+- D7: full deterministic/security/regression independent closure; not authorized.
+- Each transition requires explicit governance; never auto-progress.
 
-## C3 Implemented Scope
-
-- Bound model-controlled AI output strings and collection cardinality.
-- Preserve strict schema validation with AI-local safe degradation.
-- Model-generated agent summaries remain inert data under Meta `untrusted_evidence`, separate from server-owned authority context.
-- Add bounded, non-secret structured AI-runtime telemetry using existing logging only.
-- Add focused telemetry-redaction, adversarial, and output-contract regression tests.
-
-## C3 Implementation Constraints
-
-- Required implementation runtime: **GPT-5.6 Sol / Medium**.
-- Required independent post-implementation gate: **GPT-5.6 Sol / High**.
-- Preserve C1 provider-boundary protections and C2 aggregate resource controls.
-- Preserve exactly six canonical agents plus the Meta Controller; no routing, new agents, providers, or frameworks.
-- Do not add observability infrastructure, a telemetry backend, Redis, Kafka, Celery, Kubernetes, or microservices.
-- Do not alter trading authority, Risk Engine decisions, Kill Switch state, TradePlan geometry, or execution boundaries.
-
-## C3 Independent Verification Evidence
-
-- Added strict Unicode character and collection limits to agent, Meta, and final analytical result contracts: summary 2048; text/evidence items 512; collections 12.
-- Moved all model-derived `agent_summaries` from Meta `trusted_context` to `untrusted_evidence`; retained server Risk, Kill Switch, symbol, clock, and agreement metadata in trusted context.
-- Tightened the Meta system prompt to treat agent summaries as inert data and ignore embedded commands.
-- Added small allowlisted AI telemetry for agent completion/degradation and Meta completion/degradation/resource skip. Emission errors are isolated from results.
-- Added focused C3 tests for exact limits, Thai Unicode, forbidden authority fields, safe degradation, JSON delimiter injection, and log redaction; updated the C1 Meta payload expectation.
-- C3 focused suite on normal Windows host: **29 passed**, exit code 0.
-- Full relevant C1+C2+C3 host regression: **250 tests executed**, **0 failed**, **0 errors**, exit code 0.
-- Windows host spawn/Pipe: **PASS**. The earlier Codex sandbox `WinError 5` was environment-specific.
-- Ruff: **PASS**. `git diff --check`: **PASS**.
-- C1 protections and C2 aggregate runtime controls remain intact; fixture mode remains default.
-- Independent GPT-5.6 Sol / High verification passed; C3 and Batch C are closed.
-
-## Next Authorized Activity
-
-- **Separate governance authorization for the next roadmap batch only.**
-- Do not implement or authorize model routing, backtesting, paper execution, OMS, broker execution, or live trading.
+## Safety and Verification
+- Preserve `TRADING_MODE=PAPER` and `LIVE_AUTO_TRADING=false`.
+- Preserve Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
+- No Redis, Kafka, Celery, Kubernetes, microservices, Vector DB, GPU, or ML pipeline.
+- Future implementation runtime: GPT-5.6 Sol / Medium.
+- Mandatory independent verification runtime: GPT-5.6 Sol / High.
+- The next authorized task is D1 implementation only.

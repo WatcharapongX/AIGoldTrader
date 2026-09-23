@@ -1,10 +1,15 @@
 # Machine-Readable Capability Registry — AIGoldTrader
-# Authoritative baseline for AI coding agents and automated inspection.
-
 version: "1.0"
 last_verified: "2026-09-23"
 repository: "WatcharapongX/AIGoldTrader"
 branch: "main"
+
+governance:
+  current_batch: "D"
+  decision: plan_requires_split
+  active_sub_batch: "D1"
+  active_scope: "domain contracts, reproducibility, data coverage, resource policy, and simulation/live isolation"
+  later_sub_batches_authorized: false
 
 trading_safety:
   trading_mode: PAPER
@@ -20,54 +25,44 @@ trading_safety:
 capabilities:
   market_data:
     status: implemented
-    details: "Real-time quotes, M1-W1 candle aggregation, multi-provider abstraction"
-
+    details: "Canonical UTC quotes/candles, M1-W1 aggregation, provider abstraction and persistence"
   market_structure:
     status: implemented
-    details: "Swing points, BOS, CHoCH, MSS, order blocks, FVGs"
-
+    details: "Causal closed-candle swings, BOS, CHoCH, MSS, liquidity, order blocks and FVGs"
   smc_ict:
     status: implemented
-    details: "Confluence scoring, liquidity analysis, multi-timeframe bias"
-
+    details: "Confluence scoring, liquidity analysis and multi-timeframe bias"
   strategy_engine:
     status: implemented
-    details: "STRAT01-STRAT06, 7 trader profiles, 8 canonical candidate states"
-
+    details: "Deterministic STRAT01-STRAT06, 7 profiles, causal immutable contexts and TradePlan suggestions"
   risk_engine:
     status: implemented
-    details: "Portfolio risk reservations, gross exposure checks, fail-closed kill switch"
-
+    details: "Authoritative policy, sizing, exposure/reservations, fingerprints and fail-closed Kill Switch"
   ai_agents:
     status: implemented
     analytical_agents: 6
     meta_controller: true
     authority: advisory_only
-
   external_ai:
     status: hardening
-    details: "C1 provider-boundary protection, C2 aggregate runtime protection, and C3 bounded output contracts, Meta trust boundary, and safe telemetry are independently verified and closed; Batch C External AI Runtime Safety is closed; fixture mode remains default; model routing and trading execution are not authorized"
-
+    details: "Batch C C1-C3 independently closed; fixture default; model routing not authorized"
   browser_auth:
     status: implemented_verified
-    details: "Independently verified Batch B closure: HttpOnly refresh cookie, memory-only access token, Web Locks/sessionEpoch protections, and PostgreSQL refresh/logout authority serialization"
-
+    details: "Batch B independently closed"
   backtesting:
-    status: not_implemented
-    details: "Strategy Lab provides evaluation snapshots only; walk-forward backtest engine is absent"
-
+    status: planned_authorized_not_implemented
+    governance: split_program_d1_only
+    symbol_scope: [XAUUSD]
+    deterministic_core_requires_external_ai: false
+    details: "Strategy Lab snapshots are not backtesting; D1 contracts/isolation is the only active implementation scope"
   paper_trading:
-    status: not_implemented
-    details: "Simulation execution engine absent; TRADING_MODE=PAPER is safety simulation flag only"
-
+    status: not_implemented_not_authorized
   oms_execution:
-    status: not_implemented
-    details: "Order management system not implemented"
-
+    status: not_implemented_not_authorized
   position_management:
-    status: not_implemented
-    details: "Live position tracking and reconciliation not implemented"
-
+    status: not_implemented_not_authorized
   broker_execution:
-    status: not_implemented
-    details: "Broker adapters and MT5 order routing absent; order_send absent"
+    status: not_implemented_not_authorized
+    details: "Broker order routing and order_send remain absent"
+  model_routing:
+    status: not_authorized
