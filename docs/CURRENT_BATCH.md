@@ -6,9 +6,10 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D1 — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.**
+**Current gate: D1 — CLOSED.**
 
-**Current executable scope: D1 independent re-verification only.**
+**Current permitted activity: D2 Governance Authorization only.** This permits planning and authorization
+review only; it does **not** authorize D2 implementation.
 
 D2–D7 are planned but are **NOT AUTHORIZED** until the preceding sub-batch is implemented,
 verified, documented, and separately advanced by governance. Do not automatically progress.
@@ -17,7 +18,7 @@ verified, documented, and separately advanced by governance. Do not automaticall
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
 - External AI: **HARDENING**; deterministic fixture mode remains the default.
-- Backtesting: **FOUNDATION CONTRACTS IMPLEMENTED; ENGINE NOT IMPLEMENTED**.
+- Backtesting: **FOUNDATION CONTRACTS IMPLEMENTED AND VERIFIED; ENGINE NOT IMPLEMENTED**.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
 
@@ -138,11 +139,10 @@ initial balance, spread, slippage, commission), lifecycle/status, KPI summary, e
 trade list, and strategy/direction filters. Backend truth and provenance badges come first; no broader redesign.
 
 ## Gated Sub-Batches
-1. **D1 — REMEDIATED / PENDING INDEPENDENT RE-VERIFICATION**: immutable domain contracts; run configuration and
-   lifecycle; canonical input,
-   version, and provenance fingerprints; data-coverage contract; server-owned resource policy; explicit
-   simulation/live isolation contracts; hand-calculable fixtures and contract/architecture tests. No runner,
-   migration, API, UI, background task, or simulated fill implementation.
+1. **D1 — CLOSED**: foundational immutable domain contracts, reproducibility controls,
+   coverage/provenance authority, resource policy, lifecycle semantics, and the simulation/live isolation
+   boundary passed independent verification. No runner, migration, API, UI, background task, or simulated
+   fill implementation exists.
 2. **D2 — PLANNED / NOT AUTHORIZED**: chronological replay and prefix-invariance; causal multi-timeframe/news
    inputs; shared side-effect-free risk-policy seam. Requires independent Sol/High verification before D3.
 3. **D3 — PLANNED / NOT AUTHORIZED**: deterministic fills, costs, ambiguity, isolated portfolio lifecycle,
@@ -179,7 +179,7 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 - Batch B and Batch C protections must not be weakened.
 
 ## Required Gates
-- D1-IV-001 through D1-IV-006 are **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- Next authorized task: D1 independent re-verification only.
-- Required verification runtime: GPT-5.6 Sol / High.
-- D2–D7 remain not authorized. Do not begin the next sub-batch automatically.
+- D1 is **CLOSED** following independent GPT-5.6 Sol / High re-verification.
+- D1-IV-001 through D1-IV-006 are **CLOSED**.
+- Next permitted activity: D2 Governance Authorization only; D2 implementation is **NOT AUTHORIZED**.
+- D3–D7 remain not authorized. Do not begin the next sub-batch automatically.

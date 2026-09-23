@@ -7,10 +7,11 @@ branch: "main"
 governance:
   current_batch: "D"
   decision: plan_requires_split
-  active_sub_batch: "D1"
-  active_sub_batch_status: remediated_pending_independent_reverification
-  active_scope: "D1 independent re-verification only"
-  next_authorized_activity: "D1 independent re-verification using GPT-5.6 Sol / High"
+  completed_sub_batches:
+    - "D1"
+  active_sub_batch: null
+  active_scope: "D2 governance authorization only"
+  next_authorized_activity: "D2 governance authorization only; implementation not authorized"
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -52,11 +53,11 @@ capabilities:
     status: implemented_verified
     details: "Batch B independently closed"
   backtesting:
-    status: foundation_contracts_implemented_engine_not_implemented
-    governance: split_program_d1_only
+    status: foundation_verified_engine_not_implemented
+    governance: split_program_d1_closed
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 contracts and isolation are implemented; D1-IV-001 through D1-IV-006 are remediated pending independent re-verification; no replay, fills, PnL, persistence, API, or results UI"
+    details: "D1 contracts and isolation are independently verified and closed; no replay, fill simulation, PnL, persistence, API, or results UI; D2 implementation is not authorized"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:

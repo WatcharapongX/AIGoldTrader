@@ -3,57 +3,55 @@
 ## Session Result
 - Date: 2026-09-23.
 - Branch: `main`.
-- Starting HEAD and origin/main: `40bdb65c69d6513a25dd0d4df1c5e3e298387b65`.
-- Starting worktree: clean.
-- Runtime selected by operator: GPT-5.6 Sol / Medium.
-- Batch D remains open.
-- D1 is remediated and pending independent re-verification.
-- D2–D7 remain not authorized.
+- D1 original implementation SHA: `40bdb65c69d6513a25dd0d4df1c5e3e298387b65`.
+- D1 remediation SHA: `d0b2d8a2c462ecc0e54bfb08fe3b8328c13c0ac3`.
+- Independent reviewer: GPT-5.6 Sol / High.
+- Gate: D1 Independent Re-Verification.
+- Result: **PASS**.
+- Final state: D1 = **CLOSED**; Batch D = **OPEN**.
+- D2-D7 remain **NOT AUTHORIZED**.
 
-## Targeted Remediation
-- D1-IV-001: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-  STRAT05/STRAT06 executable manifests require news vintages to be both required and available,
-  with complete source/range/verification metadata covering the full requested period.
-- D1-IV-002: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-  Executable manifests require configuration timeframe to equal the explicit coverage primary timeframe.
-- D1-IV-003: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-  CREATED, RUNNING, COMPLETED, FAILED, and CANCELLED metadata now follows the authoritative lifecycle matrix;
-  pre-start failure/cancellation remains valid and cancellation codes cannot be FAILED reasons.
-- D1-IV-004: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-  D1 contract, fingerprint, and replay-placeholder versions are fixed server-owned Literal values;
-  strategy and risk-policy versions remain external semantic provenance inputs.
-- D1-IV-005: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-  Required timeframes, timeframe coverage, gaps, and provenance timeframes normalize to stable semantic order.
-  Generic canonical JSON still preserves sequence order.
-- D1-IV-006: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-  Active-user, active-system, and pending counts are documented as existing pre-admission counts and reject
-  at their ceilings; per-run usage accepts the exact maximum and rejects only above it.
+## Finding Closure
+- D1-IV-001: **CLOSED**.
+- D1-IV-002: **CLOSED**.
+- D1-IV-003: **CLOSED**.
+- D1-IV-004: **CLOSED**.
+- D1-IV-005: **CLOSED**.
+- D1-IV-006: **CLOSED**.
+- No remaining D1 P0, P1, P2, or P3 finding exists.
 
-## Verification Evidence
-- D1 focused tests: 76 passed, 0 failed/errors.
-- D1 focused plus architecture tests: 80 passed, 0 failed/errors.
-- Market Data regression: 33 passed, 0 failed/errors.
-- Strategy regression: 68 passed, 0 failed/errors.
-- Risk sizing regression: 9 passed, 0 failed/errors.
-- Risk Engine regression: 7 passed, 0 failed/errors.
-- Existing-domain regression total: 117 passed, 0 failed/errors.
-- Ruff on all changed D1 Python/test files: passed.
-- `git diff --check`: passed; line-ending notices were informational only.
-- Existing dependency deprecation warnings were informational and unchanged.
+## Verified D1 Foundation
+- Immutable configuration and lifecycle contracts are independently verified.
+- Reproducibility controls, canonical fingerprints, and provenance authority are independently verified.
+- Typed fail-closed coverage and causal historical-news requirements are independently verified.
+- Server-owned resource ceilings and deterministic admission semantics are independently verified.
+- Simulation/live isolation is independently verified: no live Risk Engine, database, AI, broker, or MT5 execution dependency.
+- The foundation is not a backtesting engine: no replay runner, fill simulation, PnL/metrics engine,
+  persistence, API, results UI, or cancellation worker exists.
+- Strategy Lab historical evaluation snapshots are not a real backtesting engine.
+
+## Independent Evidence
+- D1 focused plus architecture tests: 80 passed; 0 failures/errors.
+- Existing-domain regression total: 117 passed; 0 failures/errors.
+- Market Data: 33 passed.
+- Strategy: 68 passed.
+- Risk sizing: 9 passed.
+- Risk Engine: 7 passed.
+- Ruff: PASS.
+- `git diff --check`: PASS.
+- Only pre-existing dependency deprecation warnings were observed.
 
 ## Scope and Safety
-- Changed production code only in D1 domain and resource-policy contracts.
-- No Market Data, Strategy, Risk, AI, database, API, frontend, or broker implementation changed.
-- No replay runner, ReplayClock, Risk seam, fills, trade ledger, portfolio simulation, PnL, metrics,
-  equity, persistence, migration, background job, Paper Trading, OMS, or live trading was added.
-- The replay version remains `replay-engine-not-implemented-d1`.
-- `TRADING_MODE=PAPER`, `LIVE_AUTO_TRADING=false`, and authority hierarchy remain unchanged.
-- Backtesting remains foundation contracts only; the engine is not implemented.
+- This was a governance-documentation closure only.
+- `TRADING_MODE=PAPER` remains enforced.
+- `LIVE_AUTO_TRADING=false` remains enforced.
+- Broker execution remains NONE; no Paper Trading Engine, OMS, or live position management exists.
+- Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
+- AI remains advisory-only with zero execution authority.
 
-## Next Authorized Activity
-- D1 independent re-verification only.
-- Required runtime: GPT-5.6 Sol / High.
-- Do not close D1 from this remediation session.
-- Do not authorize or implement D2–D7.
+## Next Permitted Activity
+- D2 Governance Authorization only.
+- This permits planning and authorization review only; D2 implementation is **NOT AUTHORIZED**.
+- Do not authorize or implement D2-D7.
 - Do not implement replay, Risk seam, fills, metrics, persistence/API/UI, Model Routing,
   Paper Trading, OMS, broker execution, or live trading.

@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch D is open as a split deterministic-backtesting program.
-- **Current Active Gate**: D1 — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.
-- **Next Authorized Activity**: D1 independent re-verification only using GPT-5.6 Sol / High.
-- **Prohibited Progression**: D2–D7 remain unapproved until the preceding gate is independently closed.
+- **Current Milestone**: Batch D remains open; D1 independently verified and CLOSED.
+- **Current Active Gate**: D1 Governance Closure Complete.
+- **Next Permitted Activity**: D2 Governance Authorization only.
+- **Prohibited Progression**: D2 implementation is NOT AUTHORIZED; D3–D7 remain unapproved.
 
 ---
 
@@ -34,11 +34,11 @@
 ### Hardening
 - External AI provider infrastructure: C1–C3 independently verified; Batch C closed; fixture mode default.
 
-### Foundation Remediated — Pending Independent Re-Verification
+### Foundation Implemented and Verified
 - **Deterministic Backtesting D1**: immutable configuration/lifecycle, coverage/provenance, resource-policy,
-  canonical fingerprint, and simulation/live isolation contracts are implemented. D1-IV-001 through
-  D1-IV-006 are remediated pending independent re-verification. The backtesting engine is not implemented.
-  No replay runner, execution simulator, persisted run, API, or results UI exists yet.
+  canonical fingerprint, and simulation/live isolation contracts are implemented and independently verified.
+  D1-IV-001 through D1-IV-006 are closed. The Backtesting Engine is not implemented: no replay runner,
+  fill simulation, PnL/metrics engine, persistence, API, or results UI exists.
 - The current `/backtesting` page renders Strategy Lab historical evaluation snapshots. These are not trades,
   fills, PnL, an equity curve, or a real backtest.
 
@@ -63,9 +63,10 @@ The approved staged data flow is:
 ## 4. Current Governance
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
-- Batch D: **OPEN; D1 REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- Batch D: **OPEN; D1 CLOSED**.
+- D1: **CLOSED**.
 - D2–D7: **NOT AUTHORIZED**.
-- Backtesting: **FOUNDATION CONTRACTS IMPLEMENTED; ENGINE NOT IMPLEMENTED**.
+- Backtesting: **FOUNDATION CONTRACTS IMPLEMENTED AND VERIFIED; ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
 - Paper Trading: **NOT AUTHORIZED**.
 - Broker Execution: **NOT AUTHORIZED**.
