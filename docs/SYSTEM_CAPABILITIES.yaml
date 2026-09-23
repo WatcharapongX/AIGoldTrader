@@ -46,7 +46,7 @@ capabilities:
 
   external_ai:
     status: hardening
-    details: "C1 independently verified and closed; C2 request-scoped aggregate attempt, token, byte, retry, and monotonic-deadline control implemented pending independent verification; fixture mode remains default; C3 not authorized"
+    details: "C1 and C2 independently verified and closed; C2 request-scoped aggregate attempt, token, byte, retry, and monotonic-deadline controls verified; fixture mode remains default; C3 remains incomplete and not authorized"
 
   browser_auth:
     status: implemented_verified

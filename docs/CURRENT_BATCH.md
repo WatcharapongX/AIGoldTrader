@@ -3,35 +3,23 @@
 ## Batch Identifier
 **Batch C — External AI Runtime Safety**
 
-## Completed Sub-Batch
+## Completed Sub-Batches
 **C1 — External Boundary Closure: CLOSED** following independent security verification.
 
+**C2 — Aggregate Runtime Control: CLOSED** following independent verification.
+
 ## Current Status
-**Batch C2 — Aggregate Runtime Control: IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
+**AWAITING C3 GOVERNANCE AUTHORIZATION**
 
-## Primary Objective
-Independently verify the implemented bounded request-scoped aggregate runtime control for the six-agent + Meta analysis lifecycle.
-
-## Authorized Scope
-- Request-scoped `AnalysisBudget` or equivalent.
-- Aggregate provider-call budget.
-- Aggregate token/byte accounting.
-- Aggregate deadline.
-- Concurrent reservation and reconciliation.
-- Retry integration.
-- Meta budget/exhaustion behavior.
-- Deterministic C2 tests.
-
-## Implementation Runtime and Required Gate
-- **Implementation runtime**: GPT-5.6 Sol / Medium — complete.
-- **Next authorized activity**: C2 Independent Verification — GPT-5.6 Sol / High.
+## Next Permitted Task
+Governance authorization for C3 only.
 
 ## Authorization Boundary
-**C3 IS NOT AUTHORIZED.**
+**C3 IMPLEMENTATION IS NOT AUTHORIZED.**
 
 **Model routing IS NOT AUTHORIZED.**
 
-C2 is not independently accepted or closed. Verification is authorized only within the scope above.
+Batch C remains **OPEN**. C3 is the next separately gated hardening stage; this closure does not authorize its implementation.
 
 ## Architecture and Safety Constraints
 - Preserve the FastAPI modular monolith, exactly six canonical analytical agents, Meta Controller, and ProviderDescriptor abstraction.
@@ -41,7 +29,7 @@ C2 is not independently accepted or closed. Verification is authorized only with
 - Broker execution, OMS, position management, paper execution, and the Backtesting Engine remain absent.
 
 ## Batch Boundary
-**Batch C remains open.** C1 is closed; C2 Aggregate Runtime Control awaits independent verification.
+**Batch C remains open.** C1 and C2 are closed. C3 implementation remains unauthorized pending a separate governance authorization.
 
 ## Strictly Out of Scope
 - C3 observability or contract-hardening implementation.
