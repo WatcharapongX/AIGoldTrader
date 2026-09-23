@@ -9,9 +9,9 @@ governance:
   decision: plan_requires_split
   completed_sub_batches:
     - "D1"
-  active_sub_batch: null
-  active_scope: "D2 governance authorization only"
-  next_authorized_activity: "D2 governance authorization only; implementation not authorized"
+  active_sub_batch: "D2A"
+  active_scope: "Causal replay foundation through existing Analysis, Strategy, and suggestion-only TradePlan output; no Risk evaluation or fills"
+  next_authorized_activity: "Implement and verify D2A only"
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -54,10 +54,10 @@ capabilities:
     details: "Batch B independently closed"
   backtesting:
     status: foundation_verified_engine_not_implemented
-    governance: split_program_d1_closed
+    governance: split_program_d1_closed_d2a_authorized
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 contracts and isolation are independently verified and closed; no replay, fill simulation, PnL, persistence, API, or results UI; D2 implementation is not authorized"
+    details: "D1 contracts and isolation are independently verified and closed; D2A causal replay is authorized but not implemented; D2B/D2C and D3-D7 are not authorized; no replay engine, fill simulation, PnL, persistence, API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:

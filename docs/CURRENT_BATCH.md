@@ -6,19 +6,19 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D1 — CLOSED.**
+**Current gate: D2A — AUTHORIZED FOR IMPLEMENTATION.**
 
-**Current permitted activity: D2 Governance Authorization only.** This permits planning and authorization
-review only; it does **not** authorize D2 implementation.
-
-D2–D7 are planned but are **NOT AUTHORIZED** until the preceding sub-batch is implemented,
-verified, documented, and separately advanced by governance. Do not automatically progress.
+The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
+D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. Only D2A is authorized.
+D2B, D2C, and D3–D7 remain **NOT AUTHORIZED** and require separate governance advancement after the
+preceding unit is implemented, independently verified, documented, and closed. Do not automatically progress.
 
 ## Current State
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
 - External AI: **HARDENING**; deterministic fixture mode remains the default.
 - Backtesting: **FOUNDATION CONTRACTS IMPLEMENTED AND VERIFIED; ENGINE NOT IMPLEMENTED**.
+- D2A causal replay is authorized but not implemented; authorization does not change capability status.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
 
@@ -143,15 +143,39 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
    coverage/provenance authority, resource policy, lifecycle semantics, and the simulation/live isolation
    boundary passed independent verification. No runner, migration, API, UI, background task, or simulated
    fill implementation exists.
-2. **D2 — PLANNED / NOT AUTHORIZED**: chronological replay and prefix-invariance; causal multi-timeframe/news
-   inputs; shared side-effect-free risk-policy seam. Requires independent Sol/High verification before D3.
-3. **D3 — PLANNED / NOT AUTHORIZED**: deterministic fills, costs, ambiguity, isolated portfolio lifecycle,
+2. **D2A — AUTHORIZED FOR IMPLEMENTATION**: pure, single-threaded causal replay foundation through existing
+   Analysis, Strategy, and suggestion-only TradePlan evaluation. The implementation scope is limited to:
+   - an aware-UTC monotonic replay clock advanced by unique chronological closed primary-timeframe candles;
+   - canonical input validation and D1 admission limits before unbounded materialization;
+   - causal M1–W1 projection by each timeframe's own close, point-in-time news revision projection by
+     `available_at`, and quote visibility only when both `timestamp <= T` and `observed_at <= T`;
+   - fixed-origin warm-up feeding with no reportable candidate/TradePlan output before `requested_start`;
+   - reuse of `AnalysisEngine`/`analyze`, `build_context(..., replay=True)`, `strategy.engine.evaluate`,
+     STRAT01–STRAT06, profiles, and existing TradePlan geometry without backtest-specific strategy copies;
+   - deterministic in-memory context/candidate/TradePlan replay events ordered by
+     `(as_of, profile_id, strategy_id, candidate_id)` with bounded stable failure codes;
+   - prefix-recomputation as the reference correctness oracle; incremental optimization is allowed only when
+     proven semantically equivalent, and checkpoint/caching optimization is not authorized in D2A;
+   - a server-owned replay-engine version replacing the D1 placeholder only when the D2A implementation exists,
+     included in existing provenance and run-input fingerprint authority;
+   - focused prefix-invariance, future-mutation, higher-timeframe close, news-revision, quote-observation,
+     repeat-determinism, resource-bound, and isolation tests.
+3. **D2B — PLANNED / NOT AUTHORIZED**: extract a typed, immutable, side-effect-free shared Risk policy core.
+   It must preserve live policy ordering and behavior; accept explicit account, policy, symbol spec, quote/news,
+   portfolio exposure, lifecycle, isolated Kill Switch state, and replay `T`; reuse deterministic sizing and safe
+   fingerprint components; and leave database locks, live automatic Kill Switch mutation/read, idempotency,
+   repository access, and reservation release/create in the live wrapper. Independent Sol/High parity review is
+   required before D2C.
+4. **D2C — PLANNED / NOT AUTHORIZED**: integrate D2A candidate/TradePlan output with the verified D2B pure Risk
+   seam, deterministic risk-decision event ordering/fingerprinting, and complete replay/Risk parity and isolation
+   tests. No fills, trade lifecycle, PnL, or persistence.
+5. **D3 — PLANNED / NOT AUTHORIZED**: deterministic fills, costs, ambiguity, isolated portfolio lifecycle,
    candidate/risk/trade in-memory ledgers.
-4. **D4 — PLANNED / NOT AUTHORIZED**: canonical metrics, equity/drawdown, and derivable period dimensions.
-5. **D5 — PLANNED / NOT AUTHORIZED**: additive PostgreSQL persistence, bounded in-process execution/cancellation,
+6. **D4 — PLANNED / NOT AUTHORIZED**: canonical metrics, equity/drawdown, and derivable period dimensions.
+7. **D5 — PLANNED / NOT AUTHORIZED**: additive PostgreSQL persistence, bounded in-process execution/cancellation,
    authenticated API, ownership and output pagination. No Celery/Redis/Kafka.
-6. **D6 — PLANNED / NOT AUTHORIZED**: minimal Backtesting UI consuming authoritative D5 APIs.
-7. **D7 — PLANNED / NOT AUTHORIZED**: determinism, no-lookahead, security/resource, migration, API, browser,
+8. **D6 — PLANNED / NOT AUTHORIZED**: minimal Backtesting UI consuming authoritative D5 APIs.
+9. **D7 — PLANNED / NOT AUTHORIZED**: determinism, no-lookahead, security/resource, migration, API, browser,
    and full regression independent closure gate.
 
 ## Required Test Program
@@ -181,5 +205,6 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 ## Required Gates
 - D1 is **CLOSED** following independent GPT-5.6 Sol / High re-verification.
 - D1-IV-001 through D1-IV-006 are **CLOSED**.
-- Next permitted activity: D2 Governance Authorization only; D2 implementation is **NOT AUTHORIZED**.
-- D3–D7 remain not authorized. Do not begin the next sub-batch automatically.
+- Governance result: **PLAN REQUIRES SPLIT**; D2A is the only authorized implementation unit.
+- D2A must pass focused tests and independent GPT-5.6 Sol / High verification before closure.
+- D2B, D2C, and D3–D7 remain not authorized. Do not begin the next sub-batch automatically.

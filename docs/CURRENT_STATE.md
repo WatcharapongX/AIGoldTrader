@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-23
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch D remains open; D1 independently verified and CLOSED.
-- **Current Active Gate**: D1 Governance Closure Complete.
-- **Next Permitted Activity**: D2 Governance Authorization only.
-- **Prohibited Progression**: D2 implementation is NOT AUTHORIZED; D3–D7 remain unapproved.
+- **Current Milestone**: Batch D remains open; D1 is CLOSED and D2 governance requires a split.
+- **Current Active Gate**: D2A Causal Replay Foundation — AUTHORIZED FOR IMPLEMENTATION.
+- **Next Permitted Activity**: D2A implementation only, followed by focused and independent verification.
+- **Prohibited Progression**: D2B, D2C, and D3–D7 remain unapproved.
 
 ---
 
@@ -54,6 +54,11 @@ Risk evaluation orchestration is not directly reusable by historical replay beca
 and interacts with live Kill Switch, data-health, decisions, and reservations. Batch D requires a shared,
 side-effect-free policy seam and isolated simulation state; no live table or authority state may be mutated.
 
+Governance therefore split D2 into independently gated units. D2A owns only the causal replay foundation
+through existing Analysis, Strategy, and suggestion-only TradePlan output. D2B will separately extract and
+prove parity of the shared pure Risk policy seam. D2C will later integrate the two. This prevents replay
+causality work from being coupled to a safety-critical live Risk refactor.
+
 The approved staged data flow is:
 
 `historical data -> UTC replay -> structure -> strategy/TradePlan -> isolated Risk policy -> simulated execution -> ledgers -> metrics`
@@ -65,7 +70,8 @@ The approved staged data flow is:
 - Batch C: **CLOSED**.
 - Batch D: **OPEN; D1 CLOSED**.
 - D1: **CLOSED**.
-- D2–D7: **NOT AUTHORIZED**.
+- D2A: **AUTHORIZED FOR IMPLEMENTATION; NOT YET IMPLEMENTED**.
+- D2B, D2C, and D3–D7: **NOT AUTHORIZED**.
 - Backtesting: **FOUNDATION CONTRACTS IMPLEMENTED AND VERIFIED; ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
 - Paper Trading: **NOT AUTHORIZED**.
