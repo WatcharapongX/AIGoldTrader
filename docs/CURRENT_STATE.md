@@ -40,8 +40,10 @@
   D1-IV-001 through D1-IV-006 are closed.
 - **D2A Causal Replay Foundation**: remediated and locally verified, pending independent GPT-5.6 Sol / High
   re-verification. It provides pure UTC causal-prefix replay through existing Analysis, News, Strategy, and
-  suggestion-only TradePlan output. The Backtesting Engine is not complete: no Risk replay integration,
-  fill simulation, PnL/metrics engine, persistence, API, or results UI exists.
+  suggestion-only TradePlan output. Its second targeted remediation adds exact interior candle-gap reconciliation,
+  execution-entry source rebinding through a private canonical snapshot, and a complete D2A replay-input identity
+  over the D1 manifest plus Strategy/Analysis/News/tick-size semantics. The Backtesting Engine is not complete:
+  no Risk replay integration, fill simulation, PnL/metrics engine, persistence, API, or results UI exists.
 - The current `/backtesting` page renders Strategy Lab historical evaluation snapshots. These are not trades,
   fills, PnL, an equity curve, or a real backtest.
 
@@ -74,6 +76,8 @@ The approved staged data flow is:
 - Batch D: **OPEN; D1 CLOSED**.
 - D1: **CLOSED**.
 - D2A: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- NEW-D2A-RV-001, V-D2A-14-RV-01, and NEW-D2A-RV-002 are remediated locally and pending independent
+  re-verification; V-D2A-14 has the same roll-up status.
 - D2B, D2C, and D3–D7: **NOT AUTHORIZED**.
 - Backtesting: **CAUSAL REPLAY FOUNDATION REMEDIATED; PENDING INDEPENDENT VERIFICATION; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.

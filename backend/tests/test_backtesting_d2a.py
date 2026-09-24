@@ -7,6 +7,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from app.services.analysis.domain import AnalysisConfig
 from app.services.analysis.engine import analyze
 from app.services.backtesting.domain import (
     REPLAY_ENGINE_VERSION,
@@ -14,8 +15,11 @@ from app.services.backtesting.domain import (
     BacktestRunConfig,
     BacktestRunManifest,
     CostAssumptions,
+    CoverageGap,
+    CoverageGapCode,
     CoverageStatus,
     DataCoverage,
+    GapExpectation,
     NewsVintageCoverage,
     TimeframeCoverage,
 )
@@ -23,15 +27,25 @@ from app.services.backtesting.fingerprint import (
     config_fingerprint,
     coverage_fingerprint,
     historical_data_fingerprint,
+    replay_configuration_fingerprint,
+    replay_input_fingerprint,
     resource_policy_fingerprint,
+    run_input_fingerprint,
 )
 from app.services.backtesting.policy import BacktestResourcePolicy
 from app.services.backtesting.replay import _visible_prefix, make_replay_inputs, replay
-from app.services.backtesting.replay_domain import ReplayClock, ReplayError, ReplayFailureCode, ReplayStrategyEvent
+from app.services.backtesting.replay_domain import (
+    ReplayClock,
+    ReplayError,
+    ReplayFailureCode,
+    ReplayInputs,
+    ReplayStrategyEvent,
+)
 from app.services.market_data.domain import SECONDS, Candle, Timeframe, bucket
-from app.services.news.domain import EconomicEvent, ObservedQuote
+from app.services.news.domain import EconomicEvent, NewsConfig, ObservedQuote
 from app.services.news.engine import build_context as build_news_context
 from app.services.strategy.context import build_context as build_strategy_context
+from app.services.strategy.domain import StrategyConfig
 from app.services.strategy.engine import REGISTRY, profiles
 from app.services.strategy.engine import evaluate as evaluate_strategies
 
@@ -67,14 +81,11 @@ def candles() -> dict[Timeframe, tuple[Candle, ...]]:
         step = dt.timedelta(seconds=SECONDS[timeframe])
         anchor = bucket(START, timeframe)
         current = bucket(END - dt.timedelta(microseconds=1), timeframe)
-        prior = tuple(candle(timeframe, anchor - step * offset, str(2000 + offset)) for offset in (2, 1))
-        result[timeframe] = prior + (
-            candle(
-                timeframe,
-                current,
-                "2000",
-                closed=current + step <= END,
-            ),
+        first = anchor - step * 2
+        count = int((current - first) / step) + 1
+        result[timeframe] = tuple(
+            candle(timeframe, first + step * index, str(2000 + index % 7), closed=first + step * (index + 1) <= END)
+            for index in range(count)
         )
     result[Timeframe.M1] = tuple(
         candle(Timeframe.M1, WARMUP + dt.timedelta(minutes=index), str(2000 + index % 7)) for index in range(240)
@@ -102,6 +113,7 @@ def manifest(
     news_source="historical_unavailable",
     news_mode="UNAVAILABLE",
     calendar_available=False,
+    gaps=(),
 ) -> BacktestRunManifest:
     values = values if values is not None else candles()
     config = BacktestRunConfig(
@@ -148,6 +160,7 @@ def manifest(
         total_candle_inputs=sum(map(len, values.values())),
         required_timeframes=FRAMES,
         timeframe_coverage=frame_coverage,
+        gaps=gaps,
         news_vintages=news,
         data_fingerprint=historical_data_fingerprint(
             symbol="XAUUSD",
@@ -1011,3 +1024,229 @@ def test_candidate_output_bound_fails_without_complete_partial_result(monkeypatc
     with pytest.raises(ReplayError) as error:
         replay(inputs(), stop_at=START)
     assert error.value.code is ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED
+
+
+def scheduled_gap(timeframe: Timeframe, start: dt.datetime, buckets: int = 1) -> CoverageGap:
+    return CoverageGap(
+        timeframe=timeframe,
+        gap_start=start,
+        gap_end=start + dt.timedelta(seconds=SECONDS[timeframe] * buckets),
+        code=CoverageGapCode.SCHEDULED_MARKET_CLOSURE,
+        expectation=GapExpectation.EXPECTED_SCHEDULED_CLOSURE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "missing_open"),
+    [
+        (Timeframe.M5, dt.datetime(2025, 1, 6, 10, 45, tzinfo=UTC)),
+        (Timeframe.H1, dt.datetime(2025, 1, 6, 10, 0, tzinfo=UTC)),
+    ],
+)
+def test_new_d2a_rv_001_undeclared_interior_gap_rejects(timeframe, missing_open):
+    values = candles()
+    changed = {**values, timeframe: tuple(c for c in values[timeframe] if c.open_time != missing_open)}
+    with pytest.raises(ReplayError) as error:
+        make_replay_inputs(manifest=manifest(values=changed), candles=changed)
+    assert error.value.code is ReplayFailureCode.INPUT_INVALID
+
+
+def test_new_d2a_rv_001_scheduled_gap_reconciles_exact_missing_buckets():
+    values = candles()
+    first_missing = dt.datetime(2025, 1, 6, 10, 45, tzinfo=UTC)
+    missing = {first_missing, first_missing + dt.timedelta(minutes=5)}
+    changed = {**values, Timeframe.M5: tuple(c for c in values[Timeframe.M5] if c.open_time not in missing)}
+    gap = scheduled_gap(Timeframe.M5, first_missing, buckets=2)
+    assert make_replay_inputs(manifest=manifest(values=changed, gaps=(gap,)), candles=changed)
+
+
+@pytest.mark.parametrize("case", ["wrong_timeframe", "wrong_interval", "orphan"])
+def test_new_d2a_rv_001_incorrect_scheduled_gap_evidence_rejects(case):
+    values = candles()
+    missing_open = dt.datetime(2025, 1, 6, 10, 45, tzinfo=UTC)
+    changed = values
+    if case != "orphan":
+        changed = {
+            **values,
+            Timeframe.M5: tuple(c for c in values[Timeframe.M5] if c.open_time != missing_open),
+        }
+    gap = (
+        scheduled_gap(Timeframe.H1, dt.datetime(2025, 1, 6, 10, 0, tzinfo=UTC))
+        if case == "wrong_timeframe"
+        else scheduled_gap(Timeframe.M5, missing_open + dt.timedelta(minutes=5))
+        if case == "wrong_interval"
+        else scheduled_gap(Timeframe.M5, missing_open)
+    )
+    with pytest.raises(ReplayError) as error:
+        make_replay_inputs(manifest=manifest(values=changed, gaps=(gap,)), candles=changed)
+    assert error.value.code is ReplayFailureCode.INPUT_INVALID
+
+
+def test_new_d2a_rv_001_gap_strictly_before_warmup_is_irrelevant():
+    values = candles()
+    early = candle(Timeframe.M1, WARMUP - dt.timedelta(minutes=5), "1999")
+    changed = {**values, Timeframe.M1: (early,) + values[Timeframe.M1]}
+    assert make_replay_inputs(manifest=manifest(values=changed), candles=changed)
+
+
+def test_v_d2a_14_rv_01_replay_rejects_direct_and_post_factory_candle_tampering():
+    values = candles()
+    valid = inputs(values)
+    changed = {
+        **values,
+        Timeframe.M5: values[Timeframe.M5][:2]
+        + (values[Timeframe.M5][2].model_copy(update={"volume": D("999")}),)
+        + values[Timeframe.M5][3:],
+    }
+    direct = ReplayInputs(**{**valid.model_dump(mode="python"), "candles": changed})
+    with pytest.raises(ReplayError) as direct_error:
+        replay(direct, stop_at=END)
+    assert direct_error.value.code is ReplayFailureCode.INPUT_INVALID
+
+    replaced = inputs(values)
+    replaced.candles[Timeframe.M5] = changed[Timeframe.M5]
+    with pytest.raises(ReplayError) as replaced_error:
+        replay(replaced, stop_at=END)
+    assert replaced_error.value.code is ReplayFailureCode.INPUT_INVALID
+
+    mutated = inputs(values)
+    mutated.candles[Timeframe.M5][2].volume = D("998")
+    with pytest.raises(ReplayError) as mutated_error:
+        replay(mutated, stop_at=END)
+    assert mutated_error.value.code is ReplayFailureCode.INPUT_INVALID
+
+
+def test_v_d2a_14_rv_01_replay_rejects_news_and_quote_tampering():
+    values = candles()
+    news = news_revision(version=1, available_at=START + dt.timedelta(minutes=5), actual="180")
+    news_args = dict(news_source="fixture_news", news_mode="FIXTURE", calendar_available=True)
+    valid_news = make_replay_inputs(
+        manifest=manifest(values=values, news_events=(news,), **news_args),
+        candles=values,
+        news_events=(news,),
+        **news_args,
+    )
+    changed_news = news.model_copy(update={"actual": D("999")})
+    with pytest.raises(ReplayError) as news_error:
+        replay(valid_news.model_copy(update={"news_events": (changed_news,)}), stop_at=END)
+    assert news_error.value.code is ReplayFailureCode.INPUT_INVALID
+
+    quote = ObservedQuote(timestamp=START, observed_at=START, bid=D("2000"), ask=D("2000.2"), source="simulated")
+    valid_quote = make_replay_inputs(
+        manifest=manifest(values=values, quotes=(quote,)), candles=values, quotes=(quote,)
+    )
+    changed_quote = quote.model_copy(update={"ask": D("2001")})
+    with pytest.raises(ReplayError) as quote_error:
+        replay(valid_quote.model_copy(update={"quotes": (changed_quote,)}), stop_at=END)
+    assert quote_error.value.code is ReplayFailureCode.INPUT_INVALID
+
+
+def test_v_d2a_14_rv_01_valid_refingerprinted_source_accepts_and_uses_private_snapshot(monkeypatch):
+    import app.services.backtesting.replay as replay_module
+
+    values = candles()
+    changed = {
+        **values,
+        Timeframe.M5: values[Timeframe.M5][:2]
+        + (values[Timeframe.M5][2].model_copy(update={"volume": D("999")}),)
+        + values[Timeframe.M5][3:],
+    }
+    assert replay(inputs(changed), stop_at=END)
+
+    caller_owned = inputs(values)
+    expected = replay(inputs(values), stop_at=END)
+    original_analyze = replay_module.analyze
+    mutated = False
+
+    def mutate_caller_after_preparation(*args, **kwargs):
+        nonlocal mutated
+        if not mutated:
+            caller_owned.candles[Timeframe.M5][2].volume = D("777")
+            mutated = True
+        return original_analyze(*args, **kwargs)
+
+    monkeypatch.setattr(replay_module, "analyze", mutate_caller_after_preparation)
+    assert replay(caller_owned, stop_at=END) == expected
+
+
+def test_v_d2a_14_rv_01_revalidates_nested_configuration_content():
+    invalid_analysis = inputs()
+    invalid_analysis.analysis_config.session_hours["ASIA"] = [20, 5]
+    with pytest.raises(ReplayError) as analysis_error:
+        replay(invalid_analysis, stop_at=START)
+    assert analysis_error.value.code is ReplayFailureCode.INPUT_INVALID
+
+    invalid_news = inputs()
+    invalid_news.news_config.reaction_seconds[:] = [300, 60]
+    with pytest.raises(ReplayError) as news_error:
+        replay(invalid_news, stop_at=START)
+    assert news_error.value.code is ReplayFailureCode.INPUT_INVALID
+
+
+def test_new_d2a_rv_002_complete_replay_configuration_identity():
+    values = candles()
+    baseline = replay(inputs(values), stop_at=START)
+    mutations = (
+        ({"strategy_config": StrategyConfig(expiry_trigger_bars=13)}, True),
+        ({"analysis_config": AnalysisConfig(internal_left=3)}, True),
+        ({"news_config": NewsConfig(reaction_seconds=[60, 300])}, False),
+        ({"tick_size": D("0.1")}, True),
+    )
+    for change, changes_output in mutations:
+        changed = replay(inputs(values, **change), stop_at=START)
+        assert changed.replay_input_fingerprint != baseline.replay_input_fingerprint
+        if changes_output:
+            assert changed.replay_fingerprint != baseline.replay_fingerprint
+    assert replay(inputs(values), stop_at=START).replay_input_fingerprint == baseline.replay_input_fingerprint
+
+
+def test_new_d2a_rv_002_configuration_identity_is_canonical():
+    normal = AnalysisConfig()
+    reverse_sessions = dict(reversed(tuple(normal.session_hours.items())))
+    reordered = AnalysisConfig(**{**normal.model_dump(mode="python"), "session_hours": reverse_sessions})
+    base = replay(inputs(analysis_config=normal, tick_size=D("0.01")), stop_at=START)
+    equivalent = replay(inputs(analysis_config=reordered, tick_size=D("0.010")), stop_at=START)
+    assert base.replay_input_fingerprint == equivalent.replay_input_fingerprint
+
+    config_id = replay_configuration_fingerprint(
+        strategy_config=StrategyConfig(),
+        analysis_config=normal,
+        news_config=NewsConfig(),
+        tick_size=D("0.01"),
+        replay_engine_version=REPLAY_ENGINE_VERSION,
+    )
+    equivalent_config_id = replay_configuration_fingerprint(
+        strategy_config=StrategyConfig(),
+        analysis_config=reordered,
+        news_config=NewsConfig(),
+        tick_size=D("0.010"),
+        replay_engine_version=REPLAY_ENGINE_VERSION,
+    )
+    assert equivalent_config_id == config_id
+    assert replay_input_fingerprint(manifest=manifest(), configuration_fingerprint=config_id) == (
+        base.replay_input_fingerprint
+    )
+
+
+def test_new_d2a_rv_002_future_suffix_separates_input_and_causal_output_identity():
+    values = candles()
+    changed = {
+        **values,
+        Timeframe.M5: values[Timeframe.M5][:-1]
+        + (values[Timeframe.M5][-1].model_copy(update={"volume": D("999")}),),
+    }
+    cutoff = dt.datetime(2025, 1, 6, 10, 50, tzinfo=UTC)
+    left = replay(inputs(values), stop_at=cutoff)
+    right = replay(inputs(changed), stop_at=cutoff)
+    assert manifest(values=values).coverage.data_fingerprint != manifest(values=changed).coverage.data_fingerprint
+    assert run_input_fingerprint(manifest(values=values)) != run_input_fingerprint(manifest(values=changed))
+    assert left.replay_input_fingerprint != right.replay_input_fingerprint
+    assert left.events == right.events
+    assert left.replay_fingerprint == right.replay_fingerprint
+
+
+@pytest.mark.parametrize("tick_size", [D("0"), D("-0.01"), D("NaN")])
+def test_new_d2a_rv_002_invalid_tick_size_rejects(tick_size):
+    with pytest.raises(ReplayError) as error:
+        make_replay_inputs(manifest=manifest(), candles=candles(), tick_size=tick_size)
+    assert error.value.code is ReplayFailureCode.INPUT_INVALID

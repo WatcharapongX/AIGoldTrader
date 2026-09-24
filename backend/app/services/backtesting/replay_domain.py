@@ -3,6 +3,7 @@
 import datetime as dt
 from decimal import Decimal
 from enum import Enum
+from typing import Annotated
 
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 
@@ -44,7 +45,7 @@ class ReplayInputs(Model):
     strategy_config: StrategyConfig = Field(default_factory=StrategyConfig)
     analysis_config: AnalysisConfig = Field(default_factory=AnalysisConfig)
     news_config: NewsConfig = Field(default_factory=NewsConfig)
-    tick_size: Decimal | None = None
+    tick_size: Annotated[Decimal, Field(gt=0, allow_inf_nan=False)] | None = None
     news_source: str = Field(default="historical_unavailable", min_length=1, max_length=128)
     news_mode: str = Field(default="UNAVAILABLE", pattern=r"^(FIXTURE|LIVE|UNAVAILABLE)$")
     calendar_available: bool = False
@@ -92,6 +93,7 @@ class ReplayStrategyEvent(Model):
 
 class ReplayResult(Model):
     replay_engine_version: str = Field(pattern=r"^replay-engine-\d+\.\d+\.\d+$")
+    replay_input_fingerprint: Sha256
     cutoff: AwareDatetime
     primary_events_processed: int = Field(ge=0)
     events: tuple[ReplayStrategyEvent, ...]

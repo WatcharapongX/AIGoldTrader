@@ -3,11 +3,23 @@
 import datetime as dt
 from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
+from app.services.analysis.domain import AnalysisConfig
 from app.services.analysis.engine import analyze
-from app.services.backtesting.domain import REPLAY_ENGINE_VERSION, BacktestRunManifest
-from app.services.backtesting.fingerprint import historical_data_fingerprint, semantic_fingerprint
+from app.services.backtesting.domain import (
+    REPLAY_ENGINE_VERSION,
+    BacktestRunManifest,
+    CoverageGapCode,
+    GapExpectation,
+)
+from app.services.backtesting.fingerprint import (
+    historical_data_fingerprint,
+    replay_configuration_fingerprint,
+    replay_input_fingerprint,
+    semantic_fingerprint,
+)
 from app.services.backtesting.policy import (
     MAX_CANDIDATES_PER_RUN,
     MAX_PRIMARY_REPLAY_EVENTS,
@@ -21,8 +33,8 @@ from app.services.backtesting.replay_domain import (
     ReplayResult,
     ReplayStrategyEvent,
 )
-from app.services.market_data.domain import SECONDS, Candle, Timeframe
-from app.services.news.domain import EconomicEvent, ObservedQuote
+from app.services.market_data.domain import SECONDS, Candle, Timeframe, bucket
+from app.services.news.domain import EconomicEvent, NewsConfig, ObservedQuote
 from app.services.news.engine import build_context as build_news_context
 from app.services.strategy.context import build_context as build_strategy_context
 from app.services.strategy.domain import StrategyConfig
@@ -32,6 +44,30 @@ _MAX_FRAME_WINDOW = 1000
 _MAX_ANALYSIS_WINDOW = 300
 _MAX_NEWS_EVENTS = 2000
 _MAX_QUOTES = 3600
+
+
+@dataclass(frozen=True)
+class _ReplayCandleFrame:
+    timeframe: Timeframe
+    candles: tuple[Candle, ...]
+
+
+@dataclass(frozen=True)
+class _ReplayExecution:
+    manifest: BacktestRunManifest
+    candle_frames: tuple[_ReplayCandleFrame, ...]
+    news_events: tuple[EconomicEvent, ...]
+    quotes: tuple[ObservedQuote, ...]
+    strategy_config: StrategyConfig
+    analysis_config: AnalysisConfig
+    news_config: NewsConfig
+    tick_size: Decimal | None
+    news_source: str
+    news_mode: str
+    calendar_available: bool
+    historical_fingerprint: str
+    configuration_fingerprint: str
+    input_fingerprint: str
 
 
 def _fail(code: ReplayFailureCode, error: Exception | None = None) -> None:
@@ -55,6 +91,52 @@ def _bounded_tuple(values: Iterable, limit: int) -> tuple:
     return tuple(result)
 
 
+def _model_copy(model_type, value):
+    payload = value.model_dump(mode="python") if hasattr(value, "model_dump") else value
+    return model_type.model_validate(payload)
+
+
+def _reconcile_candle_continuity(
+    manifest: BacktestRunManifest,
+    candles: dict[Timeframe, tuple[Candle, ...]],
+) -> None:
+    """Match every governed missing bucket to scheduled-closure evidence exactly."""
+    coverage_by_frame = {item.timeframe: item for item in manifest.coverage.timeframe_coverage}
+    gaps_by_frame = {
+        timeframe: tuple(gap for gap in manifest.coverage.gaps if gap.timeframe == timeframe)
+        for timeframe in manifest.coverage.required_timeframes
+    }
+    for timeframe, values in candles.items():
+        step = dt.timedelta(seconds=SECONDS[timeframe])
+        frame_coverage = coverage_by_frame[timeframe]
+        governed_start = max(manifest.coverage.warmup_start, frame_coverage.available_start)
+        governed_end = min(manifest.coverage.usable_end, frame_coverage.available_end)
+        missing: set[dt.datetime] = set()
+        for previous, current in zip(values, values[1:], strict=False):
+            expected = previous.open_time + step
+            while expected < current.open_time:
+                if governed_start <= expected and expected + step <= governed_end:
+                    missing.add(expected)
+                expected += step
+
+        declared: set[dt.datetime] = set()
+        for gap in gaps_by_frame[timeframe]:
+            if (
+                gap.expectation != GapExpectation.EXPECTED_SCHEDULED_CLOSURE
+                or gap.code != CoverageGapCode.SCHEDULED_MARKET_CLOSURE
+                or gap.gap_start != bucket(gap.gap_start, timeframe)
+                or gap.gap_end != bucket(gap.gap_end, timeframe)
+            ):
+                _fail(ReplayFailureCode.INPUT_INVALID)
+            expected = gap.gap_start
+            while expected < gap.gap_end:
+                if governed_start <= expected and expected + step <= governed_end:
+                    declared.add(expected)
+                expected += step
+        if missing != declared:
+            _fail(ReplayFailureCode.INPUT_INVALID)
+
+
 def _validate_candles(
     manifest: BacktestRunManifest, candles: Mapping[Timeframe, Sequence[Candle]]
 ) -> dict[Timeframe, tuple[Candle, ...]]:
@@ -67,7 +149,11 @@ def _validate_candles(
         frame_limit = remaining
         if timeframe == manifest.config.timeframe:
             frame_limit = min(frame_limit, MAX_PRIMARY_REPLAY_EVENTS)
-        values = _bounded_tuple(candles[timeframe], frame_limit)
+        raw_values = _bounded_tuple(candles[timeframe], frame_limit)
+        try:
+            values = tuple(_model_copy(Candle, candle) for candle in raw_values)
+        except (TypeError, ValueError) as error:
+            _fail(ReplayFailureCode.INPUT_INVALID, error)
         remaining -= len(values)
         previous: dt.datetime | None = None
         forming = False
@@ -109,6 +195,7 @@ def _validate_candles(
         supplied_end = values[-1].open_time + dt.timedelta(seconds=SECONDS[timeframe])
         if supplied_start > frame_coverage.available_start or supplied_end < frame_coverage.available_end:
             _fail(ReplayFailureCode.INPUT_INVALID)
+    _reconcile_candle_continuity(manifest, result)
     return result
 
 
@@ -165,6 +252,117 @@ def _validate_quotes(inputs: ReplayInputs) -> None:
         previous = quote.timestamp
 
 
+def _canonical_replay_inputs(
+    *,
+    manifest,
+    candles,
+    news_events,
+    quotes,
+    strategy_config,
+    analysis_config,
+    news_config,
+    tick_size,
+    news_source,
+    news_mode,
+    calendar_available,
+) -> tuple[ReplayInputs, str, str, str]:
+    """Prepare the exact canonical snapshot and identities used for execution."""
+    try:
+        canonical_manifest = _model_copy(BacktestRunManifest, manifest)
+        canonical_candles = _validate_candles(canonical_manifest, candles)
+        canonical_news = tuple(
+            _model_copy(EconomicEvent, event) for event in _bounded_tuple(news_events, _MAX_NEWS_EVENTS)
+        )
+        canonical_quotes = tuple(
+            _model_copy(ObservedQuote, quote) for quote in _bounded_tuple(quotes, _MAX_QUOTES)
+        )
+        canonical_strategy = _model_copy(StrategyConfig, strategy_config or StrategyConfig())
+        canonical_analysis = _model_copy(AnalysisConfig, analysis_config or AnalysisConfig())
+        canonical_news_config = _model_copy(NewsConfig, news_config or NewsConfig())
+        result = ReplayInputs.model_validate(
+            {
+                "manifest": canonical_manifest,
+                "candles": canonical_candles,
+                "news_events": canonical_news,
+                "quotes": canonical_quotes,
+                "strategy_config": canonical_strategy,
+                "analysis_config": canonical_analysis,
+                "news_config": canonical_news_config,
+                "tick_size": tick_size,
+                "news_source": news_source,
+                "news_mode": news_mode,
+                "calendar_available": calendar_available,
+            }
+        )
+    except ReplayError:
+        raise
+    except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+        _fail(ReplayFailureCode.INPUT_INVALID, error)
+    _validate_news(result)
+    _validate_quotes(result)
+    _validate_strategy_scope(result)
+    historical_fingerprint = historical_data_fingerprint(
+        symbol=canonical_manifest.config.symbol,
+        source=canonical_manifest.coverage.source,
+        candles=canonical_candles,
+        news_events=canonical_news,
+        quotes=canonical_quotes,
+        news_source=result.news_source,
+        news_mode=result.news_mode,
+        calendar_available=result.calendar_available,
+    )
+    if historical_fingerprint != canonical_manifest.coverage.data_fingerprint:
+        _fail(ReplayFailureCode.INPUT_INVALID)
+    configuration_fingerprint = replay_configuration_fingerprint(
+        strategy_config=canonical_strategy,
+        analysis_config=canonical_analysis,
+        news_config=canonical_news_config,
+        tick_size=result.tick_size,
+        replay_engine_version=REPLAY_ENGINE_VERSION,
+    )
+    input_fingerprint = replay_input_fingerprint(
+        manifest=canonical_manifest,
+        configuration_fingerprint=configuration_fingerprint,
+    )
+    return result, historical_fingerprint, configuration_fingerprint, input_fingerprint
+
+
+def _prepare_replay_execution(inputs: ReplayInputs) -> _ReplayExecution:
+    canonical, historical_fingerprint, configuration_fingerprint, input_fingerprint = _canonical_replay_inputs(
+        manifest=inputs.manifest,
+        candles=inputs.candles,
+        news_events=inputs.news_events,
+        quotes=inputs.quotes,
+        strategy_config=inputs.strategy_config,
+        analysis_config=inputs.analysis_config,
+        news_config=inputs.news_config,
+        tick_size=inputs.tick_size,
+        news_source=inputs.news_source,
+        news_mode=inputs.news_mode,
+        calendar_available=inputs.calendar_available,
+    )
+    frames = tuple(
+        _ReplayCandleFrame(timeframe=timeframe, candles=canonical.candles[timeframe])
+        for timeframe in sorted(canonical.candles, key=lambda item: SECONDS[item])
+    )
+    return _ReplayExecution(
+        manifest=canonical.manifest,
+        candle_frames=frames,
+        news_events=canonical.news_events,
+        quotes=canonical.quotes,
+        strategy_config=canonical.strategy_config,
+        analysis_config=canonical.analysis_config,
+        news_config=canonical.news_config,
+        tick_size=canonical.tick_size,
+        news_source=canonical.news_source,
+        news_mode=canonical.news_mode,
+        calendar_available=canonical.calendar_available,
+        historical_fingerprint=historical_fingerprint,
+        configuration_fingerprint=configuration_fingerprint,
+        input_fingerprint=input_fingerprint,
+    )
+
+
 def make_replay_inputs(
     *,
     manifest: BacktestRunManifest,
@@ -180,44 +378,19 @@ def make_replay_inputs(
     calendar_available: bool = False,
 ) -> ReplayInputs:
     """Validate cheap collection counts before immutable Pydantic materialization."""
-    canonical = _validate_candles(manifest, candles)
-    canonical_news = _bounded_tuple(news_events, _MAX_NEWS_EVENTS)
-    canonical_quotes = _bounded_tuple(quotes, _MAX_QUOTES)
-    values = {
-        "manifest": manifest,
-        "candles": canonical,
-        "news_events": canonical_news,
-        "quotes": canonical_quotes,
-        "tick_size": tick_size,
-        "news_source": news_source,
-        "news_mode": news_mode,
-        "calendar_available": calendar_available,
-    }
-    if strategy_config is not None:
-        values["strategy_config"] = strategy_config
-    if analysis_config is not None:
-        values["analysis_config"] = analysis_config
-    if news_config is not None:
-        values["news_config"] = news_config
-    try:
-        result = ReplayInputs.model_validate(values)
-    except (TypeError, ValueError) as error:
-        _fail(ReplayFailureCode.INPUT_INVALID, error)
-    _validate_news(result)
-    _validate_quotes(result)
-    _validate_strategy_scope(result)
-    actual_fingerprint = historical_data_fingerprint(
-        symbol=manifest.config.symbol,
-        source=manifest.coverage.source,
-        candles=canonical,
-        news_events=result.news_events,
-        quotes=result.quotes,
-        news_source=result.news_source,
-        news_mode=result.news_mode,
-        calendar_available=result.calendar_available,
+    result, _, _, _ = _canonical_replay_inputs(
+        manifest=manifest,
+        candles=candles,
+        news_events=news_events,
+        quotes=quotes,
+        strategy_config=strategy_config,
+        analysis_config=analysis_config,
+        news_config=news_config,
+        tick_size=tick_size,
+        news_source=news_source,
+        news_mode=news_mode,
+        calendar_available=calendar_available,
     )
-    if actual_fingerprint != manifest.coverage.data_fingerprint:
-        _fail(ReplayFailureCode.INPUT_INVALID)
     return result
 
 
@@ -243,11 +416,9 @@ def _selected_profile(config: StrategyConfig, config_id: str, profile_id: str, s
 
 def replay(inputs: ReplayInputs, *, stop_at: dt.datetime | None = None) -> ReplayResult:
     """Recompute every reportable decision from the causal prefix visible at its UTC close."""
-    manifest = inputs.manifest
-    candles = _validate_candles(manifest, inputs.candles)
-    _validate_news(inputs)
-    _validate_quotes(inputs)
-    _validate_strategy_scope(inputs)
+    execution = _prepare_replay_execution(inputs)
+    manifest = execution.manifest
+    candles = {frame.timeframe: frame.candles for frame in execution.candle_frames}
     cutoff = min(_utc(stop_at) if stop_at is not None else manifest.config.end, manifest.config.end)
     if cutoff < manifest.coverage.warmup_start:
         _fail(ReplayFailureCode.INPUT_INVALID)
@@ -277,19 +448,19 @@ def replay(inputs: ReplayInputs, *, stop_at: dt.datetime | None = None) -> Repla
             Timeframe.M1,
             manifest.coverage.source,
             requested=_MAX_ANALYSIS_WINDOW,
-            config=inputs.analysis_config,
+            config=execution.analysis_config,
         )
         try:
             news = build_news_context(
-                list(inputs.news_events),
+                list(execution.news_events),
                 at,
-                source=inputs.news_source,
-                mode=inputs.news_mode,
-                config=inputs.news_config,
+                source=execution.news_source,
+                mode=execution.news_mode,
+                config=execution.news_config,
                 candles=m1,
-                quotes=list(inputs.quotes),
+                quotes=list(execution.quotes),
                 structure=structure,
-                calendar_available=inputs.calendar_available,
+                calendar_available=execution.calendar_available,
                 market_source=manifest.coverage.source,
             )
             context = build_strategy_context(
@@ -298,22 +469,24 @@ def replay(inputs: ReplayInputs, *, stop_at: dt.datetime | None = None) -> Repla
                 source=manifest.coverage.source,
                 at=at,
                 news=news,
-                tick_size=inputs.tick_size,
-                config=inputs.strategy_config,
-                analysis_config=inputs.analysis_config,
+                tick_size=execution.tick_size,
+                config=execution.strategy_config,
+                analysis_config=execution.analysis_config,
                 replay=True,
-                quotes=inputs.quotes,
+                quotes=execution.quotes,
             )
         except (TypeError, ValueError) as error:
             _fail(ReplayFailureCode.CAUSALITY_VIOLATION, error)
         selected = _selected_profile(
-            inputs.strategy_config,
+            execution.strategy_config,
             context.config_id,
             manifest.config.profile_id,
             manifest.config.strategy_id,
         )
         try:
-            candidate = REGISTRY[manifest.config.strategy_id].evaluate(context, selected, inputs.strategy_config)
+            candidate = REGISTRY[manifest.config.strategy_id].evaluate(
+                context, selected, execution.strategy_config
+            )
         except (KeyError, TypeError, ValueError) as error:
             _fail(ReplayFailureCode.STRATEGY_CONFIG_INVALID, error)
         if at < manifest.config.start:
@@ -368,6 +541,7 @@ def replay(inputs: ReplayInputs, *, stop_at: dt.datetime | None = None) -> Repla
     }
     return ReplayResult(
         replay_engine_version=REPLAY_ENGINE_VERSION,
+        replay_input_fingerprint=execution.input_fingerprint,
         cutoff=cutoff,
         primary_events_processed=len(primary_events),
         events=tuple(events),

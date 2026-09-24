@@ -149,6 +149,12 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
    Analysis, Strategy, and suggestion-only TradePlan evaluation. The implementation scope is limited to:
    - an aware-UTC monotonic replay clock advanced by unique chronological closed primary-timeframe candles;
    - canonical input validation and D1 admission limits before unbounded materialization;
+   - exact governed interior-bucket reconciliation against canonical scheduled-closure gap evidence, without a
+     hardcoded market calendar or fabricated prices;
+   - authoritative execution-entry reconstruction into a private canonical snapshot, including historical-source
+     fingerprint rebinding even when the convenience factory is bypassed or its returned object is later mutated;
+   - a complete D2A replay-input fingerprint over the D1 manifest identity and exact StrategyConfig,
+     AnalysisConfig, NewsConfig, tick-size, and replay-engine semantics, kept separate from causal output identity;
    - causal M1–W1 projection by each timeframe's own close, point-in-time news revision projection by
      `available_at`, and quote visibility only when both `timestamp <= T` and `observed_at <= T`;
    - fixed-origin warm-up feeding with no reportable candidate/TradePlan output before `requested_start`;
@@ -210,11 +216,14 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 - Governance result: **PLAN REQUIRES SPLIT**; D2A remediation is complete but not closed.
 - Next authorized activity is D2A independent GPT-5.6 Sol / High re-verification only.
 
-## D2A Targeted Remediation Status
-- V-D2A-06: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- V-D2A-10: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- V-D2A-12/13: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- V-D2A-14: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- V-D2A-29: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- V-D2A-36: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+## D2A Second Targeted Remediation Status
+- NEW-D2A-RV-001: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-14-RV-01: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- NEW-D2A-RV-002: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-14 roll-up: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-06: **CLOSED**.
+- V-D2A-10: **CLOSED**.
+- V-D2A-12/13: **CLOSED**.
+- V-D2A-29: **CLOSED**.
+- V-D2A-36: **CLOSED**.
 - D2B, D2C, and D3–D7 remain not authorized. Do not begin the next sub-batch automatically.

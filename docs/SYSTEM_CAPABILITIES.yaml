@@ -57,7 +57,7 @@ capabilities:
     governance: split_program_d1_closed_d2a_pending_independent_reverification
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 is independently verified and closed; D2A pure causal replay through existing Analysis, News, Strategy, and suggestion-only TradePlan output is remediated and locally verified pending independent re-verification; D2B/D2C and D3-D7 are not authorized; no Risk replay integration, fill simulation, PnL/metrics, persistence, API, or results UI exists"
+    details: "D1 is independently verified and closed; D2A pure causal replay is second-remediated with exact scheduled-gap reconciliation, execution-entry source rebinding, private canonical execution snapshots, and complete replay-input identity over manifest plus Strategy/Analysis/News/tick-size semantics; NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, and the V-D2A-14 roll-up are pending independent re-verification; D2B/D2C and D3-D7 are not authorized; no Risk replay integration, fill simulation, PnL/metrics, persistence, API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:

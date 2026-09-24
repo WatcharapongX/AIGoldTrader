@@ -118,3 +118,35 @@ def data_provenance_fingerprint(provenance: BaseModel) -> str:
 
 def run_input_fingerprint(manifest: BaseModel) -> str:
     return semantic_fingerprint({"kind": "backtest-run-manifest", "value": manifest})
+
+
+def replay_configuration_fingerprint(
+    *,
+    strategy_config: BaseModel,
+    analysis_config: BaseModel,
+    news_config: BaseModel,
+    tick_size: Decimal | None,
+    replay_engine_version: str,
+) -> str:
+    """Identity of every D2A configuration value consumed by replay."""
+    return semantic_fingerprint(
+        {
+            "kind": "backtest-replay-configuration",
+            "replay_engine_version": replay_engine_version,
+            "strategy_config": strategy_config,
+            "analysis_config": analysis_config,
+            "news_config": news_config,
+            "tick_size": tick_size,
+        }
+    )
+
+
+def replay_input_fingerprint(*, manifest: BaseModel, configuration_fingerprint: str) -> str:
+    """Complete executable D2A identity without conflating causal output."""
+    return semantic_fingerprint(
+        {
+            "kind": "backtest-replay-input",
+            "manifest_fingerprint": run_input_fingerprint(manifest),
+            "configuration_fingerprint": configuration_fingerprint,
+        }
+    )
