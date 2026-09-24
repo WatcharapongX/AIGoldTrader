@@ -1,6 +1,6 @@
 # Machine-Readable Capability Registry — AIGoldTrader
 version: "1.0"
-last_verified: "2026-09-23"
+last_verified: "2026-09-24"
 repository: "WatcharapongX/AIGoldTrader"
 branch: "main"
 
@@ -10,8 +10,8 @@ governance:
   completed_sub_batches:
     - "D1"
   active_sub_batch: "D2A"
-  active_scope: "Independent verification of the implemented causal replay foundation; no Risk evaluation or fills"
-  next_authorized_activity: "D2A independent verification only (GPT-5.6 Sol / High)"
+  active_scope: "Independent re-verification of the remediated causal replay foundation; no Risk evaluation or fills"
+  next_authorized_activity: "D2A independent re-verification only (GPT-5.6 Sol / High)"
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -53,11 +53,11 @@ capabilities:
     status: implemented_verified
     details: "Batch B independently closed"
   backtesting:
-    status: causal_replay_foundation_implemented_risk_fill_not_implemented
-    governance: split_program_d1_closed_d2a_pending_independent_verification
+    status: causal_replay_foundation_remediated_pending_verification_risk_fill_not_implemented
+    governance: split_program_d1_closed_d2a_pending_independent_reverification
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 is independently verified and closed; D2A pure causal replay through existing Analysis, News, Strategy, and suggestion-only TradePlan output is implemented and locally verified pending independent review; D2B/D2C and D3-D7 are not authorized; no Risk replay integration, fill simulation, PnL/metrics, persistence, API, or results UI exists"
+    details: "D1 is independently verified and closed; D2A pure causal replay through existing Analysis, News, Strategy, and suggestion-only TradePlan output is remediated and locally verified pending independent re-verification; D2B/D2C and D3-D7 are not authorized; no Risk replay integration, fill simulation, PnL/metrics, persistence, API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:

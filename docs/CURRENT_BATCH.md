@@ -6,11 +6,11 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2A — IMPLEMENTED, PENDING INDEPENDENT VERIFICATION.**
+**Current gate: D2A — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
-D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. D2A implementation is complete
-but not closed; only its independent GPT-5.6 Sol / High verification is authorized now.
+D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. D2A targeted remediation is
+complete but not closed; only its independent GPT-5.6 Sol / High re-verification is authorized now.
 D2B, D2C, and D3–D7 remain **NOT AUTHORIZED** and require separate governance advancement after the
 preceding unit is implemented, independently verified, documented, and closed. Do not automatically progress.
 
@@ -18,8 +18,8 @@ preceding unit is implemented, independently verified, documented, and closed. D
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
 - External AI: **HARDENING**; deterministic fixture mode remains the default.
-- Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED; RISK/FILL ENGINE NOT IMPLEMENTED**.
-- D2A causal replay is implemented and locally verified, pending independent verification; this does not make
+- Backtesting: **CAUSAL REPLAY FOUNDATION REMEDIATED; PENDING INDEPENDENT VERIFICATION; RISK/FILL ENGINE NOT IMPLEMENTED**.
+- D2A causal replay is remediated and locally verified, pending independent re-verification; this does not make
   the Backtesting Engine complete.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
@@ -145,7 +145,7 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
    coverage/provenance authority, resource policy, lifecycle semantics, and the simulation/live isolation
    boundary passed independent verification. No runner, migration, API, UI, background task, or simulated
    fill implementation exists.
-2. **D2A — IMPLEMENTED / PENDING INDEPENDENT VERIFICATION**: pure, single-threaded causal replay foundation through existing
+2. **D2A — REMEDIATED / PENDING INDEPENDENT RE-VERIFICATION**: pure, single-threaded causal replay foundation through existing
    Analysis, Strategy, and suggestion-only TradePlan evaluation. The implementation scope is limited to:
    - an aware-UTC monotonic replay clock advanced by unique chronological closed primary-timeframe candles;
    - canonical input validation and D1 admission limits before unbounded materialization;
@@ -207,6 +207,14 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 ## Required Gates
 - D1 is **CLOSED** following independent GPT-5.6 Sol / High re-verification.
 - D1-IV-001 through D1-IV-006 are **CLOSED**.
-- Governance result: **PLAN REQUIRES SPLIT**; D2A implementation is complete but not closed.
-- Next authorized activity is D2A independent GPT-5.6 Sol / High verification only.
+- Governance result: **PLAN REQUIRES SPLIT**; D2A remediation is complete but not closed.
+- Next authorized activity is D2A independent GPT-5.6 Sol / High re-verification only.
+
+## D2A Targeted Remediation Status
+- V-D2A-06: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-10: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-12/13: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-14: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-29: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-36: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
 - D2B, D2C, and D3–D7 remain not authorized. Do not begin the next sub-batch automatically.

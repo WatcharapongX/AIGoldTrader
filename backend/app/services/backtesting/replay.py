@@ -2,12 +2,12 @@
 
 import datetime as dt
 from bisect import bisect_right
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 
 from app.services.analysis.engine import analyze
 from app.services.backtesting.domain import REPLAY_ENGINE_VERSION, BacktestRunManifest
-from app.services.backtesting.fingerprint import run_input_fingerprint, semantic_fingerprint
+from app.services.backtesting.fingerprint import historical_data_fingerprint, semantic_fingerprint
 from app.services.backtesting.policy import (
     MAX_CANDIDATES_PER_RUN,
     MAX_PRIMARY_REPLAY_EVENTS,
@@ -26,10 +26,12 @@ from app.services.news.domain import EconomicEvent, ObservedQuote
 from app.services.news.engine import build_context as build_news_context
 from app.services.strategy.context import build_context as build_strategy_context
 from app.services.strategy.domain import StrategyConfig
-from app.services.strategy.engine import evaluate, profiles
+from app.services.strategy.engine import REGISTRY, profiles
 
 _MAX_FRAME_WINDOW = 1000
 _MAX_ANALYSIS_WINDOW = 300
+_MAX_NEWS_EVENTS = 2000
+_MAX_QUOTES = 3600
 
 
 def _fail(code: ReplayFailureCode, error: Exception | None = None) -> None:
@@ -44,26 +46,38 @@ def _utc(value: dt.datetime) -> dt.datetime:
     return value.astimezone(dt.UTC)
 
 
+def _bounded_tuple(values: Iterable, limit: int) -> tuple:
+    result = []
+    for item in values:
+        if len(result) == limit:
+            _fail(ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED)
+        result.append(item)
+    return tuple(result)
+
+
 def _validate_candles(
     manifest: BacktestRunManifest, candles: Mapping[Timeframe, Sequence[Candle]]
 ) -> dict[Timeframe, tuple[Candle, ...]]:
     required = set(manifest.coverage.required_timeframes)
     if set(candles) != required or manifest.config.timeframe not in candles:
         _fail(ReplayFailureCode.INPUT_INVALID)
-    total = sum(len(values) for values in candles.values())
-    primary_count = len(candles[manifest.config.timeframe])
-    if total > MAX_TOTAL_CANDLE_INPUTS or primary_count > MAX_PRIMARY_REPLAY_EVENTS:
-        _fail(ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED)
     result: dict[Timeframe, tuple[Candle, ...]] = {}
+    remaining = MAX_TOTAL_CANDLE_INPUTS
     for timeframe in sorted(candles, key=lambda item: SECONDS[item]):
-        values = tuple(candles[timeframe])
+        frame_limit = remaining
+        if timeframe == manifest.config.timeframe:
+            frame_limit = min(frame_limit, MAX_PRIMARY_REPLAY_EVENTS)
+        values = _bounded_tuple(candles[timeframe], frame_limit)
+        remaining -= len(values)
         previous: dt.datetime | None = None
         forming = False
         for index, candle in enumerate(values):
             invalid_closed_state = (
-                timeframe == manifest.config.timeframe and not candle.is_closed
+                timeframe == manifest.config.timeframe
+                and not candle.is_closed
                 or forming
-                or not candle.is_closed and index != len(values) - 1
+                or not candle.is_closed
+                and index != len(values) - 1
             )
             if (
                 candle.symbol != manifest.config.symbol
@@ -82,6 +96,19 @@ def _validate_candles(
             previous = candle.open_time
             forming = not candle.is_closed
         result[timeframe] = values
+    coverage_by_frame = {item.timeframe: item for item in manifest.coverage.timeframe_coverage}
+    primary_count = len(result[manifest.config.timeframe])
+    total = sum(len(values) for values in result.values())
+    if primary_count != manifest.coverage.available_primary_events or total != manifest.coverage.total_candle_inputs:
+        _fail(ReplayFailureCode.INPUT_INVALID)
+    for timeframe, values in result.items():
+        frame_coverage = coverage_by_frame[timeframe]
+        if len(values) != frame_coverage.available_events or not values:
+            _fail(ReplayFailureCode.INPUT_INVALID)
+        supplied_start = values[0].open_time
+        supplied_end = values[-1].open_time + dt.timedelta(seconds=SECONDS[timeframe])
+        if supplied_start > frame_coverage.available_start or supplied_end < frame_coverage.available_end:
+            _fail(ReplayFailureCode.INPUT_INVALID)
     return result
 
 
@@ -154,13 +181,13 @@ def make_replay_inputs(
 ) -> ReplayInputs:
     """Validate cheap collection counts before immutable Pydantic materialization."""
     canonical = _validate_candles(manifest, candles)
-    if len(news_events) > 2000 or len(quotes) > 3600:
-        _fail(ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED)
+    canonical_news = _bounded_tuple(news_events, _MAX_NEWS_EVENTS)
+    canonical_quotes = _bounded_tuple(quotes, _MAX_QUOTES)
     values = {
         "manifest": manifest,
         "candles": canonical,
-        "news_events": tuple(news_events),
-        "quotes": tuple(quotes),
+        "news_events": canonical_news,
+        "quotes": canonical_quotes,
         "tick_size": tick_size,
         "news_source": news_source,
         "news_mode": news_mode,
@@ -179,15 +206,32 @@ def make_replay_inputs(
     _validate_news(result)
     _validate_quotes(result)
     _validate_strategy_scope(result)
+    actual_fingerprint = historical_data_fingerprint(
+        symbol=manifest.config.symbol,
+        source=manifest.coverage.source,
+        candles=canonical,
+        news_events=result.news_events,
+        quotes=result.quotes,
+        news_source=result.news_source,
+        news_mode=result.news_mode,
+        calendar_available=result.calendar_available,
+    )
+    if actual_fingerprint != manifest.coverage.data_fingerprint:
+        _fail(ReplayFailureCode.INPUT_INVALID)
     return result
 
 
 def _visible_prefix(
-    candles: tuple[Candle, ...], timeframe: Timeframe, at: dt.datetime
+    candles: tuple[Candle, ...], timeframe: Timeframe, at: dt.datetime, warmup_start: dt.datetime
 ) -> tuple[Candle, ...]:
     latest_open = at - dt.timedelta(seconds=SECONDS[timeframe])
     stop = bisect_right(candles, latest_open, key=lambda candle: candle.open_time)
-    return candles[max(0, stop - _MAX_FRAME_WINDOW) : stop]
+    visible = tuple(
+        candle
+        for candle in candles[:stop]
+        if candle.is_closed and candle.open_time + dt.timedelta(seconds=SECONDS[timeframe]) >= warmup_start
+    )
+    return visible[-_MAX_FRAME_WINDOW:]
 
 
 def _selected_profile(config: StrategyConfig, config_id: str, profile_id: str, strategy_id: str):
@@ -222,7 +266,10 @@ def replay(inputs: ReplayInputs, *, stop_at: dt.datetime | None = None) -> Repla
     identities: dict[tuple[dt.datetime, str, str, str], str] = {}
     for event_time in primary_events:
         at = clock.advance(event_time)
-        visible = {timeframe: list(_visible_prefix(values, timeframe, at)) for timeframe, values in candles.items()}
+        visible = {
+            timeframe: list(_visible_prefix(values, timeframe, at, manifest.coverage.warmup_start))
+            for timeframe, values in candles.items()
+        }
         m1 = visible.get(Timeframe.M1, [])
         structure = analyze(
             m1[-_MAX_ANALYSIS_WINDOW:],
@@ -266,14 +313,9 @@ def replay(inputs: ReplayInputs, *, stop_at: dt.datetime | None = None) -> Repla
             manifest.config.strategy_id,
         )
         try:
-            evaluation = evaluate(context, inputs.strategy_config, traders=(selected,))
+            candidate = REGISTRY[manifest.config.strategy_id].evaluate(context, selected, inputs.strategy_config)
         except (KeyError, TypeError, ValueError) as error:
             _fail(ReplayFailureCode.STRATEGY_CONFIG_INVALID, error)
-        candidate = next(
-            item
-            for item in evaluation.candidates
-            if item.profile_id == selected.id and item.strategy_id == manifest.config.strategy_id
-        )
         if at < manifest.config.start:
             continue
         projected = context.dependency_projection(manifest.config.strategy_id)
@@ -312,9 +354,16 @@ def replay(inputs: ReplayInputs, *, stop_at: dt.datetime | None = None) -> Repla
     events.sort(key=lambda item: (item.as_of, item.profile_id, item.strategy_id, item.candidate_id))
     result_payload = {
         "replay_engine_version": REPLAY_ENGINE_VERSION,
-        "manifest_fingerprint": run_input_fingerprint(manifest),
         "cutoff": cutoff,
         "primary_events_processed": len(primary_events),
+        "primary_candles": tuple(
+            candle
+            for candle in primary
+            if candle.is_closed
+            and manifest.coverage.warmup_start
+            <= candle.open_time + dt.timedelta(seconds=SECONDS[manifest.config.timeframe])
+            <= cutoff
+        ),
         "events": events,
     }
     return ReplayResult(

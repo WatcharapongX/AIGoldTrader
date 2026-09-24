@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 PACKAGE = Path(__file__).parents[1] / "app" / "services" / "backtesting"
-FILES = (PACKAGE / "replay.py", PACKAGE / "replay_domain.py")
+FILES = (PACKAGE / "fingerprint.py", PACKAGE / "replay.py", PACKAGE / "replay_domain.py")
 FORBIDDEN_IMPORTS = (
     "app.services.risk",
     "app.services.ai",
@@ -83,8 +83,8 @@ def test_d2a_has_no_live_external_persistence_or_execution_dependency():
     assert violations == []
 
 
-def test_d2a_files_are_the_only_new_operational_layer_and_contain_no_sql_or_paths():
-    assert {path.name for path in FILES} == {"replay.py", "replay_domain.py"}
+def test_d2a_operational_files_contain_no_sql_or_paths():
+    assert {path.name for path in FILES} == {"fingerprint.py", "replay.py", "replay_domain.py"}
     for path in FILES:
         source = path.read_text(encoding="utf-8")
         assert not any(token in source.upper() for token in ("INSERT ", "UPDATE ", "DELETE "))

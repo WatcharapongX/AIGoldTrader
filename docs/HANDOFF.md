@@ -1,70 +1,75 @@
 # Rolling Agent Handoff — AIGoldTrader
 
 ## Session Result
-- Date: 2026-09-23.
+- Date: 2026-09-24.
 - Branch: `main`.
-- Starting SHA: `e202b1988da1a4d1b59b28122439c839bbfe55ff`.
-- Gate: Batch D2A Causal Replay Foundation implementation.
-- Result: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
+- Starting SHA: `236a5ab49fea3eef7888c3e890e8efe24d5ef71d`.
+- Gate: Batch D2A targeted remediation for V-D2A-06, 10, 12/13, 14, 29, and 36.
+- Result: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
 - D1 remains **CLOSED**.
 - D2B, D2C, and D3–D7 remain **NOT AUTHORIZED**.
 - Backtesting remains incomplete: Risk replay, fills, PnL/metrics, persistence, API, and UI are absent.
 
-## Production Implementation
-- `backend/app/services/backtesting/replay_domain.py` defines the stable replay failure vocabulary,
-  immutable replay inputs/events/results, and an aware-UTC strictly monotonic `ReplayClock`.
-- `backend/app/services/backtesting/replay.py` validates bounded canonical inputs, derives configured primary
-  close events, projects each required timeframe by its own close, and recomputes causal prefixes.
-- Replay reuses `analysis.engine.analyze`, `news.engine.build_context`,
-  `strategy.context.build_context(..., replay=True)`, canonical profiles, `strategy.engine.evaluate`,
-  SetupCandidate, and suggestion-only TradePlan contracts without copying strategy or structure rules.
-- Warm-up primary events feed reconstructed state but cannot emit reportable events before requested start.
-- News revisions are selected only when `available_at <= T`; quote evidence requires both market timestamp
-  and `observed_at` at or before `T`; news structure is rebuilt from the same causal M1 prefix.
-- Events are bounded, unique, and ordered by `(as_of, profile_id, strategy_id, candidate_id)`.
-- Event and replay fingerprints are canonical and contain no wall-clock, random, or operational input.
-- `REPLAY_ENGINE_VERSION` is now server-owned as `replay-engine-1.0.0` and remains part of D1 provenance
-  and the existing run-input fingerprint. Contract and fingerprint versions were not changed.
+## Production Remediation
+- `backend/app/services/backtesting/replay.py` now bounded-materializes candles, news, and quotes by iteration;
+  externally reported `Sequence.__len__` is not trusted for resource authority.
+- Primary, per-timeframe, and total actual candle counts must exactly reconcile with D1 coverage claims.
+- Each supplied timeframe's nominal candle span must support its declared authoritative range.
+- A final forming HTF candle may support source coverage but remains causally invisible until closed.
+- One central causal projection requires `is_closed`, nominal close at or before replay time, and nominal close at
+  or after the governed warm-up origin for every timeframe, including M1.
+- A candle closing exactly at `warmup_start` is included; earlier closes cannot influence replay state.
+- `backend/app/services/backtesting/fingerprint.py` now computes the server-owned SHA-256 historical snapshot
+  identity over source/symbol, candle semantics, news revisions, quotes, news source/mode, and calendar state.
+- `make_replay_inputs()` compares actual historical content with the manifest data fingerprint and rejects
+  mismatch using the bounded `REPLAY_INPUT_INVALID` code.
+- The full manifest/run-input fingerprint remains complete-run provenance identity.
+- The replay output fingerprint is causal-at-cutoff identity and excludes future full-source provenance; it
+  binds replay version, cutoff, processed primary candle semantics, and ordered replay events.
+- Replay evaluates exactly the requested canonical `REGISTRY` playbook with the selected canonical profile.
+  Unrelated allowed strategies are no longer evaluated and cannot abort the selected run.
+
+## Finding Status
+- V-D2A-06: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-10: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-12/13: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-14: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-29: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- V-D2A-36: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
 
 ## Causality Evidence
-- Full input plus cutoff equals the causal-prefix-only event stream and replay fingerprint at multiple cutoffs.
-- Mutating or removing future primary candles cannot change prefix output.
-- Mutating not-yet-closed H1, H4, D1, or W1 candles cannot change prefix Analysis or candidate identity.
-- A final forming HTF candle is accepted as input but never exposed as closed state.
-- Future economic revisions cannot change earlier news context, candidate, or event identity.
-- Delayed quotes remain invisible before `observed_at`; later visible quote mutations affect only later state.
-- Repeated identical replay produces identical events, ordering, identities, and fingerprints.
-- Existing TradePlan geometry is preserved as `SUGGESTION_ONLY`; no outcome or execution field exists.
-
-## Resource and Failure Semantics
-- D1 limits remain authoritative: 366 requested days, 250,000 primary events, 1,000,000 candle inputs,
-  and 100,000 reportable candidate events.
-- Primary and total candle counts reject before sequence materialization in the replay input factory.
-- Stable codes cover invalid input, non-monotonic input, resource rejection, causality violation,
-  unavailable historical news, and invalid profile/strategy configuration.
-- Conflicting duplicates fail closed; exact reportable event duplicates may only canonical-deduplicate.
-
-## Isolation Boundary
-- No RiskEngine, RiskDecision, Kill Switch, portfolio, reservation, database, SQLAlchemy, API, frontend,
-  background worker, broker, MT5, network, external AI, or filesystem-write dependency was added.
-- No entry-touch, fill, SL/TP outcome, trade lifecycle, cost application, PnL, metric, or equity logic exists.
-- Analysis, News, Strategy, Market Data, and Risk implementation files were not modified.
-- Trading safety remains PAPER with live automatic trading disabled and no broker execution authority.
+- Forming M1 content cannot alter Analysis, News fingerprint, Strategy context, candidate, TradePlan, event
+  fingerprint, or replay fingerprint.
+- Forming H1/H4/D1/W1 content remains invisible before its own close.
+- Two hundred extreme candles closing before `warmup_start` do not change reportable output or replay identity.
+- A candle closing exactly at `warmup_start` is present in causal state.
+- Future primary, HTF, news-revision, and quote mutations leave earlier output and replay identity equal.
+- A future-only full-source mutation changes source snapshot identity while leaving earlier causal output identity
+  unchanged.
+- Canonical candidate identity and suggestion-only TradePlan geometry retain parity with normal Strategy output.
 
 ## Verification Evidence
-- D2A focused and architecture: 23 passed; 0 failed.
-- D1 focused and architecture: 80 passed; 0 failed.
+- D2A focused plus architecture: 32 passed; 0 failed.
+- New finding-ID remediation group: 9 passed; 0 failed.
+- D1 focused plus architecture: 80 passed; 0 failed.
 - Market Data regression: 33 passed; 0 failed.
 - Analysis regression: 54 passed; 0 failed.
 - News regression: 67 passed; 0 failed.
 - Strategy regression: 68 passed; 0 failed.
-- Ruff over every changed/new Python file: PASS.
+- Ruff over all changed Python/test files: PASS.
 - `git diff --check`: PASS; line-ending notices only, no whitespace errors.
-- Existing deprecation warnings concern Starlette/httpx and the existing pytest-asyncio event-loop fixture.
+- Existing warnings remain limited to Starlette/httpx and pytest-asyncio deprecations.
+
+## Isolation and Safety
+- No RiskEngine, RiskDecision, Kill Switch, reservation, SQLAlchemy, Redis, API, frontend, background worker,
+  external AI, network, broker, MT5, or filesystem-write dependency was added.
+- No entry-touch, fill, SL/TP outcome, trade lifecycle, cost, PnL, metric, or equity logic exists.
+- Market Data, Analysis, News, Strategy, and Risk source files are unchanged.
+- Trading remains PAPER; live automatic trading and broker execution remain disabled and absent.
 
 ## Governance and Next Gate
-- D2A is **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**, not closed.
-- Next authorized task: D2A independent verification only using GPT-5.6 Sol / High.
+- D2A is **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**, not closed.
+- Next authorized task: D2A independent re-verification only using GPT-5.6 Sol / High.
 - D2B/D2C and D3–D7 remain **NOT AUTHORIZED**.
 - Do not implement Risk extraction, replay/Risk integration, fills, PnL/metrics, persistence, API, UI,
   Model Routing, Paper Trading, OMS, broker execution, or live trading.

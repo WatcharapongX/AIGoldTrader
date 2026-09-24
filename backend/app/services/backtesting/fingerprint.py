@@ -13,6 +13,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.services.market_data.domain import SECONDS, Candle, Timeframe
+from app.services.news.domain import EconomicEvent, ObservedQuote
+
 
 def canonical_decimal(value: Decimal) -> str:
     if not value.is_finite():
@@ -59,6 +62,42 @@ def canonical_json(value: Any) -> str:
 
 def semantic_fingerprint(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def historical_data_fingerprint(
+    *,
+    symbol: str,
+    source: str,
+    candles: dict[Timeframe, tuple[Candle, ...]],
+    news_events: tuple[EconomicEvent, ...] = (),
+    quotes: tuple[ObservedQuote, ...] = (),
+    news_source: str = "historical_unavailable",
+    news_mode: str = "UNAVAILABLE",
+    calendar_available: bool = False,
+) -> str:
+    """Bind a manifest to canonical semantic historical source content."""
+    candle_sets = [
+        {
+            "timeframe": timeframe,
+            "candles": tuple(sorted(values, key=lambda item: item.open_time)),
+        }
+        for timeframe, values in sorted(candles.items(), key=lambda item: SECONDS[item[0]])
+    ]
+    ordered_news = tuple(sorted(news_events, key=canonical_json))
+    ordered_quotes = tuple(sorted(quotes, key=canonical_json))
+    return semantic_fingerprint(
+        {
+            "kind": "historical-data-snapshot",
+            "symbol": symbol,
+            "source": source,
+            "candles": candle_sets,
+            "news_events": ordered_news,
+            "quotes": ordered_quotes,
+            "news_source": news_source,
+            "news_mode": news_mode,
+            "calendar_available": calendar_available,
+        }
+    )
 
 
 def config_fingerprint(config: BaseModel) -> str:

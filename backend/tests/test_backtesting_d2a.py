@@ -7,6 +7,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from app.services.analysis.engine import analyze
 from app.services.backtesting.domain import (
     REPLAY_ENGINE_VERSION,
     BacktestProvenance,
@@ -18,12 +19,21 @@ from app.services.backtesting.domain import (
     NewsVintageCoverage,
     TimeframeCoverage,
 )
-from app.services.backtesting.fingerprint import config_fingerprint, coverage_fingerprint, resource_policy_fingerprint
+from app.services.backtesting.fingerprint import (
+    config_fingerprint,
+    coverage_fingerprint,
+    historical_data_fingerprint,
+    resource_policy_fingerprint,
+)
 from app.services.backtesting.policy import BacktestResourcePolicy
-from app.services.backtesting.replay import make_replay_inputs, replay
+from app.services.backtesting.replay import _visible_prefix, make_replay_inputs, replay
 from app.services.backtesting.replay_domain import ReplayClock, ReplayError, ReplayFailureCode, ReplayStrategyEvent
 from app.services.market_data.domain import SECONDS, Candle, Timeframe, bucket
 from app.services.news.domain import EconomicEvent, ObservedQuote
+from app.services.news.engine import build_context as build_news_context
+from app.services.strategy.context import build_context as build_strategy_context
+from app.services.strategy.engine import REGISTRY, profiles
+from app.services.strategy.engine import evaluate as evaluate_strategies
 
 D = Decimal
 UTC = dt.UTC
@@ -33,7 +43,7 @@ END = dt.datetime(2025, 1, 6, 12, tzinfo=UTC)
 FRAMES = tuple(Timeframe)
 
 
-def candle(timeframe: Timeframe, opened: dt.datetime, price: str = "2000") -> Candle:
+def candle(timeframe: Timeframe, opened: dt.datetime, price: str = "2000", *, closed: bool = True) -> Candle:
     value = D(price)
     return Candle(
         symbol="XAUUSD",
@@ -47,7 +57,7 @@ def candle(timeframe: Timeframe, opened: dt.datetime, price: str = "2000") -> Ca
         bid_close=value + D("0.25"),
         ask_close=None,
         source="simulated",
-        is_closed=True,
+        is_closed=closed,
     )
 
 
@@ -56,24 +66,44 @@ def candles() -> dict[Timeframe, tuple[Candle, ...]]:
     for timeframe in FRAMES:
         step = dt.timedelta(seconds=SECONDS[timeframe])
         anchor = bucket(START, timeframe)
-        result[timeframe] = tuple(candle(timeframe, anchor - step * offset, str(2000 + offset)) for offset in (2, 1))
+        current = bucket(END - dt.timedelta(microseconds=1), timeframe)
+        prior = tuple(candle(timeframe, anchor - step * offset, str(2000 + offset)) for offset in (2, 1))
+        result[timeframe] = prior + (
+            candle(
+                timeframe,
+                current,
+                "2000",
+                closed=current + step <= END,
+            ),
+        )
     result[Timeframe.M1] = tuple(
         candle(Timeframe.M1, WARMUP + dt.timedelta(minutes=index), str(2000 + index % 7)) for index in range(240)
     )
     result[Timeframe.M5] = tuple(
-        candle(Timeframe.M5, dt.datetime(2025, 1, 6, 10, minute, tzinfo=UTC), str(2000 + minute / 10))
-        for minute in (30, 35, 40, 45, 50, 55)
+        candle(Timeframe.M5, dt.datetime(2025, 1, 6, 10, 30, tzinfo=UTC) + dt.timedelta(minutes=5 * index))
+        for index in range(18)
     )
     result[Timeframe.H1] = (
         candle(Timeframe.H1, dt.datetime(2025, 1, 6, 8, tzinfo=UTC), "1998"),
         candle(Timeframe.H1, dt.datetime(2025, 1, 6, 9, tzinfo=UTC), "1999"),
         candle(Timeframe.H1, dt.datetime(2025, 1, 6, 10, tzinfo=UTC), "2000"),
+        candle(Timeframe.H1, dt.datetime(2025, 1, 6, 11, tzinfo=UTC), "2001"),
     )
     return result
 
 
-def manifest(*, strategy_id="STRAT01", profile_id="research", values=None) -> BacktestRunManifest:
-    values = values or candles()
+def manifest(
+    *,
+    strategy_id="STRAT01",
+    profile_id="research",
+    values=None,
+    news_events=(),
+    quotes=(),
+    news_source="historical_unavailable",
+    news_mode="UNAVAILABLE",
+    calendar_available=False,
+) -> BacktestRunManifest:
+    values = values if values is not None else candles()
     config = BacktestRunConfig(
         start=START,
         end=END,
@@ -88,8 +118,8 @@ def manifest(*, strategy_id="STRAT01", profile_id="research", values=None) -> Ba
     frame_coverage = tuple(
         TimeframeCoverage(
             timeframe=timeframe,
-            available_start=WARMUP,
-            available_end=END,
+            available_start=values[timeframe][0].open_time,
+            available_end=values[timeframe][-1].open_time + dt.timedelta(seconds=SECONDS[timeframe]),
             requested_events=len(values[timeframe]),
             available_events=len(values[timeframe]),
             source="simulated",
@@ -119,7 +149,16 @@ def manifest(*, strategy_id="STRAT01", profile_id="research", values=None) -> Ba
         required_timeframes=FRAMES,
         timeframe_coverage=frame_coverage,
         news_vintages=news,
-        data_fingerprint="a" * 64,
+        data_fingerprint=historical_data_fingerprint(
+            symbol="XAUUSD",
+            source="simulated",
+            candles=values,
+            news_events=tuple(news_events),
+            quotes=tuple(quotes),
+            news_source=news_source,
+            news_mode=news_mode,
+            calendar_available=calendar_available,
+        ),
         status=CoverageStatus.SUFFICIENT,
     )
     provenance = BacktestProvenance(
@@ -147,10 +186,30 @@ def manifest(*, strategy_id="STRAT01", profile_id="research", values=None) -> Ba
 
 
 def inputs(values=None, **changes):
-    values = values or candles()
-    args = {"manifest": manifest(values=values), "candles": values, "tick_size": D("0.01")}
+    values = values if values is not None else candles()
+    snapshot_keys = ("news_events", "quotes", "news_source", "news_mode", "calendar_available")
+    snapshot = {key: changes[key] for key in snapshot_keys if key in changes}
+    governed = changes.pop("manifest", None) or manifest(values=values, **snapshot)
+    args = {"manifest": governed, "candles": values, "tick_size": D("0.01")}
     args.update(changes)
     return make_replay_inputs(**args)
+
+
+def replace_coverage(base: BacktestRunManifest, **changes) -> BacktestRunManifest:
+    coverage = DataCoverage(**{**base.coverage.model_dump(mode="python"), **changes})
+    provenance = BacktestProvenance(
+        **{
+            **base.provenance.model_dump(mode="python"),
+            "data_coverage_fingerprint": coverage_fingerprint(coverage),
+            "data_fingerprint": coverage.data_fingerprint,
+        }
+    )
+    return BacktestRunManifest(
+        config=base.config,
+        coverage=coverage,
+        provenance=provenance,
+        resource_policy_fingerprint=base.resource_policy_fingerprint,
+    )
 
 
 def event(replay_result, at):
@@ -225,30 +284,23 @@ def test_higher_timeframe_is_visible_only_at_its_own_close():
     for timeframe in (Timeframe.H4, Timeframe.D1, Timeframe.W1):
         frame = event(result, dt.datetime(2025, 1, 6, 10, 55, tzinfo=UTC)).context.frame(timeframe)
         assert frame is not None
-        assert all(
-            item.open_time + dt.timedelta(seconds=SECONDS[timeframe]) <= frame.as_of
-            for item in frame.candles
-        )
+        assert all(item.open_time + dt.timedelta(seconds=SECONDS[timeframe]) <= frame.as_of for item in frame.candles)
 
 
 def test_full_input_cutoff_equals_causal_prefix_for_multiple_cutoffs():
     values = candles()
-    governed_manifest = manifest(values=values)
     for cutoff in (
         dt.datetime(2025, 1, 6, 10, 45, tzinfo=UTC),
         dt.datetime(2025, 1, 6, 10, 55, tzinfo=UTC),
         dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC),
     ):
-        prefix = {
-            timeframe: tuple(
-                item
-                for item in frame
-                if item.open_time + dt.timedelta(seconds=SECONDS[timeframe]) <= cutoff
-            )
-            for timeframe, frame in values.items()
-        }
-        full = replay(make_replay_inputs(manifest=governed_manifest, candles=values), stop_at=cutoff)
-        causal = replay(make_replay_inputs(manifest=governed_manifest, candles=prefix), stop_at=cutoff)
+        mutated = dict(values)
+        future = values[Timeframe.M5][-1]
+        mutated[Timeframe.M5] = values[Timeframe.M5][:-1] + (
+            future.model_copy(update={"high": D("2600"), "close": D("2500"), "bid_close": D("2500")}),
+        )
+        full = replay(inputs(values), stop_at=cutoff)
+        causal = replay(inputs(mutated), stop_at=cutoff)
         assert semantic(full) == semantic(causal)
         assert full.replay_fingerprint == causal.replay_fingerprint
 
@@ -271,13 +323,9 @@ def test_future_primary_candle_mutation_and_removal_do_not_change_prefix():
         ),
     )
     assert semantic(replay(inputs(values), stop_at=cutoff)) == semantic(replay(inputs(mutated), stop_at=cutoff))
-    removed = dict(values)
-    removed[Timeframe.M5] = values[Timeframe.M5][:-1]
-    governed_manifest = manifest(values=values)
-    full = replay(make_replay_inputs(manifest=governed_manifest, candles=values), stop_at=cutoff)
-    without_future = replay(make_replay_inputs(manifest=governed_manifest, candles=removed), stop_at=cutoff)
-    assert semantic(full) == semantic(without_future)
-    assert full.replay_fingerprint == without_future.replay_fingerprint
+    full = replay(inputs(values), stop_at=cutoff)
+    changed = replay(inputs(mutated), stop_at=cutoff)
+    assert full.replay_fingerprint == changed.replay_fingerprint
 
 
 @pytest.mark.parametrize("timeframe", [Timeframe.H1, Timeframe.H4, Timeframe.D1, Timeframe.W1])
@@ -287,15 +335,17 @@ def test_future_higher_timeframe_mutation_does_not_change_prefix_analysis_or_can
     mutated = dict(values)
     current_open = bucket(cutoff, timeframe)
     existing = values[timeframe]
-    future = next((item for item in existing if item.open_time == current_open), candle(timeframe, current_open))
-    baseline = tuple(item for item in existing if item.open_time < current_open) + (future,)
-    values = {**values, timeframe: baseline}
-    mutated[timeframe] = baseline[:-1] + (
-        future.model_copy(update={"high": D("2600"), "close": D("2500"), "bid_close": D("2500")}),
+    future = next(item for item in existing if item.open_time == current_open)
+    mutated[timeframe] = tuple(
+        item
+        if item.open_time != current_open
+        else future.model_copy(update={"high": D("2600"), "close": D("2500"), "bid_close": D("2500")})
+        for item in existing
     )
     left = replay(inputs(values), stop_at=cutoff)
     right = replay(inputs(mutated), stop_at=cutoff)
     assert semantic(left) == semantic(right)
+    assert left.replay_fingerprint == right.replay_fingerprint
     left_frame = left.events[-1].context.frame(timeframe)
     right_frame = right.events[-1].context.frame(timeframe)
     assert left_frame is not None and right_frame is not None
@@ -310,7 +360,7 @@ def test_final_forming_higher_timeframe_is_accepted_but_never_visible():
     changed[Timeframe.H1] = values[Timeframe.H1][:-1] + (forming,)
     result = replay(inputs(changed), stop_at=dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC))
     frame = event(result, dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)).context.frame(Timeframe.H1)
-    assert frame is not None and frame.bars == 2
+    assert frame is not None and frame.bars == 3
 
 
 def test_future_news_revision_is_invisible_before_available_at_and_visible_after():
@@ -319,19 +369,77 @@ def test_future_news_revision_is_invisible_before_available_at_and_visible_after
     altered = future.model_copy(update={"actual": D("90"), "previous": D("120"), "revised_previous": D("121")})
     values = candles()
     common = dict(
-        manifest=manifest(strategy_id="STRAT05", profile_id="news", values=values),
-        candles=values,
-        tick_size=D("0.01"),
-        news_source="fixture_news",
-        news_mode="FIXTURE",
-        calendar_available=True,
+        candles=values, tick_size=D("0.01"), news_source="fixture_news", news_mode="FIXTURE", calendar_available=True
     )
     before = dt.datetime(2025, 1, 6, 10, 55, tzinfo=UTC)
-    original = replay(make_replay_inputs(news_events=(first, future), **common), stop_at=before)
-    changed = replay(make_replay_inputs(news_events=(first, altered), **common), stop_at=before)
+    original_events = (first, future)
+    changed_events = (first, altered)
+    original = replay(
+        make_replay_inputs(
+            manifest=manifest(
+                strategy_id="STRAT05",
+                profile_id="news",
+                values=values,
+                news_events=original_events,
+                news_source="fixture_news",
+                news_mode="FIXTURE",
+                calendar_available=True,
+            ),
+            news_events=original_events,
+            **common,
+        ),
+        stop_at=before,
+    )
+    changed = replay(
+        make_replay_inputs(
+            manifest=manifest(
+                strategy_id="STRAT05",
+                profile_id="news",
+                values=values,
+                news_events=changed_events,
+                news_source="fixture_news",
+                news_mode="FIXTURE",
+                calendar_available=True,
+            ),
+            news_events=changed_events,
+            **common,
+        ),
+        stop_at=before,
+    )
     assert semantic(original) == semantic(changed)
-    after_original = replay(make_replay_inputs(news_events=(first, future), **common), stop_at=END)
-    after_changed = replay(make_replay_inputs(news_events=(first, altered), **common), stop_at=END)
+    assert original.replay_fingerprint == changed.replay_fingerprint
+    after_original = replay(
+        make_replay_inputs(
+            manifest=manifest(
+                strategy_id="STRAT05",
+                profile_id="news",
+                values=values,
+                news_events=original_events,
+                news_source="fixture_news",
+                news_mode="FIXTURE",
+                calendar_available=True,
+            ),
+            news_events=original_events,
+            **common,
+        ),
+        stop_at=END,
+    )
+    after_changed = replay(
+        make_replay_inputs(
+            manifest=manifest(
+                strategy_id="STRAT05",
+                profile_id="news",
+                values=values,
+                news_events=changed_events,
+                news_source="fixture_news",
+                news_mode="FIXTURE",
+                calendar_available=True,
+            ),
+            news_events=changed_events,
+            **common,
+        ),
+        stop_at=END,
+    )
     assert semantic(after_original) != semantic(after_changed)
 
 
@@ -350,19 +458,29 @@ def test_delayed_quote_and_future_quote_mutation_do_not_change_earlier_output():
     changed = delayed[:-1] + (delayed[-1].model_copy(update={"ask": D("2004")}),)
     cutoff = dt.datetime(2025, 1, 6, 10, 55, tzinfo=UTC)
     common = dict(
-        manifest=manifest(strategy_id="STRAT05", profile_id="news", values=values),
-        candles=values,
-        tick_size=D("0.01"),
-        news_source="fixture_news",
-        news_mode="FIXTURE",
-        calendar_available=True,
+        candles=values, tick_size=D("0.01"), news_source="fixture_news", news_mode="FIXTURE", calendar_available=True
     )
-    assert semantic(replay(make_replay_inputs(quotes=delayed, **common), stop_at=cutoff)) == semantic(
-        replay(make_replay_inputs(quotes=changed, **common), stop_at=cutoff)
-    )
-    assert semantic(replay(make_replay_inputs(quotes=delayed, **common), stop_at=END)) != semantic(
-        replay(make_replay_inputs(quotes=changed, **common), stop_at=END)
-    )
+
+    def quote_inputs(items):
+        return make_replay_inputs(
+            manifest=manifest(
+                strategy_id="STRAT05",
+                profile_id="news",
+                values=values,
+                quotes=items,
+                news_source="fixture_news",
+                news_mode="FIXTURE",
+                calendar_available=True,
+            ),
+            quotes=items,
+            **common,
+        )
+
+    delayed_before = replay(quote_inputs(delayed), stop_at=cutoff)
+    changed_before = replay(quote_inputs(changed), stop_at=cutoff)
+    assert semantic(delayed_before) == semantic(changed_before)
+    assert delayed_before.replay_fingerprint == changed_before.replay_fingerprint
+    assert semantic(replay(quote_inputs(delayed), stop_at=END)) != semantic(replay(quote_inputs(changed), stop_at=END))
 
 
 def test_selected_profile_strategy_is_authoritative_and_invalid_pair_rejects():
@@ -478,8 +596,7 @@ def test_input_order_duplicates_identity_and_source_fail_closed():
         (values[Timeframe.M5][::-1], ReplayFailureCode.NON_MONOTONIC),
         (values[Timeframe.M5] + (values[Timeframe.M5][-1],), ReplayFailureCode.NON_MONOTONIC),
         (
-            values[Timeframe.M5][:-1]
-            + (values[Timeframe.M5][-1].model_copy(update={"symbol": "EURUSD"}),),
+            values[Timeframe.M5][:-1] + (values[Timeframe.M5][-1].model_copy(update={"symbol": "EURUSD"}),),
             ReplayFailureCode.INPUT_INVALID,
         ),
     ):
@@ -490,28 +607,401 @@ def test_input_order_duplicates_identity_and_source_fail_closed():
         assert error.value.code is expected
 
 
-class Oversized(Sequence[Candle]):
-    def __init__(self, size: int):
-        self.size = size
+class DishonestSequence(Sequence[Candle]):
+    def __init__(self, values, reported: int):
+        self.values = values
+        self.reported = reported
 
     def __len__(self):
-        return self.size
+        return self.reported
 
     def __getitem__(self, index):
-        raise AssertionError("resource rejection must happen before materialization")
+        return self.values[index]
 
 
-def test_primary_and_total_input_bounds_reject_before_materialization():
+def test_primary_and_total_input_bounds_use_bounded_materialization(monkeypatch):
+    import app.services.backtesting.replay as replay_module
+
     values = candles()
-    too_many_primary = dict(values)
-    too_many_primary[Timeframe.M5] = Oversized(250_001)
+    primary = values[Timeframe.M5]
+    for reported in (1, len(primary) + 100):
+        changed = {**values, Timeframe.M5: DishonestSequence(primary, reported)}
+        assert len(make_replay_inputs(manifest=manifest(values=values), candles=changed).candles[Timeframe.M5]) == len(
+            primary
+        )
+    listed = {**values, Timeframe.M5: list(primary)}
+    assert make_replay_inputs(manifest=manifest(values=values), candles=listed)
+    monkeypatch.setattr(replay_module, "MAX_PRIMARY_REPLAY_EVENTS", len(primary))
+    assert make_replay_inputs(manifest=manifest(values=values), candles=values)
+    extra = candle(Timeframe.M5, END)
+    too_many = {**values, Timeframe.M5: DishonestSequence(primary + (extra,), 1)}
+    with pytest.raises(ReplayError) as error:
+        make_replay_inputs(manifest=manifest(values=values), candles=too_many)
+    assert error.value.code is ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED
+
+    monkeypatch.setattr(replay_module, "MAX_PRIMARY_REPLAY_EVENTS", 250_000)
+    total = sum(map(len, values.values()))
+    monkeypatch.setattr(replay_module, "MAX_TOTAL_CANDLE_INPUTS", total)
+    assert make_replay_inputs(manifest=manifest(values=values), candles=values)
+    monkeypatch.setattr(replay_module, "MAX_TOTAL_CANDLE_INPUTS", total - 1)
+    with pytest.raises(ReplayError) as global_limit:
+        make_replay_inputs(manifest=manifest(values=values), candles=values)
+    assert global_limit.value.code is ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED
+
+
+def test_v_d2a_06_forming_m1_is_never_causally_visible():
+    values = candles()
+    final = values[Timeframe.M1][-1]
+    forming = final.model_copy(
+        update={
+            "open": D("9000"),
+            "high": D("9999"),
+            "low": D("1"),
+            "close": D("8000"),
+            "volume": D("999"),
+            "bid_close": D("8000"),
+            "is_closed": False,
+        }
+    )
+    neutral = final.model_copy(update={"is_closed": False})
+    extreme_values = {**values, Timeframe.M1: values[Timeframe.M1][:-1] + (forming,)}
+    neutral_values = {**values, Timeframe.M1: values[Timeframe.M1][:-1] + (neutral,)}
+
+    def news_inputs(frame_values):
+        return make_replay_inputs(
+            manifest=manifest(
+                strategy_id="STRAT05",
+                profile_id="news",
+                values=frame_values,
+                news_source="fixture_news",
+                news_mode="FIXTURE",
+                calendar_available=True,
+            ),
+            candles=frame_values,
+            news_source="fixture_news",
+            news_mode="FIXTURE",
+            calendar_available=True,
+        )
+
+    assert _visible_prefix(extreme_values[Timeframe.M1], Timeframe.M1, END, WARMUP) == _visible_prefix(
+        values[Timeframe.M1][:-1], Timeframe.M1, END, WARMUP
+    )
+    extreme = replay(news_inputs(extreme_values), stop_at=END)
+    baseline = replay(news_inputs(neutral_values), stop_at=END)
+    assert semantic(extreme) == semantic(baseline)
+    assert extreme.replay_fingerprint == baseline.replay_fingerprint
+    extreme_event = event(extreme, END)
+    baseline_event = event(baseline, END)
+    assert extreme_event.context.frame(Timeframe.M1) == baseline_event.context.frame(Timeframe.M1)
+    assert extreme_event.context.news_fingerprint == baseline_event.context.news_fingerprint
+    assert extreme_event.candidate == baseline_event.candidate
+    assert extreme_event.trade_plan == baseline_event.trade_plan
+    assert extreme_event.event_fingerprint == baseline_event.event_fingerprint
+
+    closed_values = {
+        **values,
+        Timeframe.M1: values[Timeframe.M1][:-1] + (forming.model_copy(update={"is_closed": True}),),
+    }
+    closed = replay(news_inputs(closed_values), stop_at=END)
+    frame = event(closed, END).context.frame(Timeframe.M1)
+    assert frame is not None and any(item.open_time == final.open_time for item in frame.candles)
+
+
+def test_v_d2a_10_fixed_warmup_origin_and_boundary_inclusion():
+    values = candles()
+    boundary = candle(Timeframe.M1, WARMUP - dt.timedelta(minutes=1), "2100")
+    governed = {**values, Timeframe.M1: (boundary,) + values[Timeframe.M1]}
+    prior = tuple(candle(Timeframe.M1, WARMUP - dt.timedelta(minutes=201 - index), "9000") for index in range(200))
+    extended = {**values, Timeframe.M1: prior + governed[Timeframe.M1]}
+    left = replay(inputs(governed), stop_at=START)
+    right = replay(inputs(extended), stop_at=START)
+    assert semantic(left) == semantic(right)
+    assert left.replay_fingerprint == right.replay_fingerprint
+    frame = left.events[-1].context.frame(Timeframe.M1)
+    assert frame is not None
+    assert boundary.open_time in {item.open_time for item in frame.candles}
+    assert all(item.open_time != prior[-1].open_time for item in frame.candles)
+
+
+def test_v_d2a_12_13_actual_counts_reconcile_with_manifest():
+    values = candles()
+    base = manifest(values=values)
+    primary_claim = replace_coverage(
+        base,
+        available_primary_events=base.coverage.available_primary_events + 1,
+        requested_primary_events=base.coverage.requested_primary_events + 1,
+        total_candle_inputs=base.coverage.total_candle_inputs + 1,
+        timeframe_coverage=tuple(
+            item.model_copy(
+                update={
+                    "available_events": item.available_events + 1,
+                    "requested_events": item.requested_events + 1,
+                }
+            )
+            if item.timeframe is Timeframe.M5
+            else item
+            for item in base.coverage.timeframe_coverage
+        ),
+    )
     with pytest.raises(ReplayError) as primary:
-        make_replay_inputs(manifest=manifest(values=values), candles=too_many_primary)
-    assert primary.value.code is ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED
-    too_many_total = {timeframe: Oversized(120_000) for timeframe in FRAMES}
-    with pytest.raises(ReplayError) as total:
-        make_replay_inputs(manifest=manifest(values=values), candles=too_many_total)
-    assert total.value.code is ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED
+        make_replay_inputs(manifest=primary_claim, candles=values)
+    assert primary.value.code is ReplayFailureCode.INPUT_INVALID
+
+    w1_claim = replace_coverage(
+        base,
+        total_candle_inputs=base.coverage.total_candle_inputs + 1,
+        timeframe_coverage=tuple(
+            item.model_copy(
+                update={
+                    "available_events": item.available_events + 1,
+                    "requested_events": item.requested_events + 1,
+                }
+            )
+            if item.timeframe is Timeframe.W1
+            else item
+            for item in base.coverage.timeframe_coverage
+        ),
+    )
+    with pytest.raises(ReplayError) as w1:
+        make_replay_inputs(manifest=w1_claim, candles=values)
+    assert w1.value.code is ReplayFailureCode.INPUT_INVALID
+
+    frames = list(base.coverage.timeframe_coverage)
+    m1_index = next(index for index, item in enumerate(frames) if item.timeframe is Timeframe.M1)
+    h1_index = next(index for index, item in enumerate(frames) if item.timeframe is Timeframe.H1)
+    frames[m1_index] = frames[m1_index].model_copy(
+        update={
+            "available_events": frames[m1_index].available_events + 1,
+            "requested_events": frames[m1_index].requested_events + 1,
+        }
+    )
+    frames[h1_index] = frames[h1_index].model_copy(
+        update={
+            "available_events": frames[h1_index].available_events - 1,
+            "requested_events": frames[h1_index].requested_events - 1,
+        }
+    )
+    per_frame_claim = replace_coverage(base, timeframe_coverage=tuple(frames))
+    with pytest.raises(ReplayError) as per_frame:
+        make_replay_inputs(manifest=per_frame_claim, candles=values)
+    assert per_frame.value.code is ReplayFailureCode.INPUT_INVALID
+
+
+def test_v_d2a_12_13_claimed_range_must_be_supported_and_forming_htf_is_accepted():
+    values = candles()
+    assert make_replay_inputs(manifest=manifest(values=values), candles=values)
+    assert not values[Timeframe.W1][-1].is_closed
+    base = manifest(values=values)
+    frames = tuple(
+        item.model_copy(update={"available_start": item.available_start - dt.timedelta(minutes=1)})
+        if item.timeframe is Timeframe.M5
+        else item
+        for item in base.coverage.timeframe_coverage
+    )
+    unsupported = replace_coverage(base, timeframe_coverage=frames)
+    with pytest.raises(ReplayError) as error:
+        make_replay_inputs(manifest=unsupported, candles=values)
+    assert error.value.code is ReplayFailureCode.INPUT_INVALID
+
+
+def test_v_d2a_14_historical_snapshot_fingerprint_is_canonical_and_content_bound():
+    values = candles()
+    base = historical_data_fingerprint(symbol="XAUUSD", source="simulated", candles=values)
+    reversed_mapping = dict(reversed(tuple(values.items())))
+    assert historical_data_fingerprint(symbol="XAUUSD", source="simulated", candles=reversed_mapping) == base
+    assert historical_data_fingerprint(symbol="XAUUSD", source="simulated", candles=values) == base
+
+    changed_candles = dict(values)
+    changed_candles[Timeframe.M1] = values[Timeframe.M1][:-1] + (
+        values[Timeframe.M1][-1].model_copy(update={"volume": D("11")}),
+    )
+    assert historical_data_fingerprint(symbol="XAUUSD", source="simulated", candles=changed_candles) != base
+    with pytest.raises(ReplayError) as mismatch:
+        make_replay_inputs(manifest=manifest(values=values), candles=changed_candles)
+    assert mismatch.value.code is ReplayFailureCode.INPUT_INVALID
+
+    first = news_revision(version=1, available_at=START + dt.timedelta(minutes=5), actual="180")
+    second = news_revision(version=2, available_at=START + dt.timedelta(minutes=6), actual="190")
+    news_args = dict(
+        symbol="XAUUSD",
+        source="simulated",
+        candles=values,
+        news_source="fixture_news",
+        news_mode="FIXTURE",
+        calendar_available=True,
+    )
+    news_hash = historical_data_fingerprint(news_events=(first, second), **news_args)
+    assert historical_data_fingerprint(news_events=(second, first), **news_args) == news_hash
+    assert (
+        historical_data_fingerprint(news_events=(first, second.model_copy(update={"actual": D("191")})), **news_args)
+        != news_hash
+    )
+
+    quote = ObservedQuote(timestamp=START, observed_at=START, bid=D("2000"), ask=D("2000.2"), source="simulated")
+    quote_hash = historical_data_fingerprint(symbol="XAUUSD", source="simulated", candles=values, quotes=(quote,))
+    assert (
+        historical_data_fingerprint(
+            symbol="XAUUSD",
+            source="simulated",
+            candles=values,
+            quotes=(quote.model_copy(update={"ask": D("2000.3")}),),
+        )
+        != quote_hash
+    )
+
+
+def test_v_d2a_14_future_snapshot_mutation_does_not_change_causal_output_fingerprint():
+    values = candles()
+    cutoff = dt.datetime(2025, 1, 6, 10, 50, tzinfo=UTC)
+    changed = dict(values)
+    changed[Timeframe.M5] = values[Timeframe.M5][:-1] + (
+        values[Timeframe.M5][-1].model_copy(update={"volume": D("999")}),
+    )
+    assert manifest(values=values).coverage.data_fingerprint != manifest(values=changed).coverage.data_fingerprint
+    left = replay(inputs(values), stop_at=cutoff)
+    right = replay(inputs(changed), stop_at=cutoff)
+    assert semantic(left) == semantic(right)
+    assert left.replay_fingerprint == right.replay_fingerprint
+
+
+def test_v_d2a_29_selected_strategy_only_and_canonical_candidate_parity(monkeypatch):
+    baseline_inputs = inputs()
+    baseline = replay(baseline_inputs, stop_at=START)
+    replay_event = baseline.events[-1]
+    visible = {
+        timeframe: list(_visible_prefix(frame, timeframe, START, WARMUP))
+        for timeframe, frame in baseline_inputs.candles.items()
+    }
+    structure = analyze(
+        visible[Timeframe.M1],
+        "XAUUSD",
+        Timeframe.M1,
+        "simulated",
+        requested=300,
+        config=baseline_inputs.analysis_config,
+    )
+    news = build_news_context(
+        [],
+        START,
+        source=baseline_inputs.news_source,
+        mode=baseline_inputs.news_mode,
+        config=baseline_inputs.news_config,
+        candles=visible[Timeframe.M1],
+        quotes=[],
+        structure=structure,
+        calendar_available=False,
+        market_source="simulated",
+    )
+    full_context = build_strategy_context(
+        candles=visible,
+        symbol="XAUUSD",
+        source="simulated",
+        at=START,
+        news=news,
+        tick_size=baseline_inputs.tick_size,
+        config=baseline_inputs.strategy_config,
+        analysis_config=baseline_inputs.analysis_config,
+        replay=True,
+        quotes=(),
+    )
+    selected = next(
+        item for item in profiles(baseline_inputs.strategy_config, full_context.config_id) if item.id == "research"
+    )
+    normal = evaluate_strategies(
+        full_context,
+        baseline_inputs.strategy_config,
+        traders=(selected,),
+    )
+    assert replay_event.candidate == next(item for item in normal.candidates if item.strategy_id == "STRAT01")
+
+    def fail(*_args, **_kwargs):
+        raise ValueError("patched strategy failure")
+
+    for strategy_id in ("STRAT02", "STRAT03", "STRAT04", "STRAT05", "STRAT06"):
+        monkeypatch.setattr(REGISTRY[strategy_id], "evaluate", fail)
+    assert replay(inputs(), stop_at=START).events[-1].candidate == replay_event.candidate
+    monkeypatch.setattr(REGISTRY["STRAT01"], "evaluate", fail)
+    with pytest.raises(ReplayError) as selected_failure:
+        replay(inputs(), stop_at=START)
+    assert selected_failure.value.code is ReplayFailureCode.STRATEGY_CONFIG_INVALID
+
+
+def test_v_d2a_29_news_strategy_does_not_evaluate_sibling(monkeypatch):
+    values = candles()
+    governed = manifest(
+        strategy_id="STRAT05",
+        profile_id="news",
+        values=values,
+        news_source="fixture_news",
+        news_mode="FIXTURE",
+        calendar_available=True,
+    )
+    replay_inputs = make_replay_inputs(
+        manifest=governed,
+        candles=values,
+        news_source="fixture_news",
+        news_mode="FIXTURE",
+        calendar_available=True,
+    )
+
+    def fail(*_args, **_kwargs):
+        raise ValueError("STRAT06 must not run")
+
+    monkeypatch.setattr(REGISTRY["STRAT06"], "evaluate", fail)
+    assert {item.strategy_id for item in replay(replay_inputs, stop_at=START).events} == {"STRAT05"}
+
+
+def test_v_d2a_36_news_and_quote_sequences_are_bounded_by_iteration(monkeypatch):
+    import app.services.backtesting.replay as replay_module
+
+    values = candles()
+    event_one = news_revision(version=1, available_at=START + dt.timedelta(minutes=5), actual="180")
+    event_two = news_revision(version=2, available_at=START + dt.timedelta(minutes=6), actual="190")
+    monkeypatch.setattr(replay_module, "_MAX_NEWS_EVENTS", 1)
+    news_manifest = manifest(
+        values=values,
+        news_events=(event_one,),
+        news_source="fixture_news",
+        news_mode="FIXTURE",
+        calendar_available=True,
+    )
+    assert make_replay_inputs(
+        manifest=news_manifest,
+        candles=values,
+        news_events=DishonestSequence((event_one,), 99),
+        news_source="fixture_news",
+        news_mode="FIXTURE",
+        calendar_available=True,
+    )
+    with pytest.raises(ReplayError) as news_limit:
+        make_replay_inputs(
+            manifest=news_manifest,
+            candles=values,
+            news_events=DishonestSequence((event_one, event_two), 1),
+            news_source="fixture_news",
+            news_mode="FIXTURE",
+            calendar_available=True,
+        )
+    assert news_limit.value.code is ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED
+
+    quote_one = ObservedQuote(timestamp=START, observed_at=START, bid=D("2000"), ask=D("2000.2"), source="simulated")
+    quote_two = quote_one.model_copy(
+        update={"timestamp": START + dt.timedelta(seconds=1), "observed_at": START + dt.timedelta(seconds=1)}
+    )
+    monkeypatch.setattr(replay_module, "_MAX_QUOTES", 1)
+    quote_manifest = manifest(values=values, quotes=(quote_one,))
+    assert make_replay_inputs(
+        manifest=quote_manifest,
+        candles=values,
+        quotes=DishonestSequence((quote_one,), 99),
+    )
+    with pytest.raises(ReplayError) as quote_limit:
+        make_replay_inputs(
+            manifest=quote_manifest,
+            candles=values,
+            quotes=DishonestSequence((quote_one, quote_two), 1),
+        )
+    assert quote_limit.value.code is ReplayFailureCode.RESOURCE_LIMIT_EXCEEDED
 
 
 def test_candidate_output_bound_fails_without_complete_partial_result(monkeypatch):
