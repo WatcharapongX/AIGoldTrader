@@ -6,13 +6,14 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2A — CLOSED.**
+**Current gate: D2B1 — PURE RISK CONTRACTS AND DETERMINISTIC POLICY CORE — AUTHORIZED FOR IMPLEMENTATION.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
 D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. The D2A deterministic causal
-replay foundation passed independent GPT-5.6 Sol / High verification and is closed. The next permitted activity is
-**D2B Governance Authorization only**; this permits architecture/governance review and does **NOT** authorize D2B
-implementation. D2B, D2C, and D3–D7 remain **NOT AUTHORIZED** and require separate governance advancement after the
+replay foundation passed independent GPT-5.6 Sol / High verification and is closed. D2B governance found that the
+pure policy extraction and safety-critical live-wrapper migration must be independently gated. Only **D2B1 — Pure
+Risk Contracts and Deterministic Policy Core** is authorized for implementation. D2B2, D2C, and D3–D7 remain
+**NOT AUTHORIZED** and require separate governance advancement after the
 preceding unit is implemented, independently verified, documented, and closed. Do not automatically progress.
 
 ## Current State
@@ -22,6 +23,7 @@ preceding unit is implemented, independently verified, documented, and closed. D
 - Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - D2A causal replay is implemented, independently verified, and closed; this does not make
   the Backtesting Engine complete.
+- D2B1 pure Risk contracts/kernel is authorized but not implemented; no live Risk path migration is authorized.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
 
@@ -171,23 +173,139 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
      included in existing provenance and run-input fingerprint authority;
    - focused prefix-invariance, future-mutation, higher-timeframe close, news-revision, quote-observation,
      repeat-determinism, resource-bound, and isolation tests.
-3. **D2B — PLANNED / NOT AUTHORIZED**: extract a typed, immutable, side-effect-free shared Risk policy core.
-   It must preserve live policy ordering and behavior; accept explicit account, policy, symbol spec, quote/news,
-   portfolio exposure, lifecycle, isolated Kill Switch state, and replay `T`; reuse deterministic sizing and safe
-   fingerprint components; and leave database locks, live automatic Kill Switch mutation/read, idempotency,
-   repository access, and reservation release/create in the live wrapper. Independent Sol/High parity review is
-   required before D2C.
-4. **D2C — PLANNED / NOT AUTHORIZED**: integrate D2A candidate/TradePlan output with the verified D2B pure Risk
+3. **D2B1 — AUTHORIZED FOR IMPLEMENTATION**: add typed immutable pure Risk inputs/results, stable reason codes,
+   deterministic policy evaluation, pure portfolio-capacity math, explicit time/safety state, reusable sizing,
+   semantic fingerprinting, characterization fixtures, and pure/live parity tests. The existing live
+   `RiskEngine.evaluate_candidate()` orchestration must remain the behavioral oracle and must not delegate to the
+   new core in D2B1. No database, Kill Switch, reservation, API, replay, or persistence integration is authorized.
+4. **D2B2 — PLANNED / NOT AUTHORIZED**: migrate the live Risk wrapper to the independently verified D2B1 core while
+   preserving advisory locks, automatic Kill Switch persistence, persistent data-health tracking, idempotency,
+   existing-decision reconciliation, reservation atomicity, transactions, and exact public `RiskDecision` parity.
+   Independent GPT-5.6 Sol / High verification is required before D2C.
+5. **D2C — PLANNED / NOT AUTHORIZED**: integrate D2A candidate/TradePlan output with the verified D2B pure Risk
    seam, deterministic risk-decision event ordering/fingerprinting, and complete replay/Risk parity and isolation
    tests. No fills, trade lifecycle, PnL, or persistence.
-5. **D3 — PLANNED / NOT AUTHORIZED**: deterministic fills, costs, ambiguity, isolated portfolio lifecycle,
+6. **D3 — PLANNED / NOT AUTHORIZED**: deterministic fills, costs, ambiguity, isolated portfolio lifecycle,
    candidate/risk/trade in-memory ledgers.
-6. **D4 — PLANNED / NOT AUTHORIZED**: canonical metrics, equity/drawdown, and derivable period dimensions.
-7. **D5 — PLANNED / NOT AUTHORIZED**: additive PostgreSQL persistence, bounded in-process execution/cancellation,
+7. **D4 — PLANNED / NOT AUTHORIZED**: canonical metrics, equity/drawdown, and derivable period dimensions.
+8. **D5 — PLANNED / NOT AUTHORIZED**: additive PostgreSQL persistence, bounded in-process execution/cancellation,
    authenticated API, ownership and output pagination. No Celery/Redis/Kafka.
-8. **D6 — PLANNED / NOT AUTHORIZED**: minimal Backtesting UI consuming authoritative D5 APIs.
-9. **D7 — PLANNED / NOT AUTHORIZED**: determinism, no-lookahead, security/resource, migration, API, browser,
+9. **D6 — PLANNED / NOT AUTHORIZED**: minimal Backtesting UI consuming authoritative D5 APIs.
+10. **D7 — PLANNED / NOT AUTHORIZED**: determinism, no-lookahead, security/resource, migration, API, browser,
    and full regression independent closure gate.
+
+## D2B Governance Decision
+**PLAN REQUIRES SPLIT.** The current `RiskEngine.evaluate_candidate()` interleaves deterministic policy with
+stateful live authority. Extracting the pure kernel and migrating the live wrapper in one change would couple
+policy correctness to PostgreSQL locking, Kill Switch persistence, data-health counters, idempotency, and
+reservation reconciliation. D2B is therefore split into D2B1 and D2B2; only D2B1 is authorized now.
+
+### Responsibility Classification
+**Pure policy** owns deterministic evaluation from explicit immutable inputs: Kill Switch state interpretation;
+quote availability/freshness and absolute/post-news spread rules; news unavailable/blackout/pre-news reduction/
+post-news monitoring and provenance; account freshness, equity, daily/weekly loss, drawdown and cooldown; candidate
+terminal state and TradePlan expiry/status; symbol-spec validity/freshness; requested/min/max risk; open-risk
+fail-closed behavior; account/symbol/directional/concurrency capacity math; position sizing; stable reason codes and
+Thai text mapping; safety-trigger facts; and semantic payload/fingerprint construction.
+
+**Live orchestration** retains `AsyncSession`, PostgreSQL advisory/row locks, account/policy/spec/news/quote
+acquisition, automatic Kill Switch activation and state persistence/read, persistent provider/source data-health
+counters, reservation queries/create/release/reconciliation, existing-decision lookup, idempotency cache handling,
+decision persistence, transaction behavior, and live account/symbol authority.
+
+**Mixed / extraction required** includes `RiskEngine.evaluate_candidate()`,
+`PortfolioRiskManager.check_budget_capacity()`, `PortfolioRiskManager.get_summary()`,
+`KillSwitchManager.evaluate_automatic_triggers()`, `_blocked_decision()`, and the current dependency fingerprint.
+Their deterministic calculations move to the pure boundary; their DB mutation, live identity, and persistence
+effects remain in the live wrapper. `default_gold_spec()` is a live/test convenience only because it defaults to
+wall time; the pure core must never invoke it without an explicit `observed_at`.
+
+### D2B1 Pure Input Contract
+Add frozen Pydantic contracts with `extra="forbid"`, aware UTC timestamps, and Decimal-safe fields. A
+`PureRiskEvaluationInput` must contain:
+- explicit `as_of`; `SetupCandidate`; `TradePlanSuggestion`; `AccountSnapshot`; `RiskPolicy`; and
+  `SymbolSpecification`;
+- explicit quote available/unavailable state and quote data, with no provider fetch;
+- normalized point-in-time news state/events/provenance, with no latest-revision or provider lookup;
+- explicit Kill Switch state `ACTIVE`, `INACTIVE`, or `UNKNOWN` plus bounded provenance;
+- explicit data-health state (`HEALTHY`, `DEGRADED`, `TRIGGERED`, or `UNKNOWN`) and already-derived persistent
+  failure facts; the pure layer never owns a counter;
+- authoritative candidate lifecycle status and transition count;
+- requested risk percentage;
+- an immutable portfolio exposure snapshot containing open risk, DB-authoritative reserved risk after exclusion
+  of the exact candidate reservation, symbol risk, directional risk, active reservation count, open-position count,
+  and an explicit duplicate-reservation/integrity state.
+
+The account fields consumed by policy are balance, equity, peak equity, daily/weekly realized PnL, open risk,
+reserved risk as evidence only, consecutive losses, last loss time, cooldown deadline, open-position count,
+snapshot identity/version/source, and `as_of`. D2B1 does not evolve any account field.
+
+### D2B1 Pure Output Contract
+Add a frozen `PureRiskResult` containing decision (`APPROVED`, `REDUCED`, or `BLOCKED`), requested/target/approved
+risk percentages and amounts, position size, stop distance and loss-per-lot evidence, portfolio exposure before/
+after, typed bounded reason/warning/block codes with existing Thai display text, market/news provenance, automatic
+safety-trigger facts, and a versioned canonical semantic payload/fingerprint. It must contain no random ID, DB row,
+reservation ID, session, or persistence-only field. `RiskDecision` remains a live-wrapper output in D2B2.
+
+### Time and Safety Authority
+- Every pure temporal comparison uses explicit `as_of`: account age is `as_of - account.as_of`, quote age is
+  `as_of - quote.timestamp`, and spec age is `as_of - spec.observed_at`.
+- The pure module must contain no `datetime.now()`, `utcnow()`, wall-clock fallback, random UUID, mutable cache,
+  thread-dependent state, or hidden singleton lookup.
+- `ACTIVE` Kill Switch blocks; `UNKNOWN` fails closed and blocks; only `INACTIVE` allows later rules.
+- Pure code derives daily-loss, drawdown, and instantaneous quote/data-safety trigger facts but never activates the
+  Kill Switch. In D2B2 the live wrapper will consume the same pure facts, update persistent data health, perform any
+  required activation, re-read the resulting Kill Switch state, and then invoke policy evaluation.
+- Persistent consecutive data-health tracking remains live orchestration keyed by provider/source. An unavailable
+  derived health state is explicit and fail-closed; D2B1 must not recreate DB tracking.
+
+### Portfolio and Sizing Boundary
+The live wrapper builds the exposure snapshot from locked reservation rows. Duplicate active reservations are
+represented as an explicit integrity anomaly and deterministically block. DB reservation rows remain the sole live
+source of reserved risk; `AccountSnapshot.reserved_risk_pct` is not additively double-counted. Existing behavior
+that blocks any positive unattributed `account.open_risk_pct` is preserved. Pure capacity order is cooldown,
+integrity anomaly, unattributed open risk, concurrent count, account capacity, symbol capacity, directional
+capacity, per-trade cap/reduction, then approved amount. `calculate_position_size()` is already deterministic
+Decimal math and must be reused unchanged, including worst-case entry, downward step quantization, volume bounds,
+geometry validation, and `actual_risk <= approved_risk` fail-closed behavior.
+
+### Policy Ordering and Identity
+Preserve existing observable rule/reason order: automatic trigger facts and post-trigger Kill Switch dominance;
+news; candidate terminal state; account freshness/equity/daily loss/weekly loss/drawdown/cooldown; symbol-spec
+validity/freshness; unattributed open risk; quote availability/freshness/spread; TradePlan status/expiry; portfolio
+capacity; sizing; final resolution. Characterization fixtures must capture the exact current ordering before the
+live wrapper is migrated.
+
+`compute_evaluation_intent_identity()` is pure and may be reused subject to unchanged fixtures.
+`compute_risk_dependency_fingerprint()` is pure in execution but requires extraction to a versioned semantic
+payload because it currently includes live Kill Switch identity fields and only aggregate portfolio exposure.
+The new pure fingerprint must cover every explicit policy dependency, including detailed capacity/integrity and
+data-health state, while excluding DB row order and live-only IDs. Decision ID derivation, cache lookup, reservation
+identity, and persisted `RiskDecision` identity remain live-wrapper responsibilities.
+
+### Authorized D2B1 Implementation Scope
+- Add the infrastructure-free pure contracts, stable reason-code layer, policy evaluator, safety-trigger facts,
+  pure capacity calculation, and semantic fingerprint under `app.services.risk`.
+- Reuse `calculate_position_size()` unchanged. Extract/rehome `is_cooldown_active()` only if the result remains
+  byte/semantics equivalent and the existing import remains compatible.
+- Capture current live behavior as immutable characterization fixtures before asserting pure parity.
+- Add pure unit, portfolio-capacity, Kill Switch, news, freshness, lifecycle, sizing, fingerprint-determinism,
+  repeat-determinism, and architecture-isolation tests.
+- Add parity tests for the required APPROVED/REDUCED/BLOCKED matrix. Existing expected live behavior is the oracle;
+  expected outputs must not be edited merely to accommodate the refactor.
+- The pure module must have zero imports/calls to SQLAlchemy, `AsyncSession`, models, `risk.repository`,
+  `risk.kill_switch`, reservation records, provider APIs, MetaTrader5, network, filesystem writes, or wall clocks.
+- Do not make `RiskEngine.evaluate_candidate()` delegate to the new core in D2B1. That migration is D2B2.
+
+### D2B1 Acceptance and Gate
+The matrix must include normal approval; per-trade, portfolio and news reduction; news blackout/unavailable and
+post-news spread blocks; quote unavailable/stale/excessive spread; account stale/equity zero/daily loss/weekly loss/
+drawdown/cooldown; stale spec; terminal candidate states; expired plan; account/symbol/directional/concurrent caps;
+unattributed open risk; duplicate reservation anomaly; below-minimum size; and invalid sizing geometry. Explicit
+Kill Switch cases are ACTIVE, UNKNOWN, and INACTIVE. Same input must yield the same result and fingerprint.
+
+D2B1 completion requires all existing Risk tests plus the new pure/parity/isolation suites to pass and an
+independent GPT-5.6 Sol / High verification gate. D2B1 completion does not authorize D2B2 or D2C.
 
 ## Required Test Program
 - Same code/config/data/request produces byte-equivalent canonical results and fingerprints.
@@ -217,7 +335,8 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 - D1 is **CLOSED** following independent GPT-5.6 Sol / High re-verification.
 - D1-IV-001 through D1-IV-006 are **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT**; D2A passed independent GPT-5.6 Sol / High verification and is **CLOSED**.
-- Next permitted activity is **D2B Governance Authorization only**. D2B implementation is **NOT AUTHORIZED**.
+- Governance result: **PLAN REQUIRES SPLIT** for D2B.
+- Next authorized activity is **D2B1 implementation only**. D2B2, D2C, and D3–D7 are **NOT AUTHORIZED**.
 
 ## D2A Final Closure Status
 - NEW-D2A-RV-001: **CLOSED**.
@@ -235,4 +354,4 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
   Market Data 33 passed; Analysis 54 passed; News 67 passed; Strategy 68 passed; independent temporary
   usable-period/adversarial probes PASS; Ruff PASS; `git diff --check` PASS.
 - No reproducible P0/P1/P2/P3 finding remains within D2A scope.
-- D2B, D2C, and D3–D7 remain not authorized. Do not begin the next sub-batch automatically.
+- D2B1 alone is authorized. D2B2, D2C, and D3–D7 remain not authorized; do not begin the next sub-batch automatically.

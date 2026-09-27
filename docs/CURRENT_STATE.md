@@ -3,9 +3,9 @@
 - **Last Verified Date**: 2026-09-27
 - **Authoritative Branch**: `main`
 - **Current Milestone**: Batch D remains OPEN; D1 and D2A are CLOSED.
-- **Current Active Gate**: D2A Governance Closure Complete.
-- **Next Permitted Activity**: D2B Governance Authorization only; D2B implementation is NOT AUTHORIZED.
-- **Prohibited Progression**: D2B implementation, D2C, and D3–D7 remain NOT AUTHORIZED.
+- **Current Active Gate**: D2B1 Pure Risk Contracts and Deterministic Policy Core — AUTHORIZED FOR IMPLEMENTATION.
+- **Next Permitted Activity**: D2B1 implementation only, using GPT-5.6 Sol / High.
+- **Prohibited Progression**: D2B2 live-wrapper migration, D2C, and D3–D7 remain NOT AUTHORIZED.
 
 ---
 
@@ -49,6 +49,10 @@
   repeat-run determinism without DB, Risk, AI, broker/MT5, network, or filesystem-write dependencies.
 - **Backtesting Engine**: NOT COMPLETE. No Risk replay integration, fill simulation, trade lifecycle, PnL,
   equity curve, metrics engine, persistence, Backtesting API, or results UI exists.
+- **D2B governance**: PLAN REQUIRES SPLIT. D2B1 is authorized to add an infrastructure-free pure Risk input/result
+  contract and deterministic policy kernel with characterization, parity, determinism, and isolation tests.
+  The existing live `RiskEngine.evaluate_candidate()` remains the behavioral oracle and must not delegate to the
+  new core during D2B1. D2B2 live-wrapper migration and D2C replay/Risk integration are NOT AUTHORIZED.
 - **D2A identity model**: `historical_data_fingerprint` identifies the complete historical source snapshot;
   `run_input_fingerprint` identifies the governed D1 manifest; `replay_input_fingerprint` identifies that manifest
   plus complete D2A replay configuration; `replay_fingerprint` identifies causal output through the effective
@@ -73,8 +77,9 @@ and interacts with live Kill Switch, data-health, decisions, and reservations. B
 side-effect-free policy seam and isolated simulation state; no live table or authority state may be mutated.
 
 Governance therefore split D2 into independently gated units. D2A owns only the causal replay foundation
-through existing Analysis, Strategy, and suggestion-only TradePlan output. D2B will separately extract and
-prove parity of the shared pure Risk policy seam. D2C will later integrate the two. This prevents replay
+through existing Analysis, Strategy, and suggestion-only TradePlan output. D2B is further split: D2B1 extracts
+and proves the pure Risk contracts/kernel, while D2B2 will later migrate the live wrapper and close parity.
+D2C will later integrate replay with the verified seam. This prevents replay
 causality work from being coupled to a safety-critical live Risk refactor.
 
 The approved staged data flow is:
@@ -91,7 +96,10 @@ The approved staged data flow is:
 - D2A: **CLOSED** following PASS at the GPT-5.6 Sol / High D2A Usable-Period Independent Re-Verification gate.
 - NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, V-D2A-14, NEW-D2A-RV-003, V-D2A-06,
   V-D2A-10, V-D2A-12/13, V-D2A-29, and V-D2A-36 are **CLOSED**.
-- D2B implementation, D2C, and D3–D7: **NOT AUTHORIZED**.
+- D2B governance: **PLAN REQUIRES SPLIT**.
+- D2B1 Pure Risk Contracts and Deterministic Policy Core: **AUTHORIZED FOR IMPLEMENTATION**.
+- D2B2 Live Risk Wrapper Migration and Parity Closure: **NOT AUTHORIZED**.
+- D2C and D3–D7: **NOT AUTHORIZED**.
 - Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
 - Paper Trading: **NOT AUTHORIZED**.

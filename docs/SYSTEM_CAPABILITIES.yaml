@@ -10,9 +10,9 @@ governance:
   completed_sub_batches:
     - "D1"
     - "D2A"
-  active_sub_batch: null
-  active_scope: "D2B governance authorization only"
-  next_authorized_activity: "D2B governance authorization only; implementation not authorized"
+  active_sub_batch: "D2B1"
+  active_scope: "Pure Risk contracts and deterministic policy core with characterization, parity, determinism, and isolation tests; no live wrapper delegation"
+  next_authorized_activity: "D2B1 implementation only; D2B2 and D2C not authorized"
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -41,7 +41,7 @@ capabilities:
     details: "Deterministic STRAT01-STRAT06, 7 profiles, causal immutable contexts and TradePlan suggestions"
   risk_engine:
     status: implemented
-    details: "Authoritative policy, sizing, exposure/reservations, fingerprints and fail-closed Kill Switch"
+    details: "Current live behavior remains authoritative; D2B1 pure-core implementation is authorized but not implemented; D2B2 live-wrapper migration is not authorized"
   ai_agents:
     status: implemented
     analytical_agents: 6
@@ -55,10 +55,10 @@ capabilities:
     details: "Batch B independently closed"
   backtesting:
     status: causal_replay_foundation_verified_risk_fill_not_implemented
-    governance: split_program_d1_d2a_closed_d2b_not_authorized
+    governance: split_program_d1_d2a_closed_d2b1_authorized_d2b2_not_authorized
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 and D2A are independently verified and closed; D2A pure causal replay enforces exact coverage.usable_end as its hard causal ceiling while preserving complete historical-source, run-input, replay-input, and causal-output identity semantics; all D2A findings are closed; D2B implementation, D2C, and D3-D7 are not authorized; no Risk replay integration, fill simulation, trade lifecycle, PnL, equity, metrics, persistence, Backtesting API, or results UI exists"
+    details: "D1 and D2A are independently verified and closed; D2B governance requires a D2B1/D2B2 split; only D2B1 pure Risk contracts/kernel is authorized, with no live wrapper or replay integration; D2B2, D2C, and D3-D7 are not authorized; no Risk replay integration, fill simulation, trade lifecycle, PnL, equity, metrics, persistence, Backtesting API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:
