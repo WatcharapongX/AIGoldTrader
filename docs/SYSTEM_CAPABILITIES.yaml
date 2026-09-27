@@ -1,6 +1,6 @@
 # Machine-Readable Capability Registry — AIGoldTrader
 version: "1.0"
-last_verified: "2026-09-24"
+last_verified: "2026-09-27"
 repository: "WatcharapongX/AIGoldTrader"
 branch: "main"
 
@@ -10,7 +10,7 @@ governance:
   completed_sub_batches:
     - "D1"
   active_sub_batch: "D2A"
-  active_scope: "Independent re-verification of the remediated causal replay foundation; no Risk evaluation or fills"
+  active_scope: "Independent re-verification of D2A usable-period authority remediation; no Risk evaluation or fills"
   next_authorized_activity: "D2A independent re-verification only (GPT-5.6 Sol / High)"
   later_sub_batches_authorized: false
 
@@ -57,7 +57,7 @@ capabilities:
     governance: split_program_d1_closed_d2a_pending_independent_reverification
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 is independently verified and closed; D2A pure causal replay is second-remediated with exact scheduled-gap reconciliation, execution-entry source rebinding, private canonical execution snapshots, and complete replay-input identity over manifest plus Strategy/Analysis/News/tick-size semantics; NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, and the V-D2A-14 roll-up are pending independent re-verification; D2B/D2C and D3-D7 are not authorized; no Risk replay integration, fill simulation, PnL/metrics, persistence, API, or results UI exists"
+    details: "D1 is independently verified and closed; D2A pure causal replay now enforces coverage.usable_end as its hard causal ceiling while preserving complete-source and replay-input identity semantics; NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, the V-D2A-14 roll-up, V-D2A-06, V-D2A-10, V-D2A-12/13, V-D2A-29, and V-D2A-36 are closed; NEW-D2A-RV-003 is remediated pending independent re-verification; D2B/D2C and D3-D7 are not authorized; no Risk replay integration, fill simulation, PnL/metrics, persistence, API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:

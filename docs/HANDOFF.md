@@ -1,76 +1,75 @@
 # Rolling Agent Handoff — AIGoldTrader
 
 ## Session Result
-- Date: 2026-09-24.
+- Date: 2026-09-27.
 - Branch: `main`.
-- Starting SHA: `944688507e4ef0d8d867fb7d20b2d07c5f57544d`.
-- Gate: Batch D2A second targeted remediation.
+- Starting SHA: `c433083fa3f8408449678fead447c9ae5632f744`.
+- Gate: Batch D2A usable-period authority remediation only.
 - Result: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
 - D1 remains **CLOSED**.
-- D2A is not closed.
+- D2A remains open and is not governance-closed.
 - D2B, D2C, and D3–D7 remain **NOT AUTHORIZED**.
 - The Backtesting Engine remains incomplete: no Risk replay, fills, PnL/metrics, persistence, API, or UI.
 
-## NEW-D2A-RV-001 — Interior Continuity
-- Replay enumerates canonical expected buckets from existing `SECONDS[timeframe]` cadence.
-- Continuity is governed only inside each frame's authoritative warm-up/available/usable intersection.
-- Actual missing bucket opens are reconciled exactly with the union of scheduled-closure evidence.
-- Accepted evidence must use the same timeframe, canonical aligned boundaries,
-  `EXPECTED_SCHEDULED_CLOSURE`, and `SCHEDULED_MARKET_CLOSURE`.
-- Undeclared M5 and H1 gaps fail closed.
-- Wrong-timeframe, incomplete, and orphan closure evidence fails closed.
-- One declaration may cover multiple missing buckets deterministically.
-- Gaps strictly before `warmup_start` remain irrelevant.
-- No weekend, holiday, exchange, broker, or network calendar was introduced.
+## NEW-D2A-RV-003 — Usable-Period Authority
+- Root cause: replay bounded its cutoff by requested `stop_at` and `manifest.config.end`, but omitted
+  canonical `manifest.coverage.usable_end`.
+- D1 intentionally permits `usable_end < requested_end`; no D1 contract was changed.
+- Replay now derives `requested_cutoff` after private canonical execution preparation.
+- Effective cutoff is `min(requested_cutoff, config.end, coverage.usable_end)`.
+- Default replay clamps to `usable_end` when coverage ends before the requested period.
+- Explicit `stop_at` before `usable_end` remains authoritative.
+- Explicit `stop_at` at or after `usable_end` clamps to `usable_end`.
+- Events exactly at `usable_end` remain eligible; events later than it cannot enter replay.
+- Non-aligned `usable_end` remains the exact reported cutoff and is never rounded forward.
+- Primary event admission uses candle close `<=` the effective cutoff, so Analysis, News, Strategy,
+  candidate generation, and suggestion-only TradePlan output cannot advance past usable authority.
 
-## V-D2A-14-RV-01 — Execution Binding
-- `replay()` is now an independent authoritative validation boundary.
-- It bounded-materializes and reconstructs manifest, candles, news, quotes, and configs.
-- Every model is revalidated from semantic content into a caller-independent local copy.
-- The historical source fingerprint is recomputed from that exact local snapshot before Analysis runs.
-- Directly constructed `ReplayInputs` with mismatched content fail closed.
-- Post-factory candle mapping replacement and nested candle mutation fail closed.
-- Post-factory news and quote tampering fail closed.
-- Invalid nested Analysis/News configuration mutation fails revalidation.
-- Execution uses only private tuple-backed candle frames and canonical local configs after preparation.
-- A test mutating caller-owned candles after preparation proved output remains unchanged.
+## Identity and Prefix Semantics
+- `historical_data_fingerprint` still covers the complete supplied historical source snapshot.
+- `run_input_fingerprint` still covers the governed D1 manifest.
+- `replay_input_fingerprint` still covers manifest plus complete D2A configuration.
+- `stop_at` remains an output-prefix selector and is not added to replay-input identity.
+- `ReplayResult.cutoff` reports the effective authoritative cutoff.
+- `replay_fingerprint` continues to include that cutoff and the exact causal prefix.
+- Post-usable candle, news, and quote mutations change complete-source/input identity when truthful,
+  but do not change events, event fingerprints, or replay fingerprint through `usable_end`.
 
-## NEW-D2A-RV-002 — Complete Replay Input Identity
-- Historical source identity remains `historical_data_fingerprint` only.
-- D1 governance identity remains `run_input_fingerprint(manifest)` and D1 schema is unchanged.
-- `replay_configuration_fingerprint` covers the replay-engine version, complete StrategyConfig,
-  AnalysisConfig, NewsConfig, and canonical tick size.
-- `replay_input_fingerprint` combines D1 manifest identity with replay configuration identity.
-- `ReplayResult` exposes `replay_input_fingerprint` alongside causal `replay_fingerprint`.
-- Strategy, Analysis, News, and tick-size semantic mutations change complete replay input identity.
-- Mapping insertion order and equivalent Decimal spellings remain identity-invariant.
-- Non-positive and non-finite tick sizes fail closed.
-- Future-only source mutation changes source/run/replay-input identity but not earlier causal output identity.
+## Finding Status
+- NEW-D2A-RV-001: **CLOSED**.
+- V-D2A-14-RV-01: **CLOSED**.
+- NEW-D2A-RV-002: **CLOSED**.
+- V-D2A-14 roll-up: **CLOSED**.
+- V-D2A-06: **CLOSED**.
+- V-D2A-10: **CLOSED**.
+- V-D2A-12/13: **CLOSED**.
+- V-D2A-29: **CLOSED**.
+- V-D2A-36: **CLOSED**.
+- NEW-D2A-RV-003: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
 
-## Verification Evidence
-- D2A focused: 47 passed; architecture: 2 passed; combined: 49 passed.
-- New finding-ID group: 17 passed.
+## Focused Verification
+- Ten explicit NEW-D2A-RV-003 regression tests were added.
+- They cover default and explicit cutoff behavior, exact and non-aligned boundaries, ordinary full coverage,
+  future candle/news/quote isolation, identity separation, and deterministic stop-selector semantics.
+- D2A focused: 57 passed; architecture: 2 passed; combined: 59 passed.
+- NEW-D2A-RV-003 focused group: 10 passed.
 - D1 focused plus architecture: 80 passed.
-- Market Data: 33 passed.
-- Analysis: 54 passed.
-- News: 67 passed.
-- Strategy: 68 passed.
+- Market Data: 33 passed; Analysis: 54 passed; News: 67 passed; Strategy: 68 passed.
 - Ruff over changed Python/test files: PASS.
 - `git diff --check`: PASS.
 - Existing warnings remain limited to Starlette/httpx and pytest-asyncio deprecations.
 
 ## Isolation and Safety
-- No Market Data, Analysis, News, Strategy, or Risk implementation file changed.
-- No RiskEngine, Kill Switch, reservation, SQLAlchemy, DB, Redis, API, frontend, AI, network,
-  broker, MT5, filesystem-write, fill, cost, PnL, metric, or equity dependency was added.
+- Production change is confined to `backend/app/services/backtesting/replay.py`.
+- Tests change only `backend/tests/test_backtesting_d2a.py`.
+- No Market Data, Analysis, News, Strategy, Risk, D1 domain, or fingerprint implementation was changed.
+- No RiskEngine, Kill Switch, reservation, database, API, frontend, AI, broker, MT5, fill, PnL,
+  metric, equity, or persistence dependency was added.
 - TradePlan remains suggestion-only and AI remains advisory-only.
 - `TRADING_MODE=PAPER` and `LIVE_AUTO_TRADING=false` remain mandatory.
 
 ## Governance and Next Gate
-- NEW-D2A-RV-001: remediated, pending independent re-verification.
-- V-D2A-14-RV-01: remediated, pending independent re-verification.
-- NEW-D2A-RV-002: remediated, pending independent re-verification.
-- V-D2A-14 roll-up: remediated, pending independent re-verification.
-- V-D2A-06, V-D2A-10, V-D2A-12/13, V-D2A-29, and V-D2A-36 remain closed.
-- Next authorized task: D2A independent re-verification only using GPT-5.6 Sol / High.
+- Batch D remains **OPEN** and D1 remains **CLOSED**.
+- D2A is remediated but remains open pending independent GPT-5.6 Sol / High re-verification.
+- Next authorized activity after finalization: D2A independent re-verification only.
 - Do not authorize or begin D2B/D2C, D3–D7, Model Routing, Paper Trading, OMS, broker, or live trading.

@@ -1,6 +1,6 @@
 # Canonical Current Operational State — AIGoldTrader
 
-- **Last Verified Date**: 2026-09-24
+- **Last Verified Date**: 2026-09-27
 - **Authoritative Branch**: `main`
 - **Current Milestone**: Batch D remains open; D1 is CLOSED and D2 governance requires a split.
 - **Current Active Gate**: D2A Causal Replay Foundation — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.
@@ -42,7 +42,9 @@
   re-verification. It provides pure UTC causal-prefix replay through existing Analysis, News, Strategy, and
   suggestion-only TradePlan output. Its second targeted remediation adds exact interior candle-gap reconciliation,
   execution-entry source rebinding through a private canonical snapshot, and a complete D2A replay-input identity
-  over the D1 manifest plus Strategy/Analysis/News/tick-size semantics. The Backtesting Engine is not complete:
+  over the D1 manifest plus Strategy/Analysis/News/tick-size semantics. Its usable-period remediation additionally
+  clamps every replay invocation to canonical `coverage.usable_end` without truncating complete-source identity.
+  The Backtesting Engine is not complete:
   no Risk replay integration, fill simulation, PnL/metrics engine, persistence, API, or results UI exists.
 - The current `/backtesting` page renders Strategy Lab historical evaluation snapshots. These are not trades,
   fills, PnL, an equity curve, or a real backtest.
@@ -76,8 +78,8 @@ The approved staged data flow is:
 - Batch D: **OPEN; D1 CLOSED**.
 - D1: **CLOSED**.
 - D2A: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- NEW-D2A-RV-001, V-D2A-14-RV-01, and NEW-D2A-RV-002 are remediated locally and pending independent
-  re-verification; V-D2A-14 has the same roll-up status.
+- NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, and the V-D2A-14 roll-up are independently CLOSED.
+- NEW-D2A-RV-003 is remediated locally and pending independent re-verification.
 - D2B, D2C, and D3–D7: **NOT AUTHORIZED**.
 - Backtesting: **CAUSAL REPLAY FOUNDATION REMEDIATED; PENDING INDEPENDENT VERIFICATION; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.

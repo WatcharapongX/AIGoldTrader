@@ -225,6 +225,23 @@ def replace_coverage(base: BacktestRunManifest, **changes) -> BacktestRunManifes
     )
 
 
+def replace_usable_end(base: BacktestRunManifest, usable_end: dt.datetime) -> BacktestRunManifest:
+    coverage = DataCoverage(**{**base.coverage.model_dump(mode="python"), "usable_end": usable_end})
+    provenance = BacktestProvenance(
+        **{
+            **base.provenance.model_dump(mode="python"),
+            "usable_end": usable_end,
+            "data_coverage_fingerprint": coverage_fingerprint(coverage),
+        }
+    )
+    return BacktestRunManifest(
+        config=base.config,
+        coverage=coverage,
+        provenance=provenance,
+        resource_policy_fingerprint=base.resource_policy_fingerprint,
+    )
+
+
 def event(replay_result, at):
     return next(item for item in replay_result.events if item.as_of == at)
 
@@ -1250,3 +1267,195 @@ def test_new_d2a_rv_002_invalid_tick_size_rejects(tick_size):
     with pytest.raises(ReplayError) as error:
         make_replay_inputs(manifest=manifest(), candles=candles(), tick_size=tick_size)
     assert error.value.code is ReplayFailureCode.INPUT_INVALID
+
+
+def test_new_d2a_rv_003_default_replay_clamps_to_usable_end():
+    values = candles()
+    usable_end = dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)
+    governed = replace_usable_end(manifest(values=values), usable_end)
+
+    result = replay(make_replay_inputs(manifest=governed, candles=values))
+
+    assert result.cutoff == usable_end
+    assert all(item.as_of <= usable_end for item in result.events)
+
+
+def test_new_d2a_rv_003_explicit_stop_after_usable_end_clamps():
+    values = candles()
+    usable_end = dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)
+    governed = replace_usable_end(manifest(values=values), usable_end)
+
+    result = replay(
+        make_replay_inputs(manifest=governed, candles=values),
+        stop_at=dt.datetime(2025, 1, 6, 11, 45, tzinfo=UTC),
+    )
+
+    assert result.cutoff == usable_end
+    assert all(item.as_of <= usable_end for item in result.events)
+
+
+def test_new_d2a_rv_003_explicit_stop_before_usable_end_is_respected():
+    values = candles()
+    usable_end = dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)
+    governed = replace_usable_end(manifest(values=values), usable_end)
+    requested = dt.datetime(2025, 1, 6, 10, 50, tzinfo=UTC)
+
+    result = replay(make_replay_inputs(manifest=governed, candles=values), stop_at=requested)
+
+    assert result.cutoff == requested
+    assert all(item.as_of <= requested for item in result.events)
+
+
+def test_new_d2a_rv_003_event_at_exact_usable_boundary_is_allowed():
+    values = candles()
+    usable_end = dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)
+    governed = replace_usable_end(manifest(values=values), usable_end)
+
+    result = replay(make_replay_inputs(manifest=governed, candles=values))
+
+    assert any(item.as_of == usable_end for item in result.events)
+    assert not any(item.as_of > usable_end for item in result.events)
+
+
+def test_new_d2a_rv_003_non_aligned_usable_end_never_rounds_forward():
+    values = candles()
+    usable_end = dt.datetime(2025, 1, 6, 11, 2, tzinfo=UTC)
+    governed = replace_usable_end(manifest(values=values), usable_end)
+
+    result = replay(make_replay_inputs(manifest=governed, candles=values))
+
+    assert result.cutoff == usable_end
+    assert result.events[-1].as_of == dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)
+    assert all(item.as_of <= usable_end for item in result.events)
+
+
+def test_new_d2a_rv_003_full_usable_period_preserves_normal_replay():
+    values = candles()
+    baseline = replay(inputs(values))
+    governed = replace_usable_end(manifest(values=values), END)
+
+    result = replay(make_replay_inputs(manifest=governed, candles=values, tick_size=D("0.01")))
+
+    assert result == baseline
+
+
+def test_new_d2a_rv_003_future_candle_changes_identity_not_usable_prefix():
+    values = candles()
+    usable_end = dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)
+    future = next(item for item in values[Timeframe.M5] if item.open_time == usable_end)
+    changed = {
+        **values,
+        Timeframe.M5: tuple(
+            item
+            if item.open_time != future.open_time
+            else future.model_copy(
+                update={
+                    "open": D("2400"),
+                    "high": D("2402"),
+                    "low": D("2399"),
+                    "close": D("2401"),
+                    "bid_close": D("2401"),
+                }
+            )
+            for item in values[Timeframe.M5]
+        ),
+    }
+    left_manifest = replace_usable_end(manifest(values=values), usable_end)
+    right_manifest = replace_usable_end(manifest(values=changed), usable_end)
+
+    left = replay(make_replay_inputs(manifest=left_manifest, candles=values, tick_size=D("0.01")))
+    right = replay(make_replay_inputs(manifest=right_manifest, candles=changed, tick_size=D("0.01")))
+
+    assert left_manifest.coverage.data_fingerprint != right_manifest.coverage.data_fingerprint
+    assert run_input_fingerprint(left_manifest) != run_input_fingerprint(right_manifest)
+    assert left.replay_input_fingerprint != right.replay_input_fingerprint
+    assert left.events == right.events
+    assert left.replay_fingerprint == right.replay_fingerprint
+
+
+def test_new_d2a_rv_003_future_news_changes_identity_not_usable_prefix():
+    values = candles()
+    usable_end = dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)
+    future = news_revision(
+        version=2,
+        available_at=dt.datetime(2025, 1, 6, 11, 30, tzinfo=UTC),
+        actual="220",
+    )
+    changed = future.model_copy(update={"actual": D("90"), "revised_previous": D("120")})
+    metadata = dict(news_source="fixture_news", news_mode="FIXTURE", calendar_available=True)
+    left_manifest = replace_usable_end(
+        manifest(
+            strategy_id="STRAT05",
+            profile_id="news",
+            values=values,
+            news_events=(future,),
+            **metadata,
+        ),
+        usable_end,
+    )
+    right_manifest = replace_usable_end(
+        manifest(
+            strategy_id="STRAT05",
+            profile_id="news",
+            values=values,
+            news_events=(changed,),
+            **metadata,
+        ),
+        usable_end,
+    )
+    common = dict(candles=values, news_source="fixture_news", news_mode="FIXTURE", calendar_available=True)
+
+    left = replay(make_replay_inputs(manifest=left_manifest, news_events=(future,), **common))
+    right = replay(make_replay_inputs(manifest=right_manifest, news_events=(changed,), **common))
+
+    assert left_manifest.coverage.data_fingerprint != right_manifest.coverage.data_fingerprint
+    assert left.replay_input_fingerprint != right.replay_input_fingerprint
+    assert left.events == right.events
+    assert left.replay_fingerprint == right.replay_fingerprint
+
+
+def test_new_d2a_rv_003_future_quote_changes_identity_not_usable_prefix():
+    values = candles()
+    usable_end = dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)
+    observed_at = dt.datetime(2025, 1, 6, 11, 5, tzinfo=UTC)
+    future = ObservedQuote(
+        timestamp=observed_at,
+        observed_at=observed_at,
+        bid=D("2000"),
+        ask=D("2000.2"),
+        source="simulated",
+    )
+    changed = future.model_copy(update={"ask": D("2004")})
+    left_manifest = replace_usable_end(manifest(values=values, quotes=(future,)), usable_end)
+    right_manifest = replace_usable_end(manifest(values=values, quotes=(changed,)), usable_end)
+
+    left = replay(make_replay_inputs(manifest=left_manifest, candles=values, quotes=(future,)))
+    right = replay(make_replay_inputs(manifest=right_manifest, candles=values, quotes=(changed,)))
+
+    assert left_manifest.coverage.data_fingerprint != right_manifest.coverage.data_fingerprint
+    assert left.replay_input_fingerprint != right.replay_input_fingerprint
+    assert left.events == right.events
+    assert left.replay_fingerprint == right.replay_fingerprint
+
+
+def test_new_d2a_rv_003_stop_selector_preserves_replay_input_identity():
+    values = candles()
+    usable_end = dt.datetime(2025, 1, 6, 11, 0, tzinfo=UTC)
+    governed = replace_usable_end(manifest(values=values), usable_end)
+    replay_inputs = make_replay_inputs(manifest=governed, candles=values)
+
+    before = replay(replay_inputs, stop_at=dt.datetime(2025, 1, 6, 10, 50, tzinfo=UTC))
+    boundary = replay(replay_inputs, stop_at=usable_end)
+    after = replay(replay_inputs, stop_at=dt.datetime(2025, 1, 6, 11, 45, tzinfo=UTC))
+
+    assert before.cutoff == dt.datetime(2025, 1, 6, 10, 50, tzinfo=UTC)
+    assert boundary.cutoff == usable_end
+    assert after.cutoff == usable_end
+    input_fingerprints = {
+        before.replay_input_fingerprint,
+        boundary.replay_input_fingerprint,
+        after.replay_input_fingerprint,
+    }
+    assert len(input_fingerprints) == 1
+    assert before.replay_fingerprint != boundary.replay_fingerprint
+    assert boundary.replay_fingerprint == after.replay_fingerprint

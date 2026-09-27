@@ -419,7 +419,8 @@ def replay(inputs: ReplayInputs, *, stop_at: dt.datetime | None = None) -> Repla
     execution = _prepare_replay_execution(inputs)
     manifest = execution.manifest
     candles = {frame.timeframe: frame.candles for frame in execution.candle_frames}
-    cutoff = min(_utc(stop_at) if stop_at is not None else manifest.config.end, manifest.config.end)
+    requested_cutoff = _utc(stop_at) if stop_at is not None else manifest.config.end
+    cutoff = min(requested_cutoff, manifest.config.end, manifest.coverage.usable_end)
     if cutoff < manifest.coverage.warmup_start:
         _fail(ReplayFailureCode.INPUT_INVALID)
     primary = candles[manifest.config.timeframe]
