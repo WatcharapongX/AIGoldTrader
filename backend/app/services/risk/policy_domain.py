@@ -253,6 +253,8 @@ class PureRiskEvaluationInput(PureModel):
             raise ValueError("Portfolio symbol must match candidate")
         if self.portfolio.direction != self.trade_plan.direction:
             raise ValueError("Portfolio direction must match TradePlan")
+        if self.symbol_specification.symbol != self.candidate.symbol:
+            raise ValueError("SymbolSpecification symbol must match candidate")
         if self.portfolio.open_risk_pct != self.account.open_risk_pct:
             raise ValueError("Portfolio open risk must match account evidence")
         if self.portfolio.open_position_count != self.account.open_positions_count:

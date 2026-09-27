@@ -1,7 +1,7 @@
 """Side-effect-free deterministic Risk policy evaluation."""
 
 import datetime as dt
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow, localcontext
 from typing import NamedTuple
 
 from app.services.risk.domain import MarketProvenance, NewsEventAudit, NewsRiskProvenance
@@ -22,6 +22,19 @@ from app.services.risk.policy_fingerprint import compute_pure_risk_fingerprint
 from app.services.risk.sizing import SizingResult, calculate_position_size
 
 ZERO = Decimal("0")
+
+
+def _pure_risk_decimal_context() -> Context:
+    """Return a fresh context so no caller can mutate shared Decimal authority."""
+    return Context(
+        prec=28,
+        rounding=ROUND_HALF_EVEN,
+        Emin=-999999,
+        Emax=999999,
+        capitals=1,
+        clamp=0,
+        traps=[InvalidOperation, DivisionByZero, Overflow],
+    )
 
 
 class CapacityResult(NamedTuple):
@@ -350,8 +363,21 @@ def _news_evaluation(
     return target_risk_pct, news_reduced, provenance
 
 
+def _prepare_pure_risk_input(supplied: PureRiskEvaluationInput) -> PureRiskEvaluationInput:
+    """Rebuild a complete validated snapshot without trusting model construction history."""
+    payload = supplied.model_dump(mode="python", round_trip=True)
+    return PureRiskEvaluationInput.model_validate(payload)
+
+
 def evaluate_pure_risk(evaluation_input: PureRiskEvaluationInput) -> PureRiskResult:
-    """Evaluate Risk policy using only explicit immutable input state."""
+    """Validate and evaluate Risk policy under server-owned deterministic Decimal authority."""
+    with localcontext(_pure_risk_decimal_context()):
+        prepared = _prepare_pure_risk_input(evaluation_input)
+        return _evaluate_prepared_pure_risk(prepared)
+
+
+def _evaluate_prepared_pure_risk(evaluation_input: PureRiskEvaluationInput) -> PureRiskResult:
+    """Evaluate only the private canonical snapshot created at the public execution boundary."""
     account = evaluation_input.account
     policy = evaluation_input.policy
     spec = evaluation_input.symbol_specification
@@ -585,10 +611,10 @@ def evaluate_pure_risk(evaluation_input: PureRiskEvaluationInput) -> PureRiskRes
                 else exposure_after
             ),
             reason_codes=tuple(reason_codes),
-            warning_codes=tuple(warning_codes),
+            warning_codes=() if decision == "BLOCKED" else tuple(warning_codes),
             blocked_codes=tuple(blocked_codes),
             reasons_th=tuple(reasons_th),
-            warnings_th=tuple(warnings_th),
+            warnings_th=() if decision == "BLOCKED" else tuple(warnings_th),
             blocked_reasons_th=tuple(blocked_reasons_th),
             market_provenance=market_provenance,
             news_provenance=news_provenance,

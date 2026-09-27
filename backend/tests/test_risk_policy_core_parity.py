@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from app.models.risk import RiskReservationRecord
+from app.models.risk import KillSwitchRecord, RiskReservationRecord
 from app.services.market_data.domain import Quote
 from app.services.news.domain import NewsConfig
 from app.services.news.engine import build_context as build_news_context
@@ -303,6 +303,103 @@ async def test_live_pure_news_reduction_and_blackout_parity(db_session, parity_c
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("block_case", ["account_stale", "kill_switch", "capacity", "sizing"])
+async def test_d2b1_iv_p3_001_blocked_pre_news_warning_projection_parity(
+    db_session,
+    parity_case,
+    block_case,
+):
+    session, _ = db_session
+    as_of, candidate, plan, account, policy, spec, quote, _ = parity_case
+    news = build_news_context(
+        events=fixture_release(as_of + dt.timedelta(minutes=10), "mixed"),
+        as_of=as_of,
+        source="fixture_economic_v1",
+        mode="FIXTURE",
+        config=NewsConfig(),
+        candles=[],
+        quotes=[],
+        structure=None,
+        market_source="simulated",
+    )
+    reserved = Decimal("0")
+    reservation_count = 0
+    if block_case == "account_stale":
+        account = account.model_copy(update={"as_of": as_of - dt.timedelta(seconds=61)})
+    elif block_case == "kill_switch":
+        session.add(
+            KillSwitchRecord(
+                id="ks_pre_news_block",
+                state="ACTIVE",
+                trigger_type="MANUAL",
+                reason_th="ทดสอบการปิดกั้นระหว่างช่วงก่อนข่าว",
+                activated_at=as_of,
+                activated_by="d2b1_remediation_test",
+                policy_version=policy.version,
+                payload={"source": "d2b1_remediation_test"},
+            )
+        )
+        await session.flush()
+    elif block_case == "capacity":
+        await _add_reservation(
+            session,
+            as_of=as_of,
+            account_id=account.account_id,
+            suffix="pre_news_capacity",
+            risk=Decimal("2.95"),
+            symbol="EURUSD",
+            direction="SHORT",
+        )
+        reserved = Decimal("2.95")
+        reservation_count = 1
+    else:
+        plan = TradePlanSuggestion(
+            **{
+                **plan.model_dump(mode="python"),
+                "entry_upper": Decimal("2500"),
+                "stop_loss": Decimal("2300"),
+            }
+        )
+        candidate = candidate.model_copy(update={"plan": plan})
+
+    live = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=candidate,
+        plan=plan,
+        account=account,
+        policy=policy,
+        spec=spec,
+        quote=quote,
+        news_context=news,
+        as_of=as_of,
+    )
+    kill_state = await kill_switch_manager.get_state(session)
+    pure = evaluate_pure_risk(
+        _pure_input(
+            as_of=as_of,
+            candidate=candidate,
+            plan=plan,
+            account=account,
+            policy=policy,
+            spec=spec,
+            quote=quote,
+            news_context=news,
+            reserved=reserved,
+            reservation_count=reservation_count,
+            kill_switch=KillSwitchInputState(kill_state.state),
+            kill_switch_reason=kill_state.reason_th if kill_state.state == "ACTIVE" else "",
+        )
+    )
+    _assert_semantic_parity(live, pure)
+    assert pure.decision == "BLOCKED"
+    assert pure.normalized_requested_risk_pct == Decimal("1.0")
+    assert pure.target_risk_pct == Decimal("0.50")
+    assert pure.approved_risk_pct == Decimal("0")
+    assert pure.warning_codes == ()
+    assert pure.warnings_th == ()
+
+
+@pytest.mark.asyncio
 async def test_live_pure_portfolio_reduction_parity(db_session, parity_case):
     session, _ = db_session
     as_of, candidate, plan, account, policy, spec, quote, news = parity_case
@@ -412,7 +509,6 @@ async def test_live_pure_blocked_matrix_parity(db_session, parity_case, case):
         "spec_stale",
         "candidate_expired",
         "candidate_superseded",
-        "plan_status",
         "plan_expired",
         "post_news_spread",
     ],
@@ -450,9 +546,6 @@ async def test_live_pure_extended_gate_parity(db_session, parity_case, case):
         lifecycle = "EXPIRED"
     elif case == "candidate_superseded":
         lifecycle = "SUPERSEDED"
-    elif case == "plan_status":
-        plan = plan.model_copy(update={"status": "INVALID"})
-        candidate = candidate.model_copy(update={"plan": plan})
     elif case == "post_news_spread":
         quote = quote.model_copy(update={"ask": Decimal("2501.21"), "spread": Decimal("1.21")})
         news = build_news_context(
@@ -466,8 +559,14 @@ async def test_live_pure_extended_gate_parity(db_session, parity_case, case):
             structure=None,
             market_source="simulated",
         )
-    else:
-        plan = plan.model_copy(update={"expires_at": as_of})
+    elif case == "plan_expired":
+        plan = TradePlanSuggestion(
+            **{
+                **plan.model_dump(mode="python"),
+                "as_of": as_of - dt.timedelta(hours=2),
+                "expires_at": as_of,
+            }
+        )
         candidate = candidate.model_copy(update={"plan": plan})
 
     live = await risk_engine.evaluate_candidate(
@@ -486,7 +585,7 @@ async def test_live_pure_extended_gate_parity(db_session, parity_case, case):
     pure_input = _pure_input(
         as_of=as_of,
         candidate=candidate,
-        plan=_plan_for_trusted_input(plan),
+        plan=plan,
         account=account,
         policy=policy,
         spec=spec,
@@ -497,18 +596,8 @@ async def test_live_pure_extended_gate_parity(db_session, parity_case, case):
         kill_switch=KillSwitchInputState(kill_state.state),
         kill_switch_reason=kill_state.reason_th if kill_state.state == "ACTIVE" else "",
     )
-    if plan.status != "SUGGESTION_ONLY" or plan.expires_at <= plan.as_of:
-        pure_input = pure_input.model_copy(
-            update={"trade_plan": plan, "candidate": candidate.model_copy(update={"plan": plan})}
-        )
     pure = evaluate_pure_risk(pure_input)
     _assert_semantic_parity(live, pure)
-
-
-def _plan_for_trusted_input(plan):
-    if plan.status == "SUGGESTION_ONLY" and plan.expires_at > plan.as_of:
-        return plan
-    return plan.model_copy(update={"status": "SUGGESTION_ONLY", "expires_at": plan.as_of + dt.timedelta(hours=2)})
 
 
 async def _add_reservation(session, *, as_of, account_id, suffix, risk, symbol, direction):
@@ -535,7 +624,7 @@ async def _add_reservation(session, *, as_of, account_id, suffix, risk, symbol, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "case",
-    ["account", "symbol", "direction", "concurrent", "open_risk", "sizing", "invalid_long", "invalid_short"],
+    ["account", "symbol", "direction", "concurrent", "open_risk", "sizing"],
 )
 async def test_live_pure_portfolio_and_sizing_block_parity(db_session, parity_case, case):
     session, _ = db_session
@@ -594,22 +683,6 @@ async def test_live_pure_portfolio_and_sizing_block_parity(db_session, parity_ca
     elif case == "sizing":
         plan = plan.model_copy(update={"entry_upper": Decimal("2500"), "stop_loss": Decimal("2300")})
         candidate = candidate.model_copy(update={"plan": plan})
-    elif case == "invalid_long":
-        plan = plan.model_copy(update={"stop_loss": Decimal("2501")})
-        candidate = candidate.model_copy(update={"plan": plan})
-    else:
-        plan = TradePlanSuggestion(
-            **{
-                **plan.model_dump(mode="python"),
-                "direction": "SHORT",
-                "stop_loss": Decimal("2507"),
-                "targets": (
-                    Target(name="TP1", price=Decimal("2490"), source_id="h4", rr=Decimal("1.5")),
-                    Target(name="TP2", price=Decimal("2480"), source_id="d1", rr=Decimal("3.0")),
-                ),
-            }
-        ).model_copy(update={"stop_loss": Decimal("2501")})
-        candidate = candidate.model_copy(update={"direction": "SHORT", "plan": plan})
 
     live = await risk_engine.evaluate_candidate(
         session=session,
@@ -622,15 +695,10 @@ async def test_live_pure_portfolio_and_sizing_block_parity(db_session, parity_ca
         news_context=news,
         as_of=as_of,
     )
-    trusted_plan = _plan_for_trusted_input(plan)
-    if case == "invalid_long":
-        trusted_plan = plan.model_copy(update={"stop_loss": Decimal("2495")})
-    elif case == "invalid_short":
-        trusted_plan = plan.model_copy(update={"stop_loss": Decimal("2507")})
     pure_input = _pure_input(
         as_of=as_of,
-        candidate=candidate.model_copy(update={"plan": trusted_plan}),
-        plan=trusted_plan,
+        candidate=candidate,
+        plan=plan,
         account=account,
         policy=policy,
         spec=spec,
@@ -641,10 +709,6 @@ async def test_live_pure_portfolio_and_sizing_block_parity(db_session, parity_ca
         directional_risk=directional_risk,
         reservation_count=count,
     )
-    if case in {"invalid_long", "invalid_short"}:
-        pure_input = pure_input.model_copy(
-            update={"trade_plan": plan, "candidate": candidate.model_copy(update={"plan": plan})}
-        )
     pure = evaluate_pure_risk(pure_input)
     _assert_semantic_parity(live, pure)
 

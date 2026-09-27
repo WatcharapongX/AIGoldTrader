@@ -15,8 +15,12 @@ from app.services.risk.policy_domain import PURE_RISK_CORE_VERSION, PureRiskEval
 def _canonical_decimal(value: Decimal) -> str:
     if value == 0:
         return "0"
-    rendered = format(value.normalize(), "f")
-    return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+    rendered = format(value, "f")
+    if "." not in rendered:
+        return rendered
+    integer, fractional = rendered.split(".", maxsplit=1)
+    fractional = fractional.rstrip("0")
+    return integer if not fractional else f"{integer}.{fractional}"
 
 
 def _canonical(value: Any) -> Any:

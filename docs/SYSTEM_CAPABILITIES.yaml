@@ -1,6 +1,6 @@
 # Machine-Readable Capability Registry — AIGoldTrader
 version: "1.0"
-last_verified: "2026-09-27"
+last_verified: "2026-09-28"
 repository: "WatcharapongX/AIGoldTrader"
 branch: "main"
 
@@ -11,10 +11,15 @@ governance:
     - "D1"
     - "D2A"
   active_sub_batch: "D2B1"
-  active_scope: "D2B1 pure Risk contracts and deterministic policy core implemented pending independent verification; no live wrapper delegation"
-  next_authorized_activity: "D2B1 independent verification only; D2B2 and D2C not authorized"
+  active_scope: "D2B1 pure Risk contracts and deterministic policy core remediated pending independent re-verification; no live wrapper delegation"
+  next_authorized_activity: "D2B1 independent re-verification only; D2B2 and D2C not authorized"
   d2b1_requested_risk_clarification: resolved
   d2b1_requested_risk_semantics: "exact caller value -> live-compatible normalized request (None/zero to policy max) -> post-modifier target -> final approved risk; BLOCKED pure results retain semantic truth while legacy live RiskDecision projection remains unchanged"
+  d2b1_verification_findings:
+    D2B1-IV-P2-001: remediated_pending_independent_reverification
+    D2B1-IV-P2-002: remediated_pending_independent_reverification
+    D2B1-IV-P2-003: remediated_pending_independent_reverification
+    D2B1-IV-P3-001: remediated_pending_independent_reverification
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -43,7 +48,7 @@ capabilities:
     details: "Deterministic STRAT01-STRAT06, 7 profiles, causal immutable contexts and TradePlan suggestions"
   risk_engine:
     status: implemented
-    details: "Current live behavior remains authoritative; D2B1 pure-core implementation is complete pending independent verification; requested-risk semantics preserve distinct caller, normalized, target, and approved layers; negative risk is deterministically blocked by sizing without reservation side effects; D2B2 live-wrapper migration is not authorized"
+    details: "Current live behavior remains authoritative; D2B1 pure-core implementation is remediated pending independent re-verification, with canonical execution-entry reconstruction, symbol-spec authority, deterministic Decimal context, and BLOCKED warning parity; requested-risk semantics remain intact; D2B2 live-wrapper migration is not authorized"
   ai_agents:
     status: implemented
     analytical_agents: 6
@@ -57,10 +62,10 @@ capabilities:
     details: "Batch B independently closed"
   backtesting:
     status: causal_replay_foundation_verified_risk_fill_not_implemented
-    governance: split_program_d1_d2a_closed_d2b1_pending_independent_verification_d2b2_not_authorized
+    governance: split_program_d1_d2a_closed_d2b1_pending_independent_reverification_d2b2_not_authorized
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 and D2A are independently verified and closed; D2B governance requires a D2B1/D2B2 split; D2B1 pure Risk contracts/kernel is implemented pending independent verification, with no live wrapper or replay integration; D2B2, D2C, and D3-D7 are not authorized; no Risk replay integration, fill simulation, trade lifecycle, PnL, equity, metrics, persistence, Backtesting API, or results UI exists"
+    details: "D1 and D2A are independently verified and closed; D2B governance requires a D2B1/D2B2 split; D2B1 pure Risk contracts/kernel is remediated pending independent re-verification, with no live wrapper or replay integration; D2B2, D2C, and D3-D7 are not authorized; no Risk replay integration, fill simulation, trade lifecycle, PnL, equity, metrics, persistence, Backtesting API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:

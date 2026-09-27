@@ -6,13 +6,13 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2B1 — PURE RISK CONTRACTS AND DETERMINISTIC POLICY CORE — IMPLEMENTED, PENDING INDEPENDENT VERIFICATION.**
+**Current gate: D2B1 — PURE RISK CONTRACTS AND DETERMINISTIC POLICY CORE — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
 D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. The D2A deterministic causal
 replay foundation passed independent GPT-5.6 Sol / High verification and is closed. D2B governance found that the
 pure policy extraction and safety-critical live-wrapper migration must be independently gated. **D2B1 — Pure
-Risk Contracts and Deterministic Policy Core** is implemented and awaiting independent verification. D2B2, D2C,
+Risk Contracts and Deterministic Policy Core** is remediated and awaiting independent re-verification. D2B2, D2C,
 and D3–D7 remain
 **NOT AUTHORIZED** and require separate governance advancement after the
 preceding unit is implemented, independently verified, documented, and closed. Do not automatically progress.
@@ -24,7 +24,7 @@ preceding unit is implemented, independently verified, documented, and closed. D
 - Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - D2A causal replay is implemented, independently verified, and closed; this does not make
   the Backtesting Engine complete.
-- D2B1 pure Risk contracts/kernel is implemented and pending independent verification; no live Risk path migration
+- D2B1 pure Risk contracts/kernel is remediated and pending independent re-verification; no live Risk path migration
   is authorized.
 - D2B1 requested-risk semantic clarification is **RESOLVED**; the four-layer pure contract below is authoritative.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
@@ -176,7 +176,7 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
      included in existing provenance and run-input fingerprint authority;
    - focused prefix-invariance, future-mutation, higher-timeframe close, news-revision, quote-observation,
      repeat-determinism, resource-bound, and isolation tests.
-3. **D2B1 — IMPLEMENTED / PENDING INDEPENDENT VERIFICATION**: typed immutable pure Risk inputs/results, stable reason codes,
+3. **D2B1 — REMEDIATED / PENDING INDEPENDENT RE-VERIFICATION**: typed immutable pure Risk inputs/results, stable reason codes,
    deterministic policy evaluation, pure portfolio-capacity math, explicit time/safety state, reusable sizing,
    semantic fingerprinting, characterization fixtures, and pure/live parity tests. The existing live
    `RiskEngine.evaluate_candidate()` orchestration must remain the behavioral oracle and must not delegate to the
@@ -201,7 +201,7 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 **PLAN REQUIRES SPLIT.** The current `RiskEngine.evaluate_candidate()` interleaves deterministic policy with
 stateful live authority. Extracting the pure kernel and migrating the live wrapper in one change would couple
 policy correctness to PostgreSQL locking, Kill Switch persistence, data-health counters, idempotency, and
-reservation reconciliation. D2B is therefore split into D2B1 and D2B2; only D2B1 independent verification is
+reservation reconciliation. D2B is therefore split into D2B1 and D2B2; only D2B1 independent re-verification is
 authorized now.
 
 ### Responsibility Classification
@@ -348,6 +348,18 @@ Kill Switch cases are ACTIVE, UNKNOWN, and INACTIVE. Same input must yield the s
 D2B1 completion requires all existing Risk tests plus the new pure/parity/isolation suites to pass and an
 independent GPT-5.6 Sol / High verification gate. D2B1 completion does not authorize D2B2 or D2C.
 
+### D2B1 Targeted Remediation Status
+- D2B1-IV-P2-001: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. Symbol specification authority is linked
+  to the candidate symbol by normal contract validation.
+- D2B1-IV-P2-002: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. `evaluate_pure_risk()` reconstructs and
+  validates a private canonical snapshot before evaluation and fingerprints that exact snapshot.
+- D2B1-IV-P2-003: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. Pure arithmetic and unchanged sizing run
+  under a fresh server-owned Decimal context; Decimal fingerprint rendering is ambient-context independent.
+- D2B1-IV-P3-001: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. BLOCKED warning projection matches the
+  live oracle while caller, normalized, and target risk truth remain intact.
+- Remediation evidence: pure 76 passed; parity 38 passed; architecture 2 passed; combined D2B1 116 passed;
+  targeted finding tests 25 passed; unchanged live Risk regressions 7/41/9/1/1/4 passed; Ruff and diff check PASS.
+
 ## Required Test Program
 - Same code/config/data/request produces byte-equivalent canonical results and fingerprints.
 - Prefix/full-input equality at every replay cutoff; future candle/swing/confirmation/news revision/evidence/
@@ -377,7 +389,7 @@ independent GPT-5.6 Sol / High verification gate. D2B1 completion does not autho
 - D1-IV-001 through D1-IV-006 are **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT**; D2A passed independent GPT-5.6 Sol / High verification and is **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT** for D2B.
-- Next authorized activity is **D2B1 independent verification only**. D2B2, D2C, and D3–D7 are **NOT AUTHORIZED**.
+- Next authorized activity is **D2B1 independent re-verification only**. D2B2, D2C, and D3–D7 are **NOT AUTHORIZED**.
 
 ## D2A Final Closure Status
 - NEW-D2A-RV-001: **CLOSED**.
@@ -395,5 +407,5 @@ independent GPT-5.6 Sol / High verification gate. D2B1 completion does not autho
   Market Data 33 passed; Analysis 54 passed; News 67 passed; Strategy 68 passed; independent temporary
   usable-period/adversarial probes PASS; Ruff PASS; `git diff --check` PASS.
 - No reproducible P0/P1/P2/P3 finding remains within D2A scope.
-- D2B1 independent verification alone is authorized. D2B2, D2C, and D3–D7 remain not authorized; do not begin the
+- D2B1 independent re-verification alone is authorized. D2B2, D2C, and D3–D7 remain not authorized; do not begin the
   next sub-batch automatically.
