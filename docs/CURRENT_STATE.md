@@ -53,6 +53,12 @@
   contract and deterministic policy kernel with characterization, parity, determinism, and isolation tests.
   The existing live `RiskEngine.evaluate_candidate()` remains the behavioral oracle and must not delegate to the
   new core during D2B1. D2B2 live-wrapper migration and D2C replay/Risk integration are NOT AUTHORIZED.
+- **D2B1 requested-risk clarification**: RESOLVED. Pure semantic truth separates the exact
+  `caller_requested_risk_pct`, compatibility-normalized request (`None` and zero map to policy maximum),
+  post-modifier `target_risk_pct`, and final `approved_risk_pct`. BLOCKED pure results retain caller/normalized/
+  target truth with approved risk zero. The current BLOCKED `RiskDecision` policy-maximum requested-risk value is
+  a legacy live-wrapper projection and is not modified in D2B1. Negative risk requires live characterization,
+  not a new validation policy.
 - **D2A identity model**: `historical_data_fingerprint` identifies the complete historical source snapshot;
   `run_input_fingerprint` identifies the governed D1 manifest; `replay_input_fingerprint` identifies that manifest
   plus complete D2A replay configuration; `replay_fingerprint` identifies causal output through the effective
@@ -98,6 +104,7 @@ The approved staged data flow is:
   V-D2A-10, V-D2A-12/13, V-D2A-29, and V-D2A-36 are **CLOSED**.
 - D2B governance: **PLAN REQUIRES SPLIT**.
 - D2B1 Pure Risk Contracts and Deterministic Policy Core: **AUTHORIZED FOR IMPLEMENTATION**.
+- D2B1 requested-risk semantic clarification: **RESOLVED**.
 - D2B2 Live Risk Wrapper Migration and Parity Closure: **NOT AUTHORIZED**.
 - D2C and D3–D7: **NOT AUTHORIZED**.
 - Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.

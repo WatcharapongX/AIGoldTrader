@@ -24,6 +24,7 @@ preceding unit is implemented, independently verified, documented, and closed. D
 - D2A causal replay is implemented, independently verified, and closed; this does not make
   the Backtesting Engine complete.
 - D2B1 pure Risk contracts/kernel is authorized but not implemented; no live Risk path migration is authorized.
+- D2B1 requested-risk semantic clarification is **RESOLVED**; the four-layer pure contract below is authoritative.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
 
@@ -246,6 +247,43 @@ risk percentages and amounts, position size, stop distance and loss-per-lot evid
 after, typed bounded reason/warning/block codes with existing Thai display text, market/news provenance, automatic
 safety-trigger facts, and a versioned canonical semantic payload/fingerprint. It must contain no random ID, DB row,
 reservation ID, session, or persistence-only field. `RiskDecision` remains a live-wrapper output in D2B2.
+
+### D2B1 Requested-Risk Semantic Clarification — RESOLVED
+The pure contract has four distinct layers:
+1. `caller_requested_risk_pct: Decimal | None` is the exact caller-provided audit value, including explicit zero.
+2. `normalized_requested_risk_pct` preserves current live compatibility: `None` and `Decimal("0")` normalize to
+   `policy.max_risk_per_trade_pct`; any other non-zero Decimal remains unchanged. D2B1 must not newly reject zero.
+3. `target_risk_pct` is the effective target after deterministic pre-cap modifiers such as pre-news reduction,
+   but before per-trade and portfolio capacity approval.
+4. `approved_risk_pct` is the final capacity-approved value; every BLOCKED result has `Decimal("0")` approved.
+
+`PureRiskResult` must preserve all four truthful layers even when BLOCKED. It must expose
+`normalized_requested_risk_amount`, `target_risk_amount`, and `approved_risk_amount`, calculated from account equity
+with existing Decimal behavior. If a generic `requested_risk_amount` is retained, it means the normalized-request
+amount, never the legacy BLOCKED projection.
+
+The current live `_blocked_decision()` projection of `RiskDecision.requested_risk_pct` and
+`requested_risk_amount` to the policy maximum is a legacy live-wrapper/public-persistence projection, not pure
+semantic truth. D2B1 must not change that live behavior or implement an adapter. When D2B2 is separately authorized,
+its compatibility adapter must initially map APPROVED/REDUCED requested risk from the normalized value and preserve
+the current policy-maximum projection for BLOCKED decisions unless separate governance authorizes a public change.
+
+Pure/live parity therefore compares decision, approved risk/amount, sizing, exposure, ordered reasons/warnings/
+blocks, provenance, and trigger facts. It intentionally does not compare
+`PureRiskResult.caller_requested_risk_pct` with BLOCKED `RiskDecision.requested_risk_pct`.
+
+The additive pure audit fingerprint must include the exact caller value, normalized value, and target value.
+`None` and explicit `Decimal("0")` normalize to the same policy target but remain distinct audit inputs and must
+produce different pure fingerprints. Existing live evaluation-intent and dependency fingerprint functions remain
+unchanged in D2B1.
+
+Negative requested risk is not redesigned by this clarification. D2B1 must characterize `Decimal("-0.1")` against
+the live oracle before finalization and preserve the observable result/reason semantics. If behavior is internally
+inconsistent, uncontrolled, or cannot be represented safely, stop with **D2B1 NEGATIVE-RISK PARITY AMBIGUITY**.
+Mandatory requested-risk tests cover `None`, zero, positive below/equal/above the per-trade maximum, normal and
+pre-news paths, and early/capacity/sizing BLOCKED paths, asserting caller, normalized, target, approved, and decision
+separately. BLOCKED cases include Kill Switch, news blackout, quote unavailable, account stale, daily loss,
+portfolio full, and sizing failure.
 
 ### Time and Safety Authority
 - Every pure temporal comparison uses explicit `as_of`: account age is `as_of - account.as_of`, quote age is

@@ -3,82 +3,75 @@
 ## Session Result
 - Date: 2026-09-27.
 - Branch: `main`.
-- Starting SHA: `0f6253811739366e8f34b3afeb90f22b276e208c`.
-- Gate: Batch D2B Shared Pure Risk Policy Core governance authorization.
-- Reviewer/runtime: GPT-5.6 Sol / High.
-- Decision: **PLAN REQUIRES SPLIT**.
-- D2B1: **AUTHORIZED FOR IMPLEMENTATION**.
-- D2B2, D2C, and D3–D7: **NOT AUTHORIZED**.
-- D1 and D2A remain **CLOSED**; Batch D remains **OPEN**.
+- Starting SHA: `03642b37f6cd093a8cf09120f90203408e97cf7c`.
+- Gate: D2B1 requested-risk semantic governance clarification.
+- Runtime: GPT-5.6 Sol / High.
+- Result: **RESOLVED**.
+- D2B1 remains **AUTHORIZED FOR IMPLEMENTATION**.
+- D2B2, D2C, and D3–D7 remain **NOT AUTHORIZED**.
+- No backend, frontend, test, migration, dependency, or runtime file changed.
 
-## Source Finding
-- `RiskEngine.evaluate_candidate()` mixes deterministic policy with live infrastructure.
-- Pure behavior includes quote/news/account/lifecycle/spec gates, cooldown, exposure capacity,
-  position sizing, reason/provenance construction, and semantic fingerprint inputs.
-- Live behavior includes PostgreSQL locks, Kill Switch persistence/read, data-health counters,
-  reservation reads/writes, cached-decision reconciliation, idempotency, and transactions.
-- `PortfolioRiskManager.check_budget_capacity()` mixes locked reservation queries with pure math.
-- `KillSwitchManager.evaluate_automatic_triggers()` mixes deterministic breach facts with DB mutation.
-- `calculate_position_size()` is already deterministic pure Decimal math and is reusable unchanged.
-- `is_cooldown_active()` is pure but currently located in the infrastructure-coupled portfolio module.
+## Resolved Four-Layer Contract
+- `caller_requested_risk_pct: Decimal | None` is the exact caller input and audit evidence.
+- `normalized_requested_risk_pct` preserves current live compatibility.
+- Caller `None` normalizes to `policy.max_risk_per_trade_pct`.
+- Caller `Decimal("0")` also normalizes to the policy maximum.
+- Any other non-zero Decimal remains the normalized value.
+- Zero is not newly rejected; changing that rule requires separate governance.
+- `target_risk_pct` is the normalized request after deterministic pre-cap modifiers such as
+  pre-news reduction and before per-trade/portfolio capacity.
+- `approved_risk_pct` is the final capacity-approved value.
+- Every BLOCKED pure result has approved risk equal to `Decimal("0")`.
 
-## D2B1 Authorized Unit
-- Name: Pure Risk Contracts and Deterministic Policy Core.
-- Add frozen, `extra="forbid"`, Decimal-safe, aware-UTC input/result contracts.
-- Add explicit `as_of`; no wall-clock fallback or hidden lookup.
-- Add explicit candidate, TradePlan, account, policy, spec, quote/news, lifecycle, Kill Switch,
-  data-health, requested-risk, and portfolio exposure inputs.
-- Add deterministic APPROVED/REDUCED/BLOCKED evaluation and pure capacity math.
-- Add typed stable reason codes with existing Thai display text preserved.
-- Add automatic daily-loss/drawdown/instantaneous data-safety trigger facts without mutation.
-- Add a complete versioned pure semantic payload/fingerprint.
-- Reuse current position sizing unchanged.
-- Capture current live behavior as the immutable characterization/parity oracle.
-- The live `RiskEngine.evaluate_candidate()` must not delegate to the new core in D2B1.
+## Amount Semantics
+- `normalized_requested_risk_amount` corresponds to normalized requested risk and account equity.
+- `target_risk_amount` corresponds to the post-modifier target and account equity.
+- `approved_risk_amount` corresponds to final approved risk and account equity.
+- All calculations preserve current Decimal behavior.
+- A generic `requested_risk_amount`, if retained, means normalized requested amount.
 
-## Safety Boundaries
-- Kill Switch input states are ACTIVE, INACTIVE, and UNKNOWN.
-- ACTIVE blocks; UNKNOWN fails closed; only INACTIVE continues.
-- Pure code never calls `check`, `get_state`, `activate`, or automatic mutation APIs.
-- Daily-loss/drawdown facts are pure; live Kill Switch mutation remains D2B2 orchestration.
-- Persistent provider/source data-health counters remain live DB state.
-- Pure input receives already-derived health state; UNKNOWN is explicit and fail-closed.
-- Duplicate active reservations become an explicit integrity anomaly input and block.
-- DB reservation rows remain the live source of reserved risk; snapshot reserved risk is not double-counted.
-- Positive unattributed open risk remains fail-closed.
+## BLOCKED Semantic Truth
+- BLOCKED `PureRiskResult` retains caller, normalized, and target values truthfully.
+- Example: caller 0.50, pre-news target 0.25, later stale account block results in
+  caller 0.50, normalized 0.50, target 0.25, approved 0.
+- Blocking must not overwrite caller or target values with the policy maximum.
 
-## Portfolio, Sizing, and Identity
-- Exposure input contains open/reserved, symbol, directional, active-reservation, and open-position state.
-- Capacity order preserves cooldown, integrity, unattributed risk, concurrency, account, symbol,
-  direction, per-trade cap/reduction, then approved amount.
-- Sizing preserves worst-case entry, downward volume-step quantization, min/max volume,
-  geometry validation, and actual risk not exceeding approved risk.
-- Evaluation-intent identity may be reused unchanged only under parity fixtures.
-- Current dependency fingerprint requires extraction to cover detailed portfolio/integrity/data-health state.
-- DB row order, live-only IDs, random UUIDs, and wall time must not enter pure identity.
-- `RiskDecision` and decision/reservation persistence identity remain live-wrapper responsibilities.
+## Legacy Live Projection Boundary
+- Current `_blocked_decision()` projects live `RiskDecision.requested_risk_pct` and amount
+  from `policy.max_risk_per_trade_pct` regardless of caller/target values.
+- This is legacy live-wrapper/public-persistence behavior, not pure semantic truth.
+- D2B1 must not modify it or implement the live adapter.
+- Future D2B2 must preserve that BLOCKED projection unless separate governance authorizes change.
+- APPROVED/REDUCED future mapping uses normalized requested risk.
 
-## Required D2B1 Tests
-- Pure policy unit and full decision-matrix tests.
-- Portfolio-capacity and duplicate-integrity parity.
-- Kill Switch ACTIVE/UNKNOWN/INACTIVE matrix.
-- News unavailable/blackout/pre-reduction/post-spread matrix.
-- Quote, account, and spec freshness matrices using explicit `as_of`.
-- Candidate terminal and TradePlan expiry cases.
-- Sizing parity and fail-closed geometry/volume cases.
-- Fingerprint sensitivity, invariance, and repeat determinism.
-- Architecture isolation proving no SQLAlchemy/models/repository/Kill Switch/provider/MT5/network/filesystem/wall clock.
-- Existing Risk regression remains the oracle; expected behavior may not be rewritten to fit refactoring.
+## Parity and Fingerprint Rules
+- Pure/live parity compares decision, approved risk/amount, sizing, exposure, ordered reasons,
+  warnings/blocks, provenance, and trigger facts.
+- BLOCKED parity does not equate pure caller request with live projected requested risk.
+- The additive pure fingerprint includes caller, normalized, and target risk.
+- Caller `None` and explicit zero normalize equally but remain distinct audit inputs.
+- Therefore `None` and zero must produce different pure semantic fingerprints.
+- Existing live evaluation-intent and dependency fingerprint functions remain unchanged.
 
-## Capability and Trading Safety
-- Backtesting causal replay remains implemented and verified; the Backtesting Engine remains incomplete.
-- No Risk replay integration, fills, lifecycle, PnL, equity, metrics, persistence, API, or UI is authorized.
+## Negative-Risk Boundary
+- D2B1 must characterize `Decimal("-0.1")` against the current live oracle.
+- No new negative-risk validation policy is authorized.
+- Preserve current observable outcome and reason semantics where safely representable.
+- If behavior is inconsistent, uncontrolled, or unsafe to represent, stop with
+  **D2B1 NEGATIVE-RISK PARITY AMBIGUITY**.
+
+## Required Requested-Risk Matrix
+- Cover `None`, zero, positive below/equal/above the per-trade maximum.
+- Cover normal market, pre-news reduction, early BLOCKED, capacity BLOCKED, and sizing BLOCKED.
+- Assert caller, normalized, target, approved, and decision separately.
+- BLOCKED cases include Kill Switch, news blackout, quote unavailable, account stale,
+  daily loss, portfolio full, and sizing failure.
+
+## Safety and Next Activity
 - `TRADING_MODE=PAPER` and `LIVE_AUTO_TRADING=false` remain unchanged.
 - Broker execution remains `NONE`; AI remains advisory-only.
 - Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
-
-## Next Gate
-- Implement D2B1 only with GPT-5.6 Sol / High.
-- Then run an independent GPT-5.6 Sol / High verification in a fresh session.
-- D2B1 completion does not authorize D2B2 or D2C.
-- Do not begin Model Routing, Paper Trading, OMS, broker execution, or live trading.
+- Resume D2B1 pure-core implementation only with GPT-5.6 Sol / High.
+- After implementation, run independent GPT-5.6 Sol / High verification in a fresh session.
+- Do not begin D2B2, D2C, fills, PnL/metrics, persistence/API/UI, Model Routing,
+  Paper Trading, OMS, broker execution, or live trading.

@@ -13,6 +13,8 @@ governance:
   active_sub_batch: "D2B1"
   active_scope: "Pure Risk contracts and deterministic policy core with characterization, parity, determinism, and isolation tests; no live wrapper delegation"
   next_authorized_activity: "D2B1 implementation only; D2B2 and D2C not authorized"
+  d2b1_requested_risk_clarification: resolved
+  d2b1_requested_risk_semantics: "exact caller value -> live-compatible normalized request (None/zero to policy max) -> post-modifier target -> final approved risk; BLOCKED pure results retain semantic truth while legacy live RiskDecision projection remains unchanged"
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -41,7 +43,7 @@ capabilities:
     details: "Deterministic STRAT01-STRAT06, 7 profiles, causal immutable contexts and TradePlan suggestions"
   risk_engine:
     status: implemented
-    details: "Current live behavior remains authoritative; D2B1 pure-core implementation is authorized but not implemented; D2B2 live-wrapper migration is not authorized"
+    details: "Current live behavior remains authoritative; D2B1 pure-core implementation is authorized but not implemented; requested-risk semantic ambiguity is resolved with distinct caller, normalized, target, and approved layers; negative risk still requires live characterization; D2B2 live-wrapper migration is not authorized"
   ai_agents:
     status: implemented
     analytical_agents: 6
