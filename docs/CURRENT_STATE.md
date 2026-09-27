@@ -3,8 +3,8 @@
 - **Last Verified Date**: 2026-09-27
 - **Authoritative Branch**: `main`
 - **Current Milestone**: Batch D remains OPEN; D1 and D2A are CLOSED.
-- **Current Active Gate**: D2B1 Pure Risk Contracts and Deterministic Policy Core — AUTHORIZED FOR IMPLEMENTATION.
-- **Next Permitted Activity**: D2B1 implementation only, using GPT-5.6 Sol / High.
+- **Current Active Gate**: D2B1 Pure Risk Contracts and Deterministic Policy Core — IMPLEMENTED, PENDING INDEPENDENT VERIFICATION.
+- **Next Permitted Activity**: D2B1 independent verification only, using GPT-5.6 Sol / High in a fresh session.
 - **Prohibited Progression**: D2B2 live-wrapper migration, D2C, and D3–D7 remain NOT AUTHORIZED.
 
 ---
@@ -49,16 +49,17 @@
   repeat-run determinism without DB, Risk, AI, broker/MT5, network, or filesystem-write dependencies.
 - **Backtesting Engine**: NOT COMPLETE. No Risk replay integration, fill simulation, trade lifecycle, PnL,
   equity curve, metrics engine, persistence, Backtesting API, or results UI exists.
-- **D2B governance**: PLAN REQUIRES SPLIT. D2B1 is authorized to add an infrastructure-free pure Risk input/result
-  contract and deterministic policy kernel with characterization, parity, determinism, and isolation tests.
+- **D2B governance**: PLAN REQUIRES SPLIT. D2B1 has implemented an infrastructure-free pure Risk input/result
+  contract and deterministic policy kernel with characterization, parity, determinism, and isolation tests;
+  it remains pending independent verification.
   The existing live `RiskEngine.evaluate_candidate()` remains the behavioral oracle and must not delegate to the
   new core during D2B1. D2B2 live-wrapper migration and D2C replay/Risk integration are NOT AUTHORIZED.
 - **D2B1 requested-risk clarification**: RESOLVED. Pure semantic truth separates the exact
   `caller_requested_risk_pct`, compatibility-normalized request (`None` and zero map to policy maximum),
   post-modifier `target_risk_pct`, and final `approved_risk_pct`. BLOCKED pure results retain caller/normalized/
   target truth with approved risk zero. The current BLOCKED `RiskDecision` policy-maximum requested-risk value is
-  a legacy live-wrapper projection and is not modified in D2B1. Negative risk requires live characterization,
-  not a new validation policy.
+  a legacy live-wrapper projection and is not modified in D2B1. Negative risk was characterized as a deterministic
+  sizing BLOCK with no reservation side effect and is safely represented without a new validation policy.
 - **D2A identity model**: `historical_data_fingerprint` identifies the complete historical source snapshot;
   `run_input_fingerprint` identifies the governed D1 manifest; `replay_input_fingerprint` identifies that manifest
   plus complete D2A replay configuration; `replay_fingerprint` identifies causal output through the effective
@@ -103,7 +104,7 @@ The approved staged data flow is:
 - NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, V-D2A-14, NEW-D2A-RV-003, V-D2A-06,
   V-D2A-10, V-D2A-12/13, V-D2A-29, and V-D2A-36 are **CLOSED**.
 - D2B governance: **PLAN REQUIRES SPLIT**.
-- D2B1 Pure Risk Contracts and Deterministic Policy Core: **AUTHORIZED FOR IMPLEMENTATION**.
+- D2B1 Pure Risk Contracts and Deterministic Policy Core: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**.
 - D2B1 requested-risk semantic clarification: **RESOLVED**.
 - D2B2 Live Risk Wrapper Migration and Parity Closure: **NOT AUTHORIZED**.
 - D2C and D3–D7: **NOT AUTHORIZED**.

@@ -6,13 +6,14 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2B1 — PURE RISK CONTRACTS AND DETERMINISTIC POLICY CORE — AUTHORIZED FOR IMPLEMENTATION.**
+**Current gate: D2B1 — PURE RISK CONTRACTS AND DETERMINISTIC POLICY CORE — IMPLEMENTED, PENDING INDEPENDENT VERIFICATION.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
 D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. The D2A deterministic causal
 replay foundation passed independent GPT-5.6 Sol / High verification and is closed. D2B governance found that the
-pure policy extraction and safety-critical live-wrapper migration must be independently gated. Only **D2B1 — Pure
-Risk Contracts and Deterministic Policy Core** is authorized for implementation. D2B2, D2C, and D3–D7 remain
+pure policy extraction and safety-critical live-wrapper migration must be independently gated. **D2B1 — Pure
+Risk Contracts and Deterministic Policy Core** is implemented and awaiting independent verification. D2B2, D2C,
+and D3–D7 remain
 **NOT AUTHORIZED** and require separate governance advancement after the
 preceding unit is implemented, independently verified, documented, and closed. Do not automatically progress.
 
@@ -23,7 +24,8 @@ preceding unit is implemented, independently verified, documented, and closed. D
 - Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - D2A causal replay is implemented, independently verified, and closed; this does not make
   the Backtesting Engine complete.
-- D2B1 pure Risk contracts/kernel is authorized but not implemented; no live Risk path migration is authorized.
+- D2B1 pure Risk contracts/kernel is implemented and pending independent verification; no live Risk path migration
+  is authorized.
 - D2B1 requested-risk semantic clarification is **RESOLVED**; the four-layer pure contract below is authoritative.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
@@ -174,7 +176,7 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
      included in existing provenance and run-input fingerprint authority;
    - focused prefix-invariance, future-mutation, higher-timeframe close, news-revision, quote-observation,
      repeat-determinism, resource-bound, and isolation tests.
-3. **D2B1 — AUTHORIZED FOR IMPLEMENTATION**: add typed immutable pure Risk inputs/results, stable reason codes,
+3. **D2B1 — IMPLEMENTED / PENDING INDEPENDENT VERIFICATION**: typed immutable pure Risk inputs/results, stable reason codes,
    deterministic policy evaluation, pure portfolio-capacity math, explicit time/safety state, reusable sizing,
    semantic fingerprinting, characterization fixtures, and pure/live parity tests. The existing live
    `RiskEngine.evaluate_candidate()` orchestration must remain the behavioral oracle and must not delegate to the
@@ -199,7 +201,8 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 **PLAN REQUIRES SPLIT.** The current `RiskEngine.evaluate_candidate()` interleaves deterministic policy with
 stateful live authority. Extracting the pure kernel and migrating the live wrapper in one change would couple
 policy correctness to PostgreSQL locking, Kill Switch persistence, data-health counters, idempotency, and
-reservation reconciliation. D2B is therefore split into D2B1 and D2B2; only D2B1 is authorized now.
+reservation reconciliation. D2B is therefore split into D2B1 and D2B2; only D2B1 independent verification is
+authorized now.
 
 ### Responsibility Classification
 **Pure policy** owns deterministic evaluation from explicit immutable inputs: Kill Switch state interpretation;
@@ -374,7 +377,7 @@ independent GPT-5.6 Sol / High verification gate. D2B1 completion does not autho
 - D1-IV-001 through D1-IV-006 are **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT**; D2A passed independent GPT-5.6 Sol / High verification and is **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT** for D2B.
-- Next authorized activity is **D2B1 implementation only**. D2B2, D2C, and D3–D7 are **NOT AUTHORIZED**.
+- Next authorized activity is **D2B1 independent verification only**. D2B2, D2C, and D3–D7 are **NOT AUTHORIZED**.
 
 ## D2A Final Closure Status
 - NEW-D2A-RV-001: **CLOSED**.
@@ -392,4 +395,5 @@ independent GPT-5.6 Sol / High verification gate. D2B1 completion does not autho
   Market Data 33 passed; Analysis 54 passed; News 67 passed; Strategy 68 passed; independent temporary
   usable-period/adversarial probes PASS; Ruff PASS; `git diff --check` PASS.
 - No reproducible P0/P1/P2/P3 finding remains within D2A scope.
-- D2B1 alone is authorized. D2B2, D2C, and D3–D7 remain not authorized; do not begin the next sub-batch automatically.
+- D2B1 independent verification alone is authorized. D2B2, D2C, and D3–D7 remain not authorized; do not begin the
+  next sub-batch automatically.
