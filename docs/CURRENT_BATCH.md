@@ -6,20 +6,21 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2A — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.**
+**Current gate: D2A — CLOSED.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
-D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. D2A usable-period authority
-remediation is complete but not closed; only its independent GPT-5.6 Sol / High re-verification is authorized now.
-D2B, D2C, and D3–D7 remain **NOT AUTHORIZED** and require separate governance advancement after the
+D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. The D2A deterministic causal
+replay foundation passed independent GPT-5.6 Sol / High verification and is closed. The next permitted activity is
+**D2B Governance Authorization only**; this permits architecture/governance review and does **NOT** authorize D2B
+implementation. D2B, D2C, and D3–D7 remain **NOT AUTHORIZED** and require separate governance advancement after the
 preceding unit is implemented, independently verified, documented, and closed. Do not automatically progress.
 
 ## Current State
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
 - External AI: **HARDENING**; deterministic fixture mode remains the default.
-- Backtesting: **CAUSAL REPLAY FOUNDATION REMEDIATED; PENDING INDEPENDENT VERIFICATION; RISK/FILL ENGINE NOT IMPLEMENTED**.
-- D2A causal replay is remediated and locally verified, pending independent re-verification; this does not make
+- Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
+- D2A causal replay is implemented, independently verified, and closed; this does not make
   the Backtesting Engine complete.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
@@ -145,7 +146,7 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
    coverage/provenance authority, resource policy, lifecycle semantics, and the simulation/live isolation
    boundary passed independent verification. No runner, migration, API, UI, background task, or simulated
    fill implementation exists.
-2. **D2A — REMEDIATED / PENDING INDEPENDENT RE-VERIFICATION**: pure, single-threaded causal replay foundation through existing
+2. **D2A — CLOSED**: pure, single-threaded causal replay foundation through existing
    Analysis, Strategy, and suggestion-only TradePlan evaluation. The implementation scope is limited to:
    - an aware-UTC monotonic replay clock advanced by unique chronological closed primary-timeframe candles;
    - a canonical hard causal ceiling at `coverage.usable_end`, applied after private execution preparation and
@@ -215,18 +216,23 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 ## Required Gates
 - D1 is **CLOSED** following independent GPT-5.6 Sol / High re-verification.
 - D1-IV-001 through D1-IV-006 are **CLOSED**.
-- Governance result: **PLAN REQUIRES SPLIT**; D2A remediation is complete but not closed.
-- Next authorized activity is D2A independent GPT-5.6 Sol / High re-verification only.
+- Governance result: **PLAN REQUIRES SPLIT**; D2A passed independent GPT-5.6 Sol / High verification and is **CLOSED**.
+- Next permitted activity is **D2B Governance Authorization only**. D2B implementation is **NOT AUTHORIZED**.
 
-## D2A Targeted Remediation Status
+## D2A Final Closure Status
 - NEW-D2A-RV-001: **CLOSED**.
 - V-D2A-14-RV-01: **CLOSED**.
 - NEW-D2A-RV-002: **CLOSED**.
 - V-D2A-14 roll-up: **CLOSED**.
-- NEW-D2A-RV-003: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- NEW-D2A-RV-003: **CLOSED**.
 - V-D2A-06: **CLOSED**.
 - V-D2A-10: **CLOSED**.
 - V-D2A-12/13: **CLOSED**.
 - V-D2A-29: **CLOSED**.
 - V-D2A-36: **CLOSED**.
+- Final independent gate: **D2A Usable-Period Independent Re-Verification — PASS**.
+- Final evidence: D2A focused 57 passed; D2A architecture 2 passed; D2A combined 59 passed; D1 80 passed;
+  Market Data 33 passed; Analysis 54 passed; News 67 passed; Strategy 68 passed; independent temporary
+  usable-period/adversarial probes PASS; Ruff PASS; `git diff --check` PASS.
+- No reproducible P0/P1/P2/P3 finding remains within D2A scope.
 - D2B, D2C, and D3–D7 remain not authorized. Do not begin the next sub-batch automatically.

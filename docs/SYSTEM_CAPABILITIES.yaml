@@ -9,9 +9,10 @@ governance:
   decision: plan_requires_split
   completed_sub_batches:
     - "D1"
-  active_sub_batch: "D2A"
-  active_scope: "Independent re-verification of D2A usable-period authority remediation; no Risk evaluation or fills"
-  next_authorized_activity: "D2A independent re-verification only (GPT-5.6 Sol / High)"
+    - "D2A"
+  active_sub_batch: null
+  active_scope: "D2B governance authorization only"
+  next_authorized_activity: "D2B governance authorization only; implementation not authorized"
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -53,11 +54,11 @@ capabilities:
     status: implemented_verified
     details: "Batch B independently closed"
   backtesting:
-    status: causal_replay_foundation_remediated_pending_verification_risk_fill_not_implemented
-    governance: split_program_d1_closed_d2a_pending_independent_reverification
+    status: causal_replay_foundation_verified_risk_fill_not_implemented
+    governance: split_program_d1_d2a_closed_d2b_not_authorized
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 is independently verified and closed; D2A pure causal replay now enforces coverage.usable_end as its hard causal ceiling while preserving complete-source and replay-input identity semantics; NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, the V-D2A-14 roll-up, V-D2A-06, V-D2A-10, V-D2A-12/13, V-D2A-29, and V-D2A-36 are closed; NEW-D2A-RV-003 is remediated pending independent re-verification; D2B/D2C and D3-D7 are not authorized; no Risk replay integration, fill simulation, PnL/metrics, persistence, API, or results UI exists"
+    details: "D1 and D2A are independently verified and closed; D2A pure causal replay enforces exact coverage.usable_end as its hard causal ceiling while preserving complete historical-source, run-input, replay-input, and causal-output identity semantics; all D2A findings are closed; D2B implementation, D2C, and D3-D7 are not authorized; no Risk replay integration, fill simulation, trade lifecycle, PnL, equity, metrics, persistence, Backtesting API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:

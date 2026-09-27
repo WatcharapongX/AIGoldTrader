@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-27
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch D remains open; D1 is CLOSED and D2 governance requires a split.
-- **Current Active Gate**: D2A Causal Replay Foundation — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.
-- **Next Permitted Activity**: D2A independent verification only (GPT-5.6 Sol / High).
-- **Prohibited Progression**: D2B, D2C, and D3–D7 remain unapproved.
+- **Current Milestone**: Batch D remains OPEN; D1 and D2A are CLOSED.
+- **Current Active Gate**: D2A Governance Closure Complete.
+- **Next Permitted Activity**: D2B Governance Authorization only; D2B implementation is NOT AUTHORIZED.
+- **Prohibited Progression**: D2B implementation, D2C, and D3–D7 remain NOT AUTHORIZED.
 
 ---
 
@@ -38,14 +38,25 @@
 - **Deterministic Backtesting D1**: immutable configuration/lifecycle, coverage/provenance, resource-policy,
   canonical fingerprint, and simulation/live isolation contracts are implemented and independently verified.
   D1-IV-001 through D1-IV-006 are closed.
-- **D2A Causal Replay Foundation**: remediated and locally verified, pending independent GPT-5.6 Sol / High
-  re-verification. It provides pure UTC causal-prefix replay through existing Analysis, News, Strategy, and
-  suggestion-only TradePlan output. Its second targeted remediation adds exact interior candle-gap reconciliation,
-  execution-entry source rebinding through a private canonical snapshot, and a complete D2A replay-input identity
-  over the D1 manifest plus Strategy/Analysis/News/tick-size semantics. Its usable-period remediation additionally
-  clamps every replay invocation to canonical `coverage.usable_end` without truncating complete-source identity.
-  The Backtesting Engine is not complete:
-  no Risk replay integration, fill simulation, PnL/metrics engine, persistence, API, or results UI exists.
+- **D2A Causal Replay Foundation**: implemented and independently verified by GPT-5.6 Sol / High. It provides
+  deterministic aware-UTC replay, canonical primary-event close semantics, a fixed causal warm-up origin, and a
+  hard causal ceiling at exact `coverage.usable_end`; no event after that ceiling is eligible. It preserves M1–W1
+  causal close visibility, point-in-time news revisions, quote timestamp plus `observed_at` causality, prefix and
+  future-source-mutation invariance, causal historical-state reconstruction, exact scheduled-closure gap
+  reconciliation, and fail-closed undeclared interior-gap handling. Inputs are bounded and bound to a private
+  canonical replay snapshot with complete configuration/input identity. Selected-strategy evaluation preserves
+  canonical Strategy candidate and TradePlan parity, deterministic event ordering, output fingerprints, and
+  repeat-run determinism without DB, Risk, AI, broker/MT5, network, or filesystem-write dependencies.
+- **Backtesting Engine**: NOT COMPLETE. No Risk replay integration, fill simulation, trade lifecycle, PnL,
+  equity curve, metrics engine, persistence, Backtesting API, or results UI exists.
+- **D2A identity model**: `historical_data_fingerprint` identifies the complete historical source snapshot;
+  `run_input_fingerprint` identifies the governed D1 manifest; `replay_input_fingerprint` identifies that manifest
+  plus complete D2A replay configuration; `replay_fingerprint` identifies causal output through the effective
+  cutoff; and `stop_at` is an output-prefix selector only.
+- **D2A usable-period authority**: `requested_cutoff` is `stop_at` when provided, otherwise
+  `manifest.config.end`; the effective cutoff is the minimum of requested cutoff, `manifest.config.end`, and
+  `manifest.coverage.usable_end`. An event exactly at `usable_end` may be eligible, an event after it is not, and
+  a non-aligned `usable_end` is never rounded forward.
 - The current `/backtesting` page renders Strategy Lab historical evaluation snapshots. These are not trades,
   fills, PnL, an equity curve, or a real backtest.
 
@@ -75,13 +86,13 @@ The approved staged data flow is:
 ## 4. Current Governance
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
-- Batch D: **OPEN; D1 CLOSED**.
+- Batch D: **OPEN; D1 and D2A CLOSED**.
 - D1: **CLOSED**.
-- D2A: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, and the V-D2A-14 roll-up are independently CLOSED.
-- NEW-D2A-RV-003 is remediated locally and pending independent re-verification.
-- D2B, D2C, and D3–D7: **NOT AUTHORIZED**.
-- Backtesting: **CAUSAL REPLAY FOUNDATION REMEDIATED; PENDING INDEPENDENT VERIFICATION; RISK/FILL ENGINE NOT IMPLEMENTED**.
+- D2A: **CLOSED** following PASS at the GPT-5.6 Sol / High D2A Usable-Period Independent Re-Verification gate.
+- NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, V-D2A-14, NEW-D2A-RV-003, V-D2A-06,
+  V-D2A-10, V-D2A-12/13, V-D2A-29, and V-D2A-36 are **CLOSED**.
+- D2B implementation, D2C, and D3–D7: **NOT AUTHORIZED**.
+- Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
 - Paper Trading: **NOT AUTHORIZED**.
 - Broker Execution: **NOT AUTHORIZED**.
