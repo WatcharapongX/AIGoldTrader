@@ -22,6 +22,7 @@ from app.services.risk.domain import (
     KillSwitchTrigger,
     RiskPolicy,
 )
+from app.services.risk.policy_domain import MarketSafetyState, SafetyTriggerFacts
 
 DATA_HEALTH_COMPONENT_MAX_LENGTH = 64
 
@@ -96,6 +97,21 @@ class KillSwitchManager:
             cleared_by=row.cleared_by,
             policy_version=row.policy_version,
         )
+
+    async def get_data_health_failures(
+        self,
+        session: AsyncSession,
+        provider: str,
+        source: str,
+    ) -> int:
+        """Read the persisted provider/source counter used by live Risk orchestration."""
+        row = await session.scalar(
+            select(DataHealthRecord).where(
+                DataHealthRecord.provider == provider,
+                DataHealthRecord.source == source,
+            )
+        )
+        return row.consecutive_failures if row is not None else 0
 
     async def check(self, session: AsyncSession) -> KillSwitchCheck:
         state = await self.get_state(session)
@@ -253,38 +269,66 @@ class KillSwitchManager:
         quote_stale_reason: str = "",
         provider: str = "market_data",
         source: str = "default",
+        safety_trigger_facts: SafetyTriggerFacts | None = None,
     ) -> KillSwitchState | None:
         """Evaluates automatic safety triggers (daily loss limit, drawdown limit, data health).
         If triggered, activates and persists the Kill Switch state immediately (SOL-P5-P1-013, 014, 015).
         """
         # Daily loss trigger
-        if account.daily_realized_pnl < Decimal("0") and account.equity > Decimal("0"):
+        daily_loss_breach = (
+            safety_trigger_facts.daily_loss_breach
+            if safety_trigger_facts is not None
+            else (
+                account.daily_realized_pnl < Decimal("0")
+                and account.equity > Decimal("0")
+                and abs(account.daily_realized_pnl) / account.equity * Decimal("100")
+                >= policy.daily_loss_limit_pct
+            )
+        )
+        if daily_loss_breach and account.equity > Decimal("0"):
             daily_loss_pct = abs(account.daily_realized_pnl) / account.equity * Decimal("100")
-            if daily_loss_pct >= policy.daily_loss_limit_pct:
-                return await self.activate(
-                    session=session,
-                    trigger_type="AUTOMATIC_DAILY_LOSS",
-                    reason_th=(
-                        f"ผลขาดทุนรายวันสะสม ({daily_loss_pct:.2f}%) "
-                        f"เกินเพดานความปลอดภัย ({policy.daily_loss_limit_pct:.2f}%)"
-                    ),
-                    activated_by="system_risk_engine",
-                    policy_version=policy.version,
-                )
+            return await self.activate(
+                session=session,
+                trigger_type="AUTOMATIC_DAILY_LOSS",
+                reason_th=(
+                    f"ผลขาดทุนรายวันสะสม ({daily_loss_pct:.2f}%) "
+                    f"เกินเพดานความปลอดภัย ({policy.daily_loss_limit_pct:.2f}%)"
+                ),
+                activated_by="system_risk_engine",
+                policy_version=policy.version,
+            )
 
         # Drawdown trigger
-        if account.peak_equity > Decimal("0") and account.equity < account.peak_equity:
+        drawdown_breach = (
+            safety_trigger_facts.drawdown_breach
+            if safety_trigger_facts is not None
+            else (
+                account.peak_equity > Decimal("0")
+                and account.equity < account.peak_equity
+                and (account.peak_equity - account.equity)
+                / account.peak_equity
+                * Decimal("100")
+                >= policy.max_drawdown_pct
+            )
+        )
+        if drawdown_breach and account.peak_equity > Decimal("0"):
             drawdown_pct = (account.peak_equity - account.equity) / account.peak_equity * Decimal("100")
-            if drawdown_pct >= policy.max_drawdown_pct:
-                return await self.activate(
-                    session=session,
-                    trigger_type="AUTOMATIC_DRAWDOWN",
-                    reason_th=(
-                        f"ระดับ Drawdown ({drawdown_pct:.2f}%) เกินเพดานความปลอดภัยสูงสุด ({policy.max_drawdown_pct:.2f}%)"
-                    ),
-                    activated_by="system_risk_engine",
-                    policy_version=policy.version,
-                )
+            return await self.activate(
+                session=session,
+                trigger_type="AUTOMATIC_DRAWDOWN",
+                reason_th=(
+                    f"ระดับ Drawdown ({drawdown_pct:.2f}%) เกินเพดานความปลอดภัยสูงสุด ({policy.max_drawdown_pct:.2f}%)"
+                ),
+                activated_by="system_risk_engine",
+                policy_version=policy.version,
+            )
+
+        if safety_trigger_facts is not None:
+            quote_stale = safety_trigger_facts.quote_safety_state in {
+                MarketSafetyState.UNAVAILABLE,
+                MarketSafetyState.STALE,
+                MarketSafetyState.SPREAD_BLOCKED,
+            }
 
         # Data health trigger with cross-process persistent tracking scoped by (provider, source) (SOL-P5-P2-038)
         now_utc = dt.datetime.now(dt.UTC)

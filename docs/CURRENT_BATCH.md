@@ -6,16 +6,15 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2B1 — PURE RISK CONTRACTS AND DETERMINISTIC POLICY CORE — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.**
+**Current gate: D2B2 — LIVE RISK WRAPPER MIGRATION AND PARITY CLOSURE — CLOSED FOLLOWING FINAL INDEPENDENT RE-VERIFICATION PASS.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
 D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. The D2A deterministic causal
 replay foundation passed independent GPT-5.6 Sol / High verification and is closed. D2B governance found that the
 pure policy extraction and safety-critical live-wrapper migration must be independently gated. **D2B1 — Pure
-Risk Contracts and Deterministic Policy Core** is remediated and awaiting independent re-verification. D2B2, D2C,
-and D3–D7 remain
-**NOT AUTHORIZED** and require separate governance advancement after the
-preceding unit is implemented, independently verified, documented, and closed. Do not automatically progress.
+Risk Contracts and Deterministic Policy Core** passed final independent re-verification and is closed. D2B2 was
+separately authorized, implemented, remediated, and passed the required independent GPT-5.6 Sol / High
+re-verification gate. D2B2 is closed. D2C and D3–D7 remain **NOT AUTHORIZED**. Do not automatically progress.
 
 ## Current State
 - Batch B: **CLOSED**.
@@ -24,8 +23,8 @@ preceding unit is implemented, independently verified, documented, and closed. D
 - Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - D2A causal replay is implemented, independently verified, and closed; this does not make
   the Backtesting Engine complete.
-- D2B1 pure Risk contracts/kernel is remediated and pending independent re-verification; no live Risk path migration
-  is authorized.
+- D2B1 pure Risk contracts/kernel is independently verified and closed.
+- D2B2 live-wrapper migration is independently verified and closed.
 - D2B1 requested-risk semantic clarification is **RESOLVED**; the four-layer pure contract below is authoritative.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
@@ -176,15 +175,16 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
      included in existing provenance and run-input fingerprint authority;
    - focused prefix-invariance, future-mutation, higher-timeframe close, news-revision, quote-observation,
      repeat-determinism, resource-bound, and isolation tests.
-3. **D2B1 — REMEDIATED / PENDING INDEPENDENT RE-VERIFICATION**: typed immutable pure Risk inputs/results, stable reason codes,
+3. **D2B1 — CLOSED / FINAL INDEPENDENT RE-VERIFICATION PASS**: typed immutable pure Risk inputs/results, stable reason codes,
    deterministic policy evaluation, pure portfolio-capacity math, explicit time/safety state, reusable sizing,
    semantic fingerprinting, characterization fixtures, and pure/live parity tests. The existing live
    `RiskEngine.evaluate_candidate()` orchestration must remain the behavioral oracle and must not delegate to the
    new core in D2B1. No database, Kill Switch, reservation, API, replay, or persistence integration is authorized.
-4. **D2B2 — PLANNED / NOT AUTHORIZED**: migrate the live Risk wrapper to the independently verified D2B1 core while
-   preserving advisory locks, automatic Kill Switch persistence, persistent data-health tracking, idempotency,
-   existing-decision reconciliation, reservation atomicity, transactions, and exact public `RiskDecision` parity.
-   Independent GPT-5.6 Sol / High verification is required before D2C.
+4. **D2B2 — CLOSED / FINAL INDEPENDENT RE-VERIFICATION PASS**: the live Risk wrapper delegates deterministic
+   policy and sizing to the independently verified D2B1 core while preserving advisory and reservation row locks,
+   automatic Kill Switch persistence, persistent data-health tracking, idempotency, existing-decision
+   reconciliation, reservation atomicity, transactions, and exact public `RiskDecision` compatibility. Independent
+   GPT-5.6 Sol / High re-verification passed; D2C still requires separate governance authorization.
 5. **D2C — PLANNED / NOT AUTHORIZED**: integrate D2A candidate/TradePlan output with the verified D2B pure Risk
    seam, deterministic risk-decision event ordering/fingerprinting, and complete replay/Risk parity and isolation
    tests. No fills, trade lifecycle, PnL, or persistence.
@@ -201,8 +201,8 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 **PLAN REQUIRES SPLIT.** The current `RiskEngine.evaluate_candidate()` interleaves deterministic policy with
 stateful live authority. Extracting the pure kernel and migrating the live wrapper in one change would couple
 policy correctness to PostgreSQL locking, Kill Switch persistence, data-health counters, idempotency, and
-reservation reconciliation. D2B is therefore split into D2B1 and D2B2; only D2B1 independent re-verification is
-authorized now.
+reservation reconciliation. D2B is therefore split into D2B1 and D2B2. D2B1 is closed; D2B2 implementation was
+separately authorized, implemented, remediated, independently re-verified, and closed.
 
 ### Responsibility Classification
 **Pure policy** owns deterministic evaluation from explicit immutable inputs: Kill Switch state interpretation;
@@ -265,11 +265,11 @@ The pure contract has four distinct layers:
 with existing Decimal behavior. If a generic `requested_risk_amount` is retained, it means the normalized-request
 amount, never the legacy BLOCKED projection.
 
-The current live `_blocked_decision()` projection of `RiskDecision.requested_risk_pct` and
+The original live `_blocked_decision()` projection of `RiskDecision.requested_risk_pct` and
 `requested_risk_amount` to the policy maximum is a legacy live-wrapper/public-persistence projection, not pure
-semantic truth. D2B1 must not change that live behavior or implement an adapter. When D2B2 is separately authorized,
-its compatibility adapter must initially map APPROVED/REDUCED requested risk from the normalized value and preserve
-the current policy-maximum projection for BLOCKED decisions unless separate governance authorizes a public change.
+semantic truth. D2B1 did not change that live behavior or implement an adapter. The D2B2 compatibility adapter maps
+APPROVED/REDUCED requested risk from the normalized value and preserves the policy-maximum projection for BLOCKED
+decisions unless separate governance authorizes a public change.
 
 Pure/live parity therefore compares decision, approved risk/amount, sizing, exposure, ordered reasons/warnings/
 blocks, provenance, and trigger facts. It intentionally does not compare
@@ -295,8 +295,8 @@ portfolio full, and sizing failure.
   thread-dependent state, or hidden singleton lookup.
 - `ACTIVE` Kill Switch blocks; `UNKNOWN` fails closed and blocks; only `INACTIVE` allows later rules.
 - Pure code derives daily-loss, drawdown, and instantaneous quote/data-safety trigger facts but never activates the
-  Kill Switch. In D2B2 the live wrapper will consume the same pure facts, update persistent data health, perform any
-  required activation, re-read the resulting Kill Switch state, and then invoke policy evaluation.
+  Kill Switch. The D2B2 live wrapper consumes the same pure facts, updates persistent data health, performs any
+  required activation, re-reads the resulting Kill Switch state, and then invokes final policy evaluation.
 - Persistent consecutive data-health tracking remains live orchestration keyed by provider/source. An unavailable
   derived health state is explicit and fail-closed; D2B1 must not recreate DB tracking.
 
@@ -345,20 +345,41 @@ drawdown/cooldown; stale spec; terminal candidate states; expired plan; account/
 unattributed open risk; duplicate reservation anomaly; below-minimum size; and invalid sizing geometry. Explicit
 Kill Switch cases are ACTIVE, UNKNOWN, and INACTIVE. Same input must yield the same result and fingerprint.
 
-D2B1 completion requires all existing Risk tests plus the new pure/parity/isolation suites to pass and an
-independent GPT-5.6 Sol / High verification gate. D2B1 completion does not authorize D2B2 or D2C.
+D2B1 completion required all existing Risk tests plus the new pure/parity/isolation suites to pass and an
+independent GPT-5.6 Sol / High verification gate. Those requirements are satisfied. D2B1 completion does not
+authorize D2B2 or D2C.
 
-### D2B1 Targeted Remediation Status
-- D2B1-IV-P2-001: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. Symbol specification authority is linked
+### D2B1 Final Independent Re-Verification and Closure Status
+- D2B1-IV-P2-001: **CLOSED**. Symbol specification authority is linked
   to the candidate symbol by normal contract validation.
-- D2B1-IV-P2-002: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. `evaluate_pure_risk()` reconstructs and
+- D2B1-IV-P2-002: **CLOSED**. `evaluate_pure_risk()` reconstructs and
   validates a private canonical snapshot before evaluation and fingerprints that exact snapshot.
-- D2B1-IV-P2-003: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. Pure arithmetic and unchanged sizing run
+- D2B1-IV-P2-003: **CLOSED**. Pure arithmetic and unchanged sizing run
   under a fresh server-owned Decimal context; Decimal fingerprint rendering is ambient-context independent.
-- D2B1-IV-P3-001: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. BLOCKED warning projection matches the
+- D2B1-IV-P3-001: **CLOSED**. BLOCKED warning projection matches the
   live oracle while caller, normalized, and target risk truth remain intact.
-- Remediation evidence: pure 76 passed; parity 38 passed; architecture 2 passed; combined D2B1 116 passed;
-  targeted finding tests 25 passed; unchanged live Risk regressions 7/41/9/1/1/4 passed; Ruff and diff check PASS.
+- Final independent evidence: pure 76 passed; parity 38 passed; architecture 2 passed; combined D2B1 116 passed;
+  unchanged live Risk regressions 7/41/9/1/1/4 passed; 53 temporary independent probes passed; Ruff and diff
+  check PASS; no reproducible P0/P1/P2/P3 finding remained within D2B1 scope.
+
+### D2B2 Final Independent Re-Verification and Closure Status
+- `RiskEngine.evaluate_candidate()` now acquires the account advisory lock, derives safety-trigger facts through
+  the pure core, persists automatic Kill Switch/data-health state, re-reads authoritative state, row-locks active
+  reservations, performs final pure evaluation, then owns cache/reconciliation/reservation/public mapping effects.
+- The live adapter translates quote/news/Kill Switch inputs and constructs locked portfolio evidence. It excludes
+  exactly one same-candidate retry reservation; duplicate active rows remain visible and fail closed.
+- BLOCKED public `RiskDecision` values preserve the legacy policy-maximum requested-risk projection while the pure
+  result retains exact caller, normalized, target, and approved semantic layers.
+- Local evidence: pure 76 passed; parity/delegation 41 passed; architecture 2 passed; combined targeted Risk suite
+  182 passed; five PostgreSQL concurrency/idempotency/lifecycle gates passed with a workspace-local base temp;
+  Ruff and `git diff --check` passed.
+- The initial independent gate found one P2 exact-parity defect: BLOCKED approved-risk and position zero values
+  lost their legacy Decimal scales in serialized public output. The live compatibility adapter now restores
+  `0.0000`, `0.00`, and `0.0000`, with an exact JSON regression test.
+- Final independent evidence: HEAD-oracle complete public decision parity 5/5 passed; targeted Risk matrix 182/182
+  passed; real PostgreSQL Risk concurrency/idempotency/lifecycle suite 8/8 passed with no skips; Ruff and
+  `git diff --check` passed; no P0/P1/P2/P3 finding remains.
+- D2B2 is **CLOSED**. D2C remains not authorized.
 
 ## Required Test Program
 - Same code/config/data/request produces byte-equivalent canonical results and fingerprints.
@@ -389,7 +410,8 @@ independent GPT-5.6 Sol / High verification gate. D2B1 completion does not autho
 - D1-IV-001 through D1-IV-006 are **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT**; D2A passed independent GPT-5.6 Sol / High verification and is **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT** for D2B.
-- Next authorized activity is **D2B1 independent re-verification only**. D2B2, D2C, and D3–D7 are **NOT AUTHORIZED**.
+- Next permitted activity is **D2C governance review/authorization only**. D2C implementation and D3–D7 are
+  **NOT AUTHORIZED**.
 
 ## D2A Final Closure Status
 - NEW-D2A-RV-001: **CLOSED**.
@@ -407,5 +429,7 @@ independent GPT-5.6 Sol / High verification gate. D2B1 completion does not autho
   Market Data 33 passed; Analysis 54 passed; News 67 passed; Strategy 68 passed; independent temporary
   usable-period/adversarial probes PASS; Ruff PASS; `git diff --check` PASS.
 - No reproducible P0/P1/P2/P3 finding remains within D2A scope.
-- D2B1 independent re-verification alone is authorized. D2B2, D2C, and D3–D7 remain not authorized; do not begin the
-  next sub-batch automatically.
+- D2B1 final independent re-verification: **PASS; CLOSED**.
+- D2B2 final independent re-verification: **PASS; CLOSED**.
+- D2C governance review/authorization alone is permitted next. D2C implementation and D3–D7 remain not authorized;
+  do not begin the next sub-batch automatically.

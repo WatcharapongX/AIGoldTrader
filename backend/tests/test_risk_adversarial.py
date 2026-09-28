@@ -2187,6 +2187,7 @@ async def test_news_runtime_fastapi_roundtrip(client, auth_headers, db_session, 
 
     # 1. Seed candidate
     cand_id = "cand_news_rt_01"
+    runtime_plan = test_plan.model_copy(update={"candidate_id": cand_id})
     eval_rec = StrategyEvaluationRecord(
         id="eval_news_rt_01",
         context_id="ctx_news_01",
@@ -2222,7 +2223,7 @@ async def test_news_runtime_fastapi_roundtrip(client, auth_headers, db_session, 
             "missing_conditions": [],
             "conflicts": [],
             "invalidation_th": "หลุดแนวรับ",
-            "plan": test_plan.model_dump(mode="json"),
+            "plan": runtime_plan.model_dump(mode="json"),
         },
     )
     session.add(cand_rec)

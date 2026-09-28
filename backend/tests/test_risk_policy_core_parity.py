@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
+import app.services.risk.engine as risk_engine_module
 from app.models.risk import KillSwitchRecord, RiskReservationRecord
 from app.services.market_data.domain import Quote
 from app.services.news.domain import NewsConfig
@@ -15,6 +16,7 @@ from app.services.news.provider import fixture_release
 from app.services.risk.domain import AccountSnapshot, RiskPolicy, default_gold_spec
 from app.services.risk.engine import risk_engine
 from app.services.risk.kill_switch import kill_switch_manager
+from app.services.risk.live_adapter import portfolio_snapshot_from_live
 from app.services.risk.policy_core import evaluate_pure_risk, is_pure_cooldown_active
 from app.services.risk.policy_domain import (
     DataHealthInputState,
@@ -866,3 +868,145 @@ def test_pure_cooldown_matches_existing_function(parity_case, account_updates):
     as_of, _, _, account, policy, _, _, _ = parity_case
     account = account.model_copy(update=account_updates)
     assert is_pure_cooldown_active(account, policy, as_of) == is_cooldown_active(account, policy, as_of)
+
+
+@pytest.mark.asyncio
+async def test_d2b2_live_wrapper_delegates_and_consumes_pure_safety_facts(
+    db_session,
+    parity_case,
+    monkeypatch,
+):
+    session, _ = db_session
+    as_of, candidate, plan, account, policy, spec, quote, news = parity_case
+    pure_calls = []
+    trigger_facts = []
+    reservation_lock_flags = []
+    original_evaluate = risk_engine_module.evaluate_pure_risk
+    original_triggers = kill_switch_manager.evaluate_automatic_triggers
+    original_reservations = portfolio_manager.get_active_reservations
+
+    def capture_evaluate(evaluation_input):
+        result = original_evaluate(evaluation_input)
+        pure_calls.append((evaluation_input, result))
+        return result
+
+    async def capture_triggers(*args, **kwargs):
+        trigger_facts.append(kwargs.get("safety_trigger_facts"))
+        return await original_triggers(*args, **kwargs)
+
+    async def capture_reservations(*args, **kwargs):
+        reservation_lock_flags.append(kwargs.get("for_update", False))
+        return await original_reservations(*args, **kwargs)
+
+    monkeypatch.setattr(risk_engine_module, "evaluate_pure_risk", capture_evaluate)
+    monkeypatch.setattr(kill_switch_manager, "evaluate_automatic_triggers", capture_triggers)
+    monkeypatch.setattr(portfolio_manager, "get_active_reservations", capture_reservations)
+
+    live = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=candidate,
+        plan=plan,
+        account=account,
+        policy=policy,
+        spec=spec,
+        quote=quote,
+        news_context=news,
+        as_of=as_of,
+    )
+
+    assert len(pure_calls) == 2
+    assert pure_calls[0][0].kill_switch.state == KillSwitchInputState.UNKNOWN
+    assert pure_calls[1][0].kill_switch.state == KillSwitchInputState.INACTIVE
+    assert trigger_facts == [pure_calls[0][1].safety_trigger_facts]
+    assert reservation_lock_flags == [True]
+    _assert_semantic_parity(live, pure_calls[1][1])
+
+
+def test_d2b2_live_portfolio_adapter_exact_exclusion_and_duplicate_integrity(parity_case):
+    _, candidate, plan, account, _, _, _, _ = parity_case
+    same = SimpleNamespace(
+        id="res_same",
+        candidate_id=candidate.id,
+        risk_pct=Decimal("0.4"),
+        symbol=candidate.symbol,
+        direction=plan.direction,
+    )
+    other = SimpleNamespace(
+        id="res_other",
+        candidate_id="cand_other",
+        risk_pct=Decimal("1.2"),
+        symbol="EURUSD",
+        direction="SHORT",
+    )
+    snapshot, legacy_exposure, excluded_id = portfolio_snapshot_from_live(
+        account,
+        candidate,
+        plan,
+        [same, other],
+    )
+    assert excluded_id == same.id
+    assert snapshot.reserved_risk_pct == Decimal("1.2")
+    assert snapshot.active_reservation_count == 1
+    assert snapshot.reservation_integrity == ReservationIntegrityState.OK
+    assert legacy_exposure == Decimal("1.2")
+
+    duplicate = SimpleNamespace(
+        id="res_same_duplicate",
+        candidate_id=candidate.id,
+        risk_pct=Decimal("0.4"),
+        symbol=candidate.symbol,
+        direction=plan.direction,
+    )
+    snapshot, legacy_exposure, excluded_id = portfolio_snapshot_from_live(
+        account,
+        candidate,
+        plan,
+        [same, duplicate, other],
+    )
+    assert excluded_id is None
+    assert snapshot.reserved_risk_pct == Decimal("2.0")
+    assert snapshot.reservation_integrity == ReservationIntegrityState.DUPLICATE_ACTIVE_RESERVATION
+    assert snapshot.duplicate_candidate_id == candidate.id
+    assert legacy_exposure == Decimal("1.2")
+
+
+@pytest.mark.asyncio
+async def test_d2b2_blocked_public_projection_preserves_legacy_requested_risk(
+    db_session,
+    parity_case,
+    monkeypatch,
+):
+    session, _ = db_session
+    as_of, candidate, plan, account, policy, spec, quote, news = parity_case
+    final_results = []
+    original_evaluate = risk_engine_module.evaluate_pure_risk
+
+    def capture_evaluate(evaluation_input):
+        result = original_evaluate(evaluation_input)
+        final_results.append(result)
+        return result
+
+    monkeypatch.setattr(risk_engine_module, "evaluate_pure_risk", capture_evaluate)
+    live = await risk_engine.evaluate_candidate(
+        session=session,
+        candidate=candidate,
+        plan=plan,
+        account=account,
+        policy=policy,
+        spec=spec,
+        quote=quote,
+        news_context=news,
+        requested_risk_pct=Decimal("-0.1"),
+        as_of=as_of,
+    )
+
+    pure = final_results[-1]
+    assert pure.decision == live.decision == "BLOCKED"
+    assert pure.caller_requested_risk_pct == Decimal("-0.1")
+    assert pure.target_risk_pct == Decimal("-0.1")
+    assert live.requested_risk_pct == policy.max_risk_per_trade_pct
+    assert live.requested_risk_amount == Decimal("100.00")
+    public_payload = live.model_dump(mode="json")
+    assert public_payload["approved_risk_pct"] == "0.0000"
+    assert public_payload["approved_risk_amount"] == "0.00"
+    assert public_payload["position_size"] == "0.0000"

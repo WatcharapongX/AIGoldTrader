@@ -2,10 +2,10 @@
 
 - **Last Verified Date**: 2026-09-28
 - **Authoritative Branch**: `main`
-- **Current Milestone**: Batch D remains OPEN; D1 and D2A are CLOSED.
-- **Current Active Gate**: D2B1 Pure Risk Contracts and Deterministic Policy Core — REMEDIATED, PENDING INDEPENDENT RE-VERIFICATION.
-- **Next Permitted Activity**: D2B1 independent re-verification only, using GPT-5.6 Sol / High in a fresh session.
-- **Prohibited Progression**: D2B2 live-wrapper migration, D2C, and D3–D7 remain NOT AUTHORIZED.
+- **Current Milestone**: Batch D remains OPEN; D1, D2A, D2B1, and D2B2 are CLOSED.
+- **Current Active Gate**: No implementation gate is active. D2B2 Live Risk Wrapper Migration and Parity Closure passed independent GPT-5.6 Sol / High re-verification.
+- **Next Permitted Activity**: D2C governance review/authorization only; D2C implementation is not authorized.
+- **Prohibited Progression**: D2C implementation and D3–D7 remain NOT AUTHORIZED.
 
 ---
 
@@ -49,19 +49,21 @@
   repeat-run determinism without DB, Risk, AI, broker/MT5, network, or filesystem-write dependencies.
 - **Backtesting Engine**: NOT COMPLETE. No Risk replay integration, fill simulation, trade lifecycle, PnL,
   equity curve, metrics engine, persistence, Backtesting API, or results UI exists.
-- **D2B governance**: PLAN REQUIRES SPLIT. D2B1 has implemented and remediated an infrastructure-free pure Risk
-  input/result contract and deterministic policy kernel with characterization, parity, determinism, authority,
-  and isolation tests; it remains pending independent re-verification.
-  The existing live `RiskEngine.evaluate_candidate()` remains the behavioral oracle and must not delegate to the
-  new core during D2B1. D2B2 live-wrapper migration and D2C replay/Risk integration are NOT AUTHORIZED.
+- **D2B governance**: PLAN REQUIRES SPLIT. D2B1 implemented, remediated, and independently verified an
+  infrastructure-free pure Risk input/result contract and deterministic policy kernel with characterization,
+  parity, determinism, authority, and isolation tests; D2B1 is CLOSED.
+  D2B2 has migrated the live `RiskEngine.evaluate_candidate()` wrapper to that core while retaining stateful
+  locks, persistent Kill Switch/data-health authority, idempotency, reservation reconciliation, transaction
+  behavior, and the legacy public BLOCKED projection. Independent re-verification found and closed one fixed-scale
+  BLOCKED serialization parity defect; D2B2 is CLOSED. D2C replay/Risk integration remains NOT AUTHORIZED.
 - **D2B1 requested-risk clarification**: RESOLVED. Pure semantic truth separates the exact
   `caller_requested_risk_pct`, compatibility-normalized request (`None` and zero map to policy maximum),
   post-modifier `target_risk_pct`, and final `approved_risk_pct`. BLOCKED pure results retain caller/normalized/
   target truth with approved risk zero. The current BLOCKED `RiskDecision` policy-maximum requested-risk value is
   a legacy live-wrapper projection and is not modified in D2B1. Negative risk was characterized as a deterministic
   sizing BLOCK with no reservation side effect and is safely represented without a new validation policy.
-- **D2B1 verification remediation**: D2B1-IV-P2-001, D2B1-IV-P2-002, D2B1-IV-P2-003, and D2B1-IV-P3-001 are
-  **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**. The pure execution boundary now validates symbol-spec
+- **D2B1 verification closure**: D2B1-IV-P2-001, D2B1-IV-P2-002, D2B1-IV-P2-003, and D2B1-IV-P3-001 are
+  **CLOSED** following final independent re-verification PASS. The pure execution boundary validates symbol-spec
   authority, reconstructs a private canonical input snapshot, owns deterministic Decimal context, fingerprints
   context-independent Decimal values, and preserves BLOCKED live warning projection while retaining target truth.
 - **D2A identity model**: `historical_data_fingerprint` identifies the complete historical source snapshot;
@@ -88,9 +90,9 @@ and interacts with live Kill Switch, data-health, decisions, and reservations. B
 side-effect-free policy seam and isolated simulation state; no live table or authority state may be mutated.
 
 Governance therefore split D2 into independently gated units. D2A owns only the causal replay foundation
-through existing Analysis, Strategy, and suggestion-only TradePlan output. D2B is further split: D2B1 extracts
-and proves the pure Risk contracts/kernel, while D2B2 will later migrate the live wrapper and close parity.
-D2C will later integrate replay with the verified seam. This prevents replay
+through existing Analysis, Strategy, and suggestion-only TradePlan output. D2B is further split: D2B1 extracted
+and proved the pure Risk contracts/kernel, while D2B2 migrated and independently verified the live wrapper with
+exact public parity. D2C will later integrate replay with the verified seam. This prevents replay
 causality work from being coupled to a safety-critical live Risk refactor.
 
 The approved staged data flow is:
@@ -102,17 +104,17 @@ The approved staged data flow is:
 ## 4. Current Governance
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
-- Batch D: **OPEN; D1 and D2A CLOSED**.
+- Batch D: **OPEN; D1, D2A, D2B1, and D2B2 CLOSED**.
 - D1: **CLOSED**.
 - D2A: **CLOSED** following PASS at the GPT-5.6 Sol / High D2A Usable-Period Independent Re-Verification gate.
 - NEW-D2A-RV-001, V-D2A-14-RV-01, NEW-D2A-RV-002, V-D2A-14, NEW-D2A-RV-003, V-D2A-06,
   V-D2A-10, V-D2A-12/13, V-D2A-29, and V-D2A-36 are **CLOSED**.
 - D2B governance: **PLAN REQUIRES SPLIT**.
-- D2B1 Pure Risk Contracts and Deterministic Policy Core: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+- D2B1 Pure Risk Contracts and Deterministic Policy Core: **CLOSED — FINAL INDEPENDENT RE-VERIFICATION PASS**.
 - D2B1-IV-P2-001, D2B1-IV-P2-002, D2B1-IV-P2-003, D2B1-IV-P3-001:
-  **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+  **CLOSED**.
 - D2B1 requested-risk semantic clarification: **RESOLVED**.
-- D2B2 Live Risk Wrapper Migration and Parity Closure: **NOT AUTHORIZED**.
+- D2B2 Live Risk Wrapper Migration and Parity Closure: **CLOSED — FINAL INDEPENDENT RE-VERIFICATION PASS**.
 - D2C and D3–D7: **NOT AUTHORIZED**.
 - Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.

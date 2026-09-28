@@ -1,4 +1,4 @@
-"""D2B1 static isolation and live-wrapper hard-gate tests."""
+"""D2B pure-core isolation and D2B2 live-wrapper delegation gates."""
 
 import ast
 from pathlib import Path
@@ -70,9 +70,10 @@ def test_pure_production_files_have_no_forbidden_dependencies_or_effects():
         assert not (calls & forbidden_calls)
 
 
-def test_live_wrapper_does_not_delegate_and_operational_files_are_unmodified_by_import():
+def test_live_wrapper_delegates_policy_without_reimplementing_sizing_or_capacity():
     engine_source = (RISK_DIR / "engine.py").read_text(encoding="utf-8")
-    assert "evaluate_pure_risk" not in engine_source
-    assert "PureRiskEvaluationInput" not in engine_source
-    assert "PureRiskResult" not in engine_source
+    assert "evaluate_pure_risk" in engine_source
+    assert "PureRiskResult" in engine_source
+    assert "calculate_position_size" not in engine_source
+    assert "check_budget_capacity" not in engine_source
     assert callable(evaluate_pure_risk)

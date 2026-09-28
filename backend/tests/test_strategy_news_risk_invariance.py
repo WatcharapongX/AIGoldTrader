@@ -156,8 +156,12 @@ async def test_strategy_invariance_and_risk_independence_under_news_variation(db
         expires_at=base_time + dt.timedelta(hours=1),
     )
 
-    cand_calm_with_plan = cand_calm.model_copy(update={"plan": test_plan, "status": "READY"})
-    cand_blackout_with_plan = cand_blackout.model_copy(update={"plan": test_plan, "status": "READY"})
+    cand_calm_with_plan = cand_calm.model_copy(
+        update={"plan": test_plan, "status": "READY", "direction": "LONG"}
+    )
+    cand_blackout_with_plan = cand_blackout.model_copy(
+        update={"plan": test_plan, "status": "READY", "direction": "LONG"}
+    )
 
     # ASSERTION 2: Strategy output is unchanged (READY in both)
     assert cand_calm_with_plan.status == "READY"

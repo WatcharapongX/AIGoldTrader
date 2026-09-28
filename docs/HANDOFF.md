@@ -3,69 +3,78 @@
 ## Session Result
 - Date: 2026-09-28.
 - Branch: `main`.
-- Starting SHA: `147f460182b57363706fc4709806aa725848581a`.
-- Gate: D2B1 targeted remediation for independent verification findings.
-- Runtime: GPT-5.6 Sol / High (operator-selected).
-- Result: **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
-- D2B2, D2C, and D3–D7 remain **NOT AUTHORIZED**.
-- Backtesting Engine remains **NOT COMPLETE**; Risk replay integration remains **NOT IMPLEMENTED**.
+- Starting HEAD/origin-main: `d2ddc5fec92aa59a396fe2c788a6ec9cc903c5d4`.
+- Activity: D2B2 live Risk wrapper migration, remediation, and independent re-verification.
+- Independent gate runtime: GPT-5.6 Sol / High.
+- Final gate result: **PASS**.
+- D2B1 and D2B2 are **CLOSED**.
+- Batch D remains **OPEN**.
+- D2C and D3–D7 remain **NOT AUTHORIZED**.
+- Backtesting Engine remains **NOT COMPLETE**.
+- No commit, push, branch, broker execution, Paper Engine, OMS, or live-trading work was performed.
 
-## Remediated Findings
-- D2B1-IV-P2-001: SymbolSpecification authority is now linked to `candidate.symbol` by normal validation.
-- D2B1-IV-P2-002: `evaluate_pure_risk()` rebuilds the complete round-trip semantic payload into a private,
-  canonically validated `PureRiskEvaluationInput` before any policy calculation.
-- D2B1-IV-P2-003: Pure arithmetic and the unchanged sizing function run inside a fresh server-owned Decimal
-  context using precision 28 and ROUND_HALF_EVEN; Decimal fingerprint rendering no longer uses `normalize()`.
-- D2B1-IV-P3-001: Final BLOCKED results project empty warning text/codes like the live oracle while preserving
-  the exact caller, normalized request, news-reduced target, and zero approved risk.
-- All four findings are **REMEDIATED — PENDING INDEPENDENT RE-VERIFICATION**.
+## D2B2 Implementation
+- `RiskEngine.evaluate_candidate()` delegates deterministic policy and sizing to `evaluate_pure_risk()`.
+- The live wrapper retains PostgreSQL account advisory locking and active-reservation row locking.
+- A preflight pure call derives immutable daily-loss, drawdown, and quote-safety trigger facts.
+- The Kill Switch manager consumes those facts and persists automatic safety/data-health state.
+- The wrapper re-reads authoritative Kill Switch and provider/source data-health state.
+- A final pure call evaluates canonical state after safety persistence and locked exposure assembly.
+- Cache identity, existing-decision lookup, reservation reconciliation, and decision identity remain live.
+- Reservation creation/release and transaction behavior remain live orchestration responsibilities.
+- The public BLOCKED decision retains the legacy policy-maximum requested-risk projection.
+- Pure results retain caller, normalized, target, and approved risk semantics separately.
 
-## Input Authority
-- Candidate, TradePlan, portfolio, and SymbolSpecification symbols/directions are cross-linked.
-- Portfolio open-risk and open-position evidence must match the account snapshot.
-- Execution-entry reconstruction re-runs validators for the outer contract and every nested Pydantic model.
-- `model_copy(update=...)` and `model_construct(...)` malformed states fail with `ValidationError`.
-- Forged quote spread, invalid policy/spec, duplicate reservation without evidence, unavailable news with events,
-  naive news time, invalid account/candidate/Kill Switch/data-health state are rejected before evaluation.
-- The caller object is not read after preparation; policy execution and fingerprinting use the prepared snapshot.
+## Adapter and Integrity Boundary
+- Added `app/services/risk/live_adapter.py` for quote, news, Kill Switch, and portfolio translation.
+- Portfolio evidence is built from locked active reservation rows.
+- Exactly one same-candidate active reservation is excluded as the canonical retry row.
+- Duplicate active rows remain visible as an integrity anomaly and fail closed.
+- Legacy fingerprint exposure excludes current-candidate rows for cache compatibility.
+- Persistent data-health counts are read through an explicit Kill Switch manager method.
+- Direct Kill Switch callers without pure safety facts retain the prior fallback calculations.
+- Pure policy files remain infrastructure-free.
 
-## Decimal Determinism
-- Every pure evaluation receives a fresh local Decimal Context.
-- Context: precision 28, ROUND_HALF_EVEN, Emin -999999, Emax 999999, standard safety traps.
-- Caller ROUND_HALF_UP, ROUND_DOWN, ROUND_UP, and changed precision cannot alter the pure result.
-- The equity `10000.5` reproduction now always approves `$100.00` under the same semantic fingerprint.
-- Canonical Decimal rendering preserves numeric equivalence for `1.0`/`1.00`/`1E0` and signed zero variants.
+## Independent Finding and Remediation
+- The initial independent gate found one P2 exact public-serialization parity defect.
+- BLOCKED `approved_risk_pct`, `approved_risk_amount`, and `position_size` serialized as unscaled `0`.
+- The pre-migration oracle serialized those fields as `0.0000`, `0.00`, and `0.0000`.
+- Numeric safety was unchanged, but API/persisted payload equality was observably different.
+- `_to_live_decision()` now restores the three legacy BLOCKED Decimal scales.
+- The parity suite now asserts exact `model_dump(mode="json")` values.
+- Independent re-verification closed the P2 finding.
+- No P0, P1, P2, or P3 finding remains within D2B2 scope.
 
-## Preserved Behavior
-- None and explicit zero normalize to policy maximum but retain distinct audit fingerprints.
-- Positive, above-maximum, negative, and below-minimum requested-risk behavior remains unchanged.
-- Negative risk remains a deterministic sizing BLOCK with no reservation side effect.
-- News boundaries, multiple-news behavior, Kill Switch/data-health fail-closed behavior, account/loss/drawdown,
-  cooldown, capacity ordering, candidate reservation exclusion, sizing quantization, Thai text, and reason order
-  remain unchanged for valid canonical inputs.
-- `RiskEngine.evaluate_candidate()` remains the live oracle and does not delegate to the pure core.
-- No live operational Risk source file changed.
+## Final Verification Evidence
+- Independent pre-migration HEAD-oracle public decision comparison: 5/5 passed.
+- The oracle matrix includes None, zero, below-cap, above-cap, and quote-unavailable BLOCKED cases.
+- Complete `RiskDecision.model_dump(mode="json")` equality passed.
+- Pure policy core: 76/76 passed.
+- Live/pure parity and D2B2 delegation: 41/41 passed.
+- Architecture isolation/delegation: 2/2 passed.
+- Full targeted Risk matrix: 182/182 passed.
+- Real PostgreSQL Risk concurrency/idempotency/lifecycle suite: 8/8 passed, no skips.
+- PostgreSQL evidence covers oversubscription, duplicate idempotency, HTTP cache reconciliation,
+  reservation lifecycle, migrations, dirty-state reconciliation, and locking behavior.
+- Ruff: passed.
+- `git diff --check`: passed.
+- Only known Starlette/httpx and pytest-asyncio deprecation warnings were emitted.
 
-## Verification Evidence
-- D2B1 pure core: 76 passed.
-- D2B1 live/pure parity: 38 passed.
-- D2B1 architecture isolation: 2 passed.
-- Combined D2B1 suites: 116 passed.
-- Targeted finding tests: 25 passed.
-- Existing `test_risk_engine.py`: 7 passed.
-- Existing `test_risk_adversarial.py`: 41 passed.
-- Existing `test_risk_sizing.py`: 9 passed.
-- Existing `test_kill_switch.py`: 1 passed.
-- Existing strategy/news Risk invariance: 1 passed.
-- Existing `test_risk_api.py`: 4 passed.
-- Ruff on all changed D2B1 Python files: PASS.
-- `git diff --check`: PASS.
-
-## Safety and Next Activity
-- `TRADING_MODE=PAPER` and `LIVE_AUTO_TRADING=false` remain unchanged.
-- Broker execution remains absent; AI remains advisory-only.
+## Safety and Workspace
+- Runtime verification confirmed `TRADING_MODE=PAPER`.
+- Runtime verification confirmed `LIVE_AUTO_TRADING=false`.
+- No `order_send(...)` call exists under `backend/app`.
+- No broker execution, OMS, or live-position capability was introduced.
 - Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
-- Next authorized task: D2B1 independent re-verification only, GPT-5.6 Sol / High, fresh session.
-- Do not close D2B1 in this remediation session.
-- Do not authorize or begin D2B2, D2C, fills, PnL/metrics, persistence/API/UI,
-  Model Routing, Paper Trading, OMS, broker execution, or Live Trading.
+- AI remains advisory-only with zero execution authority.
+- Temporary independent oracle probes and pytest artifacts were removed.
+- The independent reviewer made no production or canonical documentation edits.
+- Final workspace changes are limited to the expected D2B2 production, tests, and canonical docs.
+- `docs/README.md` references absent `docs/11-risk-engine.md`; this did not block the gate.
+
+## Next Activity
+- D2B2 governance closure is complete; no additional D2B2 verification gate is required.
+- The next permitted activity is D2C governance review/authorization only.
+- D2C implementation is not authorized by this closure or handoff.
+- Do not begin replay/Risk integration, fills, PnL/metrics, persistence/API/UI, Paper Trading, OMS,
+  broker execution, Live Trading, or later batches without separate authorization.

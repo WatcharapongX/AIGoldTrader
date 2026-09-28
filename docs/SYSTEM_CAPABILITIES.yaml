@@ -10,16 +10,19 @@ governance:
   completed_sub_batches:
     - "D1"
     - "D2A"
-  active_sub_batch: "D2B1"
-  active_scope: "D2B1 pure Risk contracts and deterministic policy core remediated pending independent re-verification; no live wrapper delegation"
-  next_authorized_activity: "D2B1 independent re-verification only; D2B2 and D2C not authorized"
+    - "D2B1"
+    - "D2B2"
+  active_sub_batch: null
+  active_scope: "D2B2 live Risk wrapper migration independently re-verified and closed"
+  next_authorized_activity: "D2C governance review/authorization only; D2C implementation not authorized"
   d2b1_requested_risk_clarification: resolved
   d2b1_requested_risk_semantics: "exact caller value -> live-compatible normalized request (None/zero to policy max) -> post-modifier target -> final approved risk; BLOCKED pure results retain semantic truth while legacy live RiskDecision projection remains unchanged"
   d2b1_verification_findings:
-    D2B1-IV-P2-001: remediated_pending_independent_reverification
-    D2B1-IV-P2-002: remediated_pending_independent_reverification
-    D2B1-IV-P2-003: remediated_pending_independent_reverification
-    D2B1-IV-P3-001: remediated_pending_independent_reverification
+    D2B1-IV-P2-001: closed
+    D2B1-IV-P2-002: closed
+    D2B1-IV-P2-003: closed
+    D2B1-IV-P3-001: closed
+  d2b2_status: independently_verified_closed
   later_sub_batches_authorized: false
 
 trading_safety:
@@ -48,7 +51,7 @@ capabilities:
     details: "Deterministic STRAT01-STRAT06, 7 profiles, causal immutable contexts and TradePlan suggestions"
   risk_engine:
     status: implemented
-    details: "Current live behavior remains authoritative; D2B1 pure-core implementation is remediated pending independent re-verification, with canonical execution-entry reconstruction, symbol-spec authority, deterministic Decimal context, and BLOCKED warning parity; requested-risk semantics remain intact; D2B2 live-wrapper migration is not authorized"
+    details: "D2B2 independently verified and closed: live Risk orchestration delegates deterministic policy and sizing to the verified D2B1 core while retaining advisory/row locks, persistent Kill Switch and data-health authority, cache/reconciliation, reservations, transactions, and exact public RiskDecision compatibility"
   ai_agents:
     status: implemented
     analytical_agents: 6
@@ -62,10 +65,10 @@ capabilities:
     details: "Batch B independently closed"
   backtesting:
     status: causal_replay_foundation_verified_risk_fill_not_implemented
-    governance: split_program_d1_d2a_closed_d2b1_pending_independent_reverification_d2b2_not_authorized
+    governance: split_program_d1_d2a_d2b1_d2b2_closed_d2c_not_authorized
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1 and D2A are independently verified and closed; D2B governance requires a D2B1/D2B2 split; D2B1 pure Risk contracts/kernel is remediated pending independent re-verification, with no live wrapper or replay integration; D2B2, D2C, and D3-D7 are not authorized; no Risk replay integration, fill simulation, trade lifecycle, PnL, equity, metrics, persistence, Backtesting API, or results UI exists"
+    details: "D1, D2A, D2B1, and D2B2 are independently verified and closed; D2C and D3-D7 are not authorized; no Risk replay integration, fill simulation, trade lifecycle, PnL, equity, metrics, persistence, Backtesting API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:
