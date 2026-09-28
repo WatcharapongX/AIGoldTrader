@@ -6,7 +6,7 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2B2 — LIVE RISK WRAPPER MIGRATION AND PARITY CLOSURE — CLOSED FOLLOWING FINAL INDEPENDENT RE-VERIFICATION PASS.**
+**Current gate: D2C — VERIFIED PURE RISK REPLAY INTEGRATION — AUTHORIZED FOR IMPLEMENTATION.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
 D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. The D2A deterministic causal
@@ -14,7 +14,9 @@ replay foundation passed independent GPT-5.6 Sol / High verification and is clos
 pure policy extraction and safety-critical live-wrapper migration must be independently gated. **D2B1 — Pure
 Risk Contracts and Deterministic Policy Core** passed final independent re-verification and is closed. D2B2 was
 separately authorized, implemented, remediated, and passed the required independent GPT-5.6 Sol / High
-re-verification gate. D2B2 is closed. D2C and D3–D7 remain **NOT AUTHORIZED**. Do not automatically progress.
+re-verification gate. D2B2 is closed. The D2C governance review returned **PLAN APPROVED WITH CONDITIONS** and
+authorized exactly one stateless pure-Risk replay integration unit. D3–D7 remain **NOT AUTHORIZED**. Do not
+automatically progress.
 
 ## Current State
 - Batch B: **CLOSED**.
@@ -25,6 +27,8 @@ re-verification gate. D2B2 is closed. D2C and D3–D7 remain **NOT AUTHORIZED**.
   the Backtesting Engine complete.
 - D2B1 pure Risk contracts/kernel is independently verified and closed.
 - D2B2 live-wrapper migration is independently verified and closed.
+- D2C stateless pure-Risk replay integration is authorized for implementation under the exact governance contract
+  below; it is not implemented or verified yet.
 - D2B1 requested-risk semantic clarification is **RESOLVED**; the four-layer pure contract below is authoritative.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
@@ -184,10 +188,11 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
    policy and sizing to the independently verified D2B1 core while preserving advisory and reservation row locks,
    automatic Kill Switch persistence, persistent data-health tracking, idempotency, existing-decision
    reconciliation, reservation atomicity, transactions, and exact public `RiskDecision` compatibility. Independent
-   GPT-5.6 Sol / High re-verification passed; D2C still requires separate governance authorization.
-5. **D2C — PLANNED / NOT AUTHORIZED**: integrate D2A candidate/TradePlan output with the verified D2B pure Risk
-   seam, deterministic risk-decision event ordering/fingerprinting, and complete replay/Risk parity and isolation
-   tests. No fills, trade lifecycle, PnL, or persistence.
+   GPT-5.6 Sol / High re-verification passed; the separate D2C governance authorization is recorded below.
+5. **D2C — AUTHORIZED FOR IMPLEMENTATION / NOT YET IMPLEMENTED**: one bounded, stateless integration unit that
+   privately canonicalizes D2A inputs, consumes D2A `ReplayStrategyEvent` output, builds exact-time isolated
+   `PureRiskEvaluationInput` values, calls `evaluate_pure_risk()` directly, and emits immutable backtest-specific
+   Risk evidence with deterministic identity. No fills, state evolution, trade lifecycle, PnL, or persistence.
 6. **D3 — PLANNED / NOT AUTHORIZED**: deterministic fills, costs, ambiguity, isolated portfolio lifecycle,
    candidate/risk/trade in-memory ledgers.
 7. **D4 — PLANNED / NOT AUTHORIZED**: canonical metrics, equity/drawdown, and derivable period dimensions.
@@ -196,6 +201,126 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
 9. **D6 — PLANNED / NOT AUTHORIZED**: minimal Backtesting UI consuming authoritative D5 APIs.
 10. **D7 — PLANNED / NOT AUTHORIZED**: determinism, no-lookahead, security/resource, migration, API, browser,
    and full regression independent closure gate.
+
+## D2C Governance Decision and Authorized Contract
+**PLAN APPROVED WITH CONDITIONS.** D2C remains one implementation unit because the verified public seams are
+sufficient: reconstruct a private canonical `ReplayInputs` snapshot with `make_replay_inputs()`, call `replay()`
+to obtain the authoritative D2A events and identities, and call `evaluate_pure_risk()` directly. D2C must not
+depend on `risk.live_adapter.py`, `risk.engine.py`, `PortfolioRiskManager`, `KillSwitchManager`, repositories,
+SQLAlchemy, or `AsyncSession`. No D2A private preparation API or D2B production change is authorized.
+
+### Event and Output Contract
+- Introduce `RISK_REPLAY_INTEGRATION_VERSION = "risk-replay-1.0.0"` without changing the D1, D2A, or D2B versions.
+- Every D2A `ReplayStrategyEvent` produces exactly one ordered backtest `ReplayRiskEvent`.
+- If `trade_plan` exists, disposition is `EVALUATED` and D2C invokes pure Risk exactly once.
+- If `trade_plan` is absent, disposition is `NOT_EVALUATED_NO_PLAN`; no TradePlan is fabricated and no pure Risk
+  call or BLOCKED decision is created.
+- `ReplayRiskEvent` contains event time and strategy/candidate/plan identities, the source D2A event fingerprint,
+  disposition, optional Risk-input fingerprint, optional `PureRiskResult` and its semantic fingerprint, selected
+  quote timestamp plus `observed_at` when present, and its own deterministic event fingerprint.
+- `RiskReplayResult` contains the integration version, source replay input/output fingerprints, Risk configuration
+  fingerprint, Risk replay input fingerprint, cutoff, strategy/evaluated/no-plan counters, ordered events, and a
+  causal Risk replay output fingerprint. Risk event count is at most the D2A strategy-event count and therefore
+  remains within the existing candidate ceiling.
+
+### Stateless Account and Portfolio Semantics
+- D2C answers only: "Would this plan pass verified Risk policy at T under the configured baseline simulation
+  state?" It does not answer whether approved events can coexist or execute sequentially.
+- For every evaluated event at `T`, account balance, equity, peak equity, and free margin equal
+  `manifest.config.initial_balance`; daily/weekly realized PnL and floating PnL are zero; open/reserved risk are
+  zero; consecutive losses and open-position count are zero; loss/cooldown timestamps are absent; state version is
+  one; and `state_updated_at`, `observed_at`, and `as_of` equal `T`.
+- Account identity is deterministic from the governed Risk replay input. Snapshot identity is deterministic from
+  that account identity, source event fingerprint, and `T`. No random UUID or live account identity is permitted.
+- Use existing `AccountSnapshot.source="CONFIGURED_TEST"` with `trading_mode="BACKTEST"`. This is explicitly a
+  configured non-live scenario snapshot, not historical live-account evidence; no additive shared Risk source
+  value or D2B production edit is authorized.
+- Portfolio exposure is exactly zero for open, reserved, symbol, and directional risk; active reservations and open
+  positions are zero; reservation integrity is `OK`; duplicate identity is absent. Each event receives a fresh
+  baseline and cannot consume another event's capacity. D3 alone may introduce evolving simulation state.
+
+### Risk Configuration and Requested Risk
+- Add one frozen, `extra="forbid"` `RiskReplayConfig` containing the complete `RiskPolicy`, a frozen XAUUSD
+  `BacktestSymbolSpecAssumption`, and `caller_requested_risk_pct`.
+- `caller_requested_risk_pct` defaults to `None`, accepts only finite non-negative bounded percentages, and is
+  passed unchanged to the pure core. `None` and explicit zero therefore retain D2B1 compatibility normalization to
+  policy maximum while remaining distinct audit/configuration identities. D1 `BacktestRunConfig` is unchanged.
+- The complete canonical `RiskPolicy` is supplied offline in the D2C configuration; no DB or live-policy lookup is
+  allowed. Its `version` must equal `manifest.provenance.risk_policy_version` or admission fails closed. Every
+  policy field is bound into the Risk configuration fingerprint.
+
+### Symbol Specification Assumption
+- The symbol-spec model is a scenario assumption, never historical broker observation. It contains XAUUSD,
+  tick size/value, contract size, volume min/max/step, digits, and explicit `BACKTEST_ASSUMPTION` provenance.
+- At event `T`, D2C creates the exact `SymbolSpecification` required by D2B1 with `observed_at=T`,
+  `source="BACKTEST_ASSUMPTION"`, no broker server, and a deterministic ID derived from the assumption identity
+  and `T`. Here `T` means scenario specification effective for this evaluation, not observed from a broker at T.
+- All economic fields are bound into the Risk configuration fingerprint. Wrong-symbol or invalid assumptions fail
+  closed; tick value, volume step, volume bounds, contract size, or other semantic changes alter identity.
+
+### News and Quote Authority
+- If `RiskPolicy.news_risk_enabled` is true, D2C admission requires causal non-fixture historical news for every
+  strategy: manifest vintage availability and complete requested-period coverage, matching source,
+  `calendar_available=true`, and `news_mode="LIVE"`. Missing/unavailable/fixture coverage fails with
+  `RISK_NEWS_UNAVAILABLE`; it is never normalized to CALM and policy is never disabled to make a replay pass.
+- If news Risk is disabled, Risk evaluation may proceed without Risk news, while STRAT05/STRAT06 retain all D1/D2A
+  Strategy-news requirements. The normalized pure input records news as unavailable/disabled rather than allowing
+  unused news suffixes to affect policy evidence.
+- Point-in-time Risk news uses the existing `news.engine.latest_known()` causal revision projection, filtered to
+  the governed source and bounded to the existing context ceiling, then converts those events to `PureNewsState`.
+  D2C does not duplicate news-window rules; `_news_evaluation()` in the pure Risk core remains authoritative.
+- The Risk quote at `T` is the greatest-timestamp canonical `ObservedQuote` satisfying both `timestamp <= T` and
+  `observed_at <= T`, with source equal to the governed market source. Its bid/ask/spread feed `PureQuoteState` and
+  its observation time is retained as D2C evidence. No eligible quote produces `UNAVAILABLE`; stale quotes remain
+  available and the pure policy's own freshness rule decides BLOCKED. Candles are never substituted for quotes.
+
+### Kill Switch, Data Health, and Candidate Lifecycle
+- Kill Switch input is `INACTIVE` with `BACKTEST_NO_EXTERNAL_KILL_SWITCH` provenance. It means no external
+  operational switch is imposed at this analysis stage, not that historical live state was observed inactive.
+  D2C neither reads, activates, nor persists any switch; pure safety-trigger facts remain evidence only.
+- Data health is `HEALTHY` with `BACKTEST_CAUSAL_DATA_ADMISSION` provenance, zero consecutive failures, and the
+  policy threshold. It represents successful D2A canonical coverage admission, not historical operational
+  provider counters. Quote and news availability/freshness remain independent pure-policy inputs.
+- `ReplayStrategyEvent.candidate_status` is the authoritative lifecycle state at `T`; Strategy is not re-queried.
+  `candidate_transition_count=0` is an explicit stateless D2C assumption because D2A exposes no authoritative
+  causal transition ledger. It is bound into the integration/configuration semantics and must not be inferred from
+  final-state hindsight.
+
+### Identity, Causality, and Failure Semantics
+- `risk_configuration_fingerprint` binds integration version; full RiskPolicy; exact requested-risk value; full
+  symbol-spec assumption; account/portfolio baselines; Kill Switch/data-health provenance; candidate-transition,
+  event-eligibility, quote-selection, and news-admission/projection semantics.
+- `risk_replay_input_fingerprint` binds the D2A `replay_input_fingerprint` and Risk configuration fingerprint. It
+  identifies complete executable inputs and changes when a future-only source suffix changes.
+- Each evaluated `risk_input_fingerprint` binds the canonical `PureRiskEvaluationInput`, source quote
+  `observed_at`, source D2A event fingerprint, and integration version. Each Risk event fingerprint binds source
+  event identity, disposition, Risk-input identity when present, exact pure semantic fingerprint when present,
+  and integration version.
+- `risk_replay_fingerprint` binds integration version, cutoff, source D2A causal `replay_fingerprint`, counters,
+  and canonical ordered Risk events. It intentionally excludes complete input identity so future-only suffix
+  mutations can change input identity without changing output through an earlier cutoff.
+- All evaluation time authority is exactly `ReplayStrategyEvent.as_of`; candidate/context/plan, account snapshot,
+  scenario spec, news projection, quote projection, and Risk input use that same `T`. No wall clock is permitted.
+- Stable integration failures are `RISK_REPLAY_INPUT_INVALID`, `RISK_REPLAY_CONFIGURATION_INVALID`,
+  `RISK_NEWS_UNAVAILABLE`, `RISK_SYMBOL_SPEC_INVALID`, `RISK_CAUSALITY_VIOLATION`,
+  `RISK_RESOURCE_LIMIT_EXCEEDED`, and `RISK_POLICY_EVALUATION_FAILED`. Ordinary pure Risk `BLOCKED` is a valid
+  event and never an engine/run failure. Arbitrary stack traces are not a deterministic public status.
+
+### Authorized D2C Implementation Scope and Gate
+- Add only the backtest Risk replay contracts, fingerprints, adapter/orchestrator, and focused tests under the
+  backtesting service/test boundary. A small backtesting package export is allowed if required.
+- Reuse `make_replay_inputs()`, `replay()`, `news.engine.latest_known()`, pure Risk contracts, and
+  `evaluate_pure_risk()` directly. Do not modify D2A or D2B production semantics and do not use the live adapter.
+- Tests must cover contract validation; D2A linkage; exact pure-core parity; same-T account/spec authority; quote
+  timestamp and `observed_at` causality; news vintage causality/admission; spec assumptions; baseline account and
+  portfolio reset; requested risk; policy version/content identity; ordering; all identity layers; prefix and
+  future-mutation invariance; repeat determinism; no-plan/terminal/BLOCKED cases; caller mutation; bounds; and
+  architecture isolation. Run D2A and D2B1 regressions. D2B2 live regressions are required only if a D2B file is
+  touched, which this authorization does not permit.
+- Independent verification must attack future quote timestamp/observation, future news revision/candle/source
+  suffix, wrong/changed spec, changed policy/balance/requested risk, missing news, no-plan and terminal candidates,
+  ordinary BLOCKED results, caller mutation, and event-order perturbation. D2C remains open until an independent
+  GPT-5.6 Sol / High gate passes. Completion does not authorize D3.
 
 ## D2B Governance Decision
 **PLAN REQUIRES SPLIT.** The current `RiskEngine.evaluate_candidate()` interleaves deterministic policy with
@@ -410,8 +535,8 @@ authorize D2B2 or D2C.
 - D1-IV-001 through D1-IV-006 are **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT**; D2A passed independent GPT-5.6 Sol / High verification and is **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT** for D2B.
-- Next permitted activity is **D2C governance review/authorization only**. D2C implementation and D3–D7 are
-  **NOT AUTHORIZED**.
+- D2C governance result: **PLAN APPROVED WITH CONDITIONS**. Exactly one D2C stateless pure-Risk replay integration
+  unit is **AUTHORIZED FOR IMPLEMENTATION**. D3–D7 remain **NOT AUTHORIZED**.
 
 ## D2A Final Closure Status
 - NEW-D2A-RV-001: **CLOSED**.
@@ -431,5 +556,6 @@ authorize D2B2 or D2C.
 - No reproducible P0/P1/P2/P3 finding remains within D2A scope.
 - D2B1 final independent re-verification: **PASS; CLOSED**.
 - D2B2 final independent re-verification: **PASS; CLOSED**.
-- D2C governance review/authorization alone is permitted next. D2C implementation and D3–D7 remain not authorized;
-  do not begin the next sub-batch automatically.
+- D2C stateless pure-Risk replay integration is the only permitted implementation activity. It requires a fresh
+  independent GPT-5.6 Sol / High verification gate before closure. D3–D7 remain not authorized; do not begin the
+  next sub-batch automatically.

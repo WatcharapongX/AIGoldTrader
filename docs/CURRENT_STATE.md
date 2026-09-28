@@ -3,9 +3,9 @@
 - **Last Verified Date**: 2026-09-28
 - **Authoritative Branch**: `main`
 - **Current Milestone**: Batch D remains OPEN; D1, D2A, D2B1, and D2B2 are CLOSED.
-- **Current Active Gate**: No implementation gate is active. D2B2 Live Risk Wrapper Migration and Parity Closure passed independent GPT-5.6 Sol / High re-verification.
-- **Next Permitted Activity**: D2C governance review/authorization only; D2C implementation is not authorized.
-- **Prohibited Progression**: D2C implementation and D3–D7 remain NOT AUTHORIZED.
+- **Current Active Gate**: D2C Verified Pure Risk Replay Integration is AUTHORIZED FOR IMPLEMENTATION under the bounded stateless-baseline contract below.
+- **Next Permitted Activity**: Implement D2C only, then stop for an independent GPT-5.6 Sol / High verification gate.
+- **Prohibited Progression**: D3–D7 remain NOT AUTHORIZED; D2C authorization does not include fills, state evolution, persistence, API, or UI.
 
 ---
 
@@ -55,7 +55,8 @@
   D2B2 has migrated the live `RiskEngine.evaluate_candidate()` wrapper to that core while retaining stateful
   locks, persistent Kill Switch/data-health authority, idempotency, reservation reconciliation, transaction
   behavior, and the legacy public BLOCKED projection. Independent re-verification found and closed one fixed-scale
-  BLOCKED serialization parity defect; D2B2 is CLOSED. D2C replay/Risk integration remains NOT AUTHORIZED.
+  BLOCKED serialization parity defect; D2B2 is CLOSED. The separate D2C governance authorization is recorded
+  below.
 - **D2B1 requested-risk clarification**: RESOLVED. Pure semantic truth separates the exact
   `caller_requested_risk_pct`, compatibility-normalized request (`None` and zero map to policy maximum),
   post-modifier `target_risk_pct`, and final `approved_risk_pct`. BLOCKED pure results retain caller/normalized/
@@ -66,6 +67,20 @@
   **CLOSED** following final independent re-verification PASS. The pure execution boundary validates symbol-spec
   authority, reconstructs a private canonical input snapshot, owns deterministic Decimal context, fingerprints
   context-independent Decimal values, and preserves BLOCKED live warning projection while retaining target truth.
+- **D2C governance authorization**: **PLAN APPROVED WITH CONDITIONS** as one implementation unit. D2C is a
+  separate in-process backtesting layer which privately canonicalizes caller inputs through the existing D2A
+  `make_replay_inputs()` boundary, obtains `ReplayStrategyEvent` values from `replay()`, constructs exact-time
+  historical/scenario `PureRiskEvaluationInput` values, and calls `evaluate_pure_risk()` directly. It must not
+  import or call `risk.live_adapter`, `RiskEngine`, reservations, Kill Switch persistence, SQLAlchemy, or any live
+  repository. Every plan-bearing event is evaluated independently against the same non-evolving account and zero-
+  exposure baseline. No-plan events remain explicit `NOT_EVALUATED_NO_PLAN` audit records. `APPROVED`, `REDUCED`,
+  and `BLOCKED` are evidence only and create no reservation, fill, position, trade, PnL, or state transition.
+- **D2C historical authority**: the complete caller-supplied `RiskPolicy` must match
+  `manifest.provenance.risk_policy_version` and is bound by content. Symbol economics are an immutable
+  `BACKTEST_ASSUMPTION`, projected at event time only as scenario-effective input, never claimed as historical
+  broker observation. With news Risk enabled, causal non-fixture historical news coverage is required for every
+  strategy. Quotes are selected only when both market timestamp and `observed_at` are at or before event time;
+  absence produces `PureQuoteState.UNAVAILABLE` and an ordinary pure Risk BLOCK.
 - **D2A identity model**: `historical_data_fingerprint` identifies the complete historical source snapshot;
   `run_input_fingerprint` identifies the governed D1 manifest; `replay_input_fingerprint` identifies that manifest
   plus complete D2A replay configuration; `replay_fingerprint` identifies causal output through the effective
@@ -115,7 +130,8 @@ The approved staged data flow is:
   **CLOSED**.
 - D2B1 requested-risk semantic clarification: **RESOLVED**.
 - D2B2 Live Risk Wrapper Migration and Parity Closure: **CLOSED — FINAL INDEPENDENT RE-VERIFICATION PASS**.
-- D2C and D3–D7: **NOT AUTHORIZED**.
+- D2C: **AUTHORIZED FOR IMPLEMENTATION — STATELESS VERIFIED PURE RISK REPLAY INTEGRATION ONLY**.
+- D3–D7: **NOT AUTHORIZED**.
 - Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
 - Paper Trading: **NOT AUTHORIZED**.
