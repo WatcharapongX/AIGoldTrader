@@ -63,7 +63,8 @@ async def metrics() -> Response:
         f"aigold_uptime_seconds {uptime}\n"
         "# HELP aigold_trading_info Trading safety mode (1=PAPER enforced).\n"
         "# TYPE aigold_trading_info gauge\n"
-        f'aigold_trading_info{{mode="{settings.trading_mode}",live_auto_trading="{str(settings.live_auto_trading).lower()}"}} 1\n'
+        f'aigold_trading_info{{mode="{settings.trading_mode}",'
+        f'live_auto_trading="{str(settings.live_auto_trading).lower()}"}} 1\n'
     )
     return Response(content=body, media_type="text/plain; version=0.0.4")
 
