@@ -636,18 +636,27 @@ def test_contracts_are_frozen_and_reject_counter_order_and_evidence_mismatch():
         ReplayRiskEvent.model_validate({**no_plan.model_dump(mode="python"), "risk_evaluation_status": "EVALUATED"})
 
 
-@pytest.mark.parametrize("perturb", ["reversed", "duplicate"])
+@pytest.mark.parametrize("perturb", ["reversed", "duplicate", "beyond_cutoff"])
 def test_perturbed_d2a_event_order_fails_with_stable_causality_code(monkeypatch, perturb):
     """D2C-IV-P2-001: model_copy-perturbed D2A streams must not leak raw ValidationError."""
     source_inputs = inputs()
     source = replay(source_inputs, stop_at=START + dt.timedelta(minutes=10))
     assert len(source.events) >= 2
-    perturbed_events = source.events[::-1] if perturb == "reversed" else (source.events[0],) + source.events
+    if perturb == "reversed":
+        perturbed_events = source.events[::-1]
+    elif perturb == "duplicate":
+        perturbed_events = (source.events[0],) + source.events
+    else:
+        late = source.events[-1].model_copy(update={"as_of": source.cutoff + dt.timedelta(minutes=1)})
+        perturbed_events = source.events[:-1] + (late,)
     forged = source.model_copy(update={"events": perturbed_events})
-    monkeypatch.setattr(integration, "replay", lambda *args, **kwargs: forged)
-    assert_failure(
-        RiskReplayFailureCode.CAUSALITY_VIOLATION, lambda: replay_risk(source_inputs, config(), stop_at=source.cutoff)
-    )
+    # raising=True (string form): fail loudly if the seam is ever renamed.
+    monkeypatch.setattr(integration, "replay", lambda *args, **kwargs: forged, raising=True)
+    with pytest.raises(RiskReplayError) as error:
+        replay_risk(source_inputs, config(), stop_at=source.cutoff)
+    assert not isinstance(error.value, ValidationError)
+    assert error.value.code is RiskReplayFailureCode.CAUSALITY_VIOLATION
+    assert str(error.value) == RiskReplayFailureCode.CAUSALITY_VIOLATION.value
 
 
 def test_adapter_accepts_inputs_not_external_replay_results():
