@@ -52,6 +52,22 @@ async def healthz() -> dict:
     }
 
 
+@router.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    """Minimal Prometheus text exposition (no extra dependency)."""
+    settings = get_settings()
+    uptime = round(time.monotonic() - _started_at, 1)
+    body = (
+        "# HELP aigold_up Process is up.\n# TYPE aigold_up gauge\naigold_up 1\n"
+        "# HELP aigold_uptime_seconds Process uptime.\n# TYPE aigold_uptime_seconds gauge\n"
+        f"aigold_uptime_seconds {uptime}\n"
+        "# HELP aigold_trading_info Trading safety mode (1=PAPER enforced).\n"
+        "# TYPE aigold_trading_info gauge\n"
+        f'aigold_trading_info{{mode="{settings.trading_mode}",live_auto_trading="{str(settings.live_auto_trading).lower()}"}} 1\n'
+    )
+    return Response(content=body, media_type="text/plain; version=0.0.4")
+
+
 @router.get("/readyz", response_model=ReadyResponse, responses={503: {"model": ReadyResponse}})
 async def readyz(response: Response) -> dict:
     """Readiness — DB ต้องพร้อมเสมอ, Redis ล่ม = degraded (ยัง ready แต่รายงาน)."""
