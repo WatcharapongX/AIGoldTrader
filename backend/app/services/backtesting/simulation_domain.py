@@ -5,7 +5,6 @@ Entry is eligible only on candles strictly after plan creation; a plan cannot
 fill from its creation candle. SL wins same-candle ambiguity (worst case).
 """
 
-import datetime as dt
 from decimal import Decimal
 from enum import Enum
 

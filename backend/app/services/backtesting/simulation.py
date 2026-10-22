@@ -46,7 +46,6 @@ def simulate(inputs: ReplayInputs, config: RiskReplayConfig, *, stop_at: dt.date
     source = replay(canonical, stop_at=stop_at)
     risk = replay_risk(inputs, config, stop_at=stop_at)
     risk_by_event = {e.replay_strategy_event_fingerprint: e for e in risk.events}
-    plan_by_event = {e.event_fingerprint: e for e in source.events}
 
     primary_tf = canonical.manifest.config.timeframe
     candles = tuple(c for c in canonical.candles.get(primary_tf, ()) if _close_time(c) <= (stop_at or source.cutoff))
@@ -77,7 +76,11 @@ def simulate(inputs: ReplayInputs, config: RiskReplayConfig, *, stop_at: dt.date
         pure = risk_event.pure_risk_result
         if pure is None or pure.decision == "BLOCKED" or pure.position_size <= 0:
             trades.append(
-                SimulatedTrade(**base, status=TradeStatus.RISK_BLOCKED, approved_risk_amount=pure.approved_risk_amount if pure else Decimal("0"))
+                SimulatedTrade(
+                    **base,
+                    status=TradeStatus.RISK_BLOCKED,
+                    approved_risk_amount=pure.approved_risk_amount if pure else Decimal("0"),
+                )
             )
             continue
         if open_until is not None and event.as_of < open_until:
@@ -132,7 +135,11 @@ def simulate(inputs: ReplayInputs, config: RiskReplayConfig, *, stop_at: dt.date
                 hit_target = False  # worst case: SL first
             if hit_stop:
                 gap_price = candle.open if (candle.open < stop if is_long else candle.open > stop) else stop
-                exit_price = (gap_price - costs.slippage_price_per_side) if is_long else (gap_price + costs.slippage_price_per_side)
+                exit_price = (
+                    (gap_price - costs.slippage_price_per_side)
+                    if is_long
+                    else (gap_price + costs.slippage_price_per_side)
+                )
                 exit_reason = ExitReason.STOP_LOSS
                 exit_idx = idx
                 break
@@ -143,7 +150,11 @@ def simulate(inputs: ReplayInputs, config: RiskReplayConfig, *, stop_at: dt.date
                 break
         if exit_price is None:
             last = candles[-1]
-            exit_price = (last.close - costs.slippage_price_per_side) if is_long else (last.close + costs.slippage_price_per_side)
+            exit_price = (
+                (last.close - costs.slippage_price_per_side)
+                if is_long
+                else (last.close + costs.slippage_price_per_side)
+            )
             exit_idx = len(candles) - 1
 
         diff = (exit_price - entry_price) if is_long else (entry_price - exit_price)
