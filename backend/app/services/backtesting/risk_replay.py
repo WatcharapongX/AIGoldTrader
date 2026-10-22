@@ -6,7 +6,13 @@ from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOp
 from app.services.backtesting.fingerprint import semantic_fingerprint
 from app.services.backtesting.policy import MAX_CANDIDATES_PER_RUN, MAX_ESTIMATED_OUTPUT_BYTES
 from app.services.backtesting.replay import make_replay_inputs, replay
-from app.services.backtesting.replay_domain import ReplayError, ReplayFailureCode, ReplayInputs, ReplayStrategyEvent
+from app.services.backtesting.replay_domain import (
+    ReplayError,
+    ReplayFailureCode,
+    ReplayInputs,
+    ReplayResult,
+    ReplayStrategyEvent,
+)
 from app.services.backtesting.risk_replay_domain import (
     RISK_REPLAY_INTEGRATION_VERSION,
     BacktestSymbolSpecAssumption,
@@ -42,6 +48,7 @@ from app.services.risk.policy_domain import (
     QuoteAvailability,
     ReservationIntegrityState,
 )
+from app.services.strategy.domain import SetupCandidate, StrategyMarketContext, TradePlanSuggestion
 
 MAX_RISK_CONFIGURATION_BYTES = 64 * 1024
 
@@ -290,6 +297,19 @@ def _validate_source_events(source) -> None:
     from final result construction escape (D2C-IV-P2-001).
     """
     try:
+        # Type/identity gate (D2C-IV-P2-003): a duck-typed plain object copying
+        # as_of/plan/context/candidate must never reach Risk evaluation. Only
+        # genuine D2A domain events inside a genuine ReplayResult are admissible;
+        # isinstance (not revalidation) preserves event identity/fingerprints.
+        if not isinstance(source, ReplayResult) or not isinstance(source.events, (tuple, list)):
+            raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION)
+        for event in source.events:
+            if not isinstance(event, ReplayStrategyEvent):
+                raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION)
+            if not isinstance(event.context, StrategyMarketContext) or not isinstance(event.candidate, SetupCandidate):
+                raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION)
+            if event.trade_plan is not None and not isinstance(event.trade_plan, TradePlanSuggestion):
+                raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION)
         timestamps = [source.cutoff, *(e.as_of for e in source.events)]
         if any(
             not isinstance(value, dt.datetime) or value.tzinfo is None or value.utcoffset() is None
@@ -323,49 +343,56 @@ def _replay_risk(inputs: ReplayInputs, config: RiskReplayConfig, stop_at: dt.dat
     for event in source.events:
         if len(events) >= MAX_CANDIDATES_PER_RUN:
             raise RiskReplayError(RiskReplayFailureCode.RESOURCE_LIMIT_EXCEEDED)
-        payload = {
-            "as_of": event.as_of,
-            "profile_id": event.profile_id,
-            "strategy_id": event.strategy_id,
-            "candidate_id": event.candidate_id,
-            "plan_id": None,
-            "replay_strategy_event_fingerprint": event.event_fingerprint,
-            "risk_evaluation_status": RiskEvaluationStatus.NOT_EVALUATED_NO_PLAN,
-            "risk_input_fingerprint": None,
-            "pure_risk_result": None,
-            "pure_risk_fingerprint": None,
-            "quote_timestamp": None,
-            "quote_observed_at": None,
-        }
-        if event.trade_plan is not None:
-            quote = _quote_at(canonical, event.as_of)
-            try:
-                pure_input = _build_input(canonical, config, event, account_id, quote)
-            except RiskReplayError:
-                raise
-            except (TypeError, ValueError, ArithmeticError) as error:
-                raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION) from error
-            try:
-                pure_result = evaluate_pure_risk(pure_input)
-            except Exception as error:
-                raise RiskReplayError(RiskReplayFailureCode.POLICY_EVALUATION_FAILED) from error
-            payload.update(
-                plan_id=event.trade_plan.id,
-                risk_evaluation_status=RiskEvaluationStatus.EVALUATED,
-                risk_input_fingerprint=semantic_fingerprint(
-                    {
-                        "kind": "risk-event-input",
-                        "integration_version": RISK_REPLAY_INTEGRATION_VERSION,
-                        "input": pure_input,
-                        "source_event": event.event_fingerprint,
-                        "quote_observed_at": quote.observed_at if quote else None,
-                    }
-                ),
-                pure_risk_result=pure_result,
-                pure_risk_fingerprint=pure_result.semantic_fingerprint,
-                quote_timestamp=quote.timestamp if quote else None,
-                quote_observed_at=quote.observed_at if quote else None,
-            )
+        # Attribute access during payload construction is inside the stable
+        # failure boundary (D2C-IV-P3-002): no raw AttributeError may escape.
+        try:
+            payload = {
+                "as_of": event.as_of,
+                "profile_id": event.profile_id,
+                "strategy_id": event.strategy_id,
+                "candidate_id": event.candidate_id,
+                "plan_id": None,
+                "replay_strategy_event_fingerprint": event.event_fingerprint,
+                "risk_evaluation_status": RiskEvaluationStatus.NOT_EVALUATED_NO_PLAN,
+                "risk_input_fingerprint": None,
+                "pure_risk_result": None,
+                "pure_risk_fingerprint": None,
+                "quote_timestamp": None,
+                "quote_observed_at": None,
+            }
+            if event.trade_plan is not None:
+                quote = _quote_at(canonical, event.as_of)
+                try:
+                    pure_input = _build_input(canonical, config, event, account_id, quote)
+                except RiskReplayError:
+                    raise
+                except (AttributeError, TypeError, ValueError, ArithmeticError) as error:
+                    raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION) from error
+                try:
+                    pure_result = evaluate_pure_risk(pure_input)
+                except Exception as error:
+                    raise RiskReplayError(RiskReplayFailureCode.POLICY_EVALUATION_FAILED) from error
+                payload.update(
+                    plan_id=event.trade_plan.id,
+                    risk_evaluation_status=RiskEvaluationStatus.EVALUATED,
+                    risk_input_fingerprint=semantic_fingerprint(
+                        {
+                            "kind": "risk-event-input",
+                            "integration_version": RISK_REPLAY_INTEGRATION_VERSION,
+                            "input": pure_input,
+                            "source_event": event.event_fingerprint,
+                            "quote_observed_at": quote.observed_at if quote else None,
+                        }
+                    ),
+                    pure_risk_result=pure_result,
+                    pure_risk_fingerprint=pure_result.semantic_fingerprint,
+                    quote_timestamp=quote.timestamp if quote else None,
+                    quote_observed_at=quote.observed_at if quote else None,
+                )
+        except RiskReplayError:
+            raise
+        except (AttributeError, TypeError, ValueError, ArithmeticError) as error:
+            raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION) from error
         try:
             risk_event = ReplayRiskEvent(**payload, risk_event_fingerprint=risk_event_fingerprint(payload))
         except (TypeError, ValueError, ArithmeticError) as error:
