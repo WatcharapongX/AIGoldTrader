@@ -38,3 +38,8 @@ from app.models.strategy import (  # noqa: F401, E402
     TradeCandidateRecord,
     TraderProfileRecord,
 )
+from app.models.backtest import (  # noqa: F401, E402
+    BacktestEquityPointRecord,
+    BacktestRunRecord,
+    BacktestTradeRecord,
+)
