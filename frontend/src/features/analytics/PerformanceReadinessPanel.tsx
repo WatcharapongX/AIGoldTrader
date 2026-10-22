@@ -75,15 +75,15 @@ export function PerformanceReadinessPanel() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2 text-[11px]">
           <div className="p-2.5 rounded bg-slate-950/50 border border-slate-800">
-            <span className="font-bold text-indigo-400">1. Phase 7 — OMS & Execution:</span>
+            <span className="font-bold text-indigo-400">1. OMS & Execution — Not Authorized:</span>
             <p className="text-gray-400 mt-0.5">ติดตั้ง Paper Order Ledger, Position Lifecycle, Order Execution</p>
           </div>
           <div className="p-2.5 rounded bg-slate-950/50 border border-slate-800">
-            <span className="font-bold text-amber-400">2. Phase 8 — Trade Journal:</span>
+            <span className="font-bold text-amber-400">2. Trade Journal — ข้อมูลจากการประเมินเท่านั้น:</span>
             <p className="text-gray-400 mt-0.5">บันทึก Closed Trades Ledger และเปิดใช้งาน Performance Engine คำนวณ Win Rate จริง</p>
           </div>
           <div className="p-2.5 rounded bg-slate-950/50 border border-slate-800">
-            <span className="font-bold text-emerald-400">3. Phase 9 — Backtest Engine:</span>
+            <span className="font-bold text-emerald-400">3. Batch D — Backtest Engine (D3-D7 Not Authorized):</span>
             <p className="text-gray-400 mt-0.5">ประเมินกลยุทธ์ย้อนหลังกับชุดข้อมูลแท่งเทียน W1/D1/H1/M5</p>
           </div>
         </div>

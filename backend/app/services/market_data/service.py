@@ -157,7 +157,7 @@ class MarketService:
         self.engine = CandleEngine()
         # At most one current UTC week of M1 contributions: finite and consistent across timeframes.
         count = int((now - bucket(now, Timeframe.W1)).total_seconds() // 60) + 1
-        bases = self.provider.get_historical_candles("XAUUSD", Timeframe.M1, now, count)
+        bases = await asyncio.to_thread(self.provider.get_historical_candles, "XAUUSD", Timeframe.M1, now, count)
         self.engine.seed(bases)
         self.state = "CONNECTING"
 

@@ -153,15 +153,19 @@ def _news_at(inputs: ReplayInputs, config: RiskReplayConfig, at: dt.datetime) ->
 
 
 def _quote_at(inputs: ReplayInputs, at: dt.datetime) -> ObservedQuote | None:
-    # D2A has already validated unique increasing market timestamps.
-    return next(
-        (
-            q
-            for q in reversed(inputs.quotes)
-            if q.timestamp <= at and q.observed_at <= at and q.source == inputs.manifest.coverage.source
-        ),
-        None,
-    )
+    # D2A has already validated unique increasing market timestamps, so bisect
+    # to the last quote at/before T instead of a linear reverse scan per event.
+    from bisect import bisect_right
+
+    quotes = inputs.quotes
+    index = bisect_right(quotes, at, key=lambda q: q.timestamp) - 1
+    source = inputs.manifest.coverage.source
+    while index >= 0:
+        quote = quotes[index]
+        if quote.observed_at <= at and quote.source == source:
+            return quote
+        index -= 1
+    return None
 
 
 def _build_input(

@@ -121,6 +121,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_proxy_boundary(self):
+        # Fail-closed trading safety (AGENTS.md invariants): live execution is not implemented.
+        if self.live_auto_trading:
+            raise ValueError("LIVE_AUTO_TRADING=true is forbidden: live trading is not implemented")
+        if self.trading_mode == "LIVE":
+            raise ValueError("TRADING_MODE=LIVE is forbidden: only PAPER/BACKTEST are permitted")
+        if "*" in self.cors_origin_list:
+            raise ValueError("Wildcard CORS origin is forbidden")
         networks = [value.strip() for value in self.trusted_proxy_cidrs.split(",") if value.strip()]
         if self.trust_proxy and not networks:
             raise ValueError("TRUST_PROXY requires explicit TRUSTED_PROXY_CIDRS")

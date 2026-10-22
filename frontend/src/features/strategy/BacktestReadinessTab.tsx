@@ -10,14 +10,9 @@ interface BacktestReadinessTabProps {
 export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
   // Extract candle counts per timeframe from actual frames in context
   const frameCoverage = React.useMemo(() => {
-    const coverage: Record<string, { bars: number; requested: number; status: string }> = {
-      M1: { bars: 1000, requested: 1000, status: 'AVAILABLE' },
-      M5: { bars: 1000, requested: 1000, status: 'AVAILABLE' },
-      H1: { bars: 300, requested: 300, status: 'AVAILABLE' },
-      H4: { bars: 300, requested: 300, status: 'AVAILABLE' },
-      D1: { bars: 300, requested: 300, status: 'AVAILABLE' },
-      W1: { bars: 231, requested: 300, status: 'PARTIAL' },
-    };
+    // Truthfulness: never invent coverage. Without authoritative context frames
+    // the coverage is UNAVAILABLE (rendered below), not fabricated numbers.
+    const coverage: Record<string, { bars: number; requested: number; status: string }> = {};
 
     if (context?.frames && Array.isArray(context.frames)) {
       for (const f of context.frames) {
@@ -41,7 +36,7 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
           <div className="flex items-center gap-2.5">
             <span className="w-3 h-3 rounded-full bg-amber-400 animate-pulse" />
             <h3 className="text-base font-bold text-white tracking-wide">
-              สถานะ Backtest Engine: PENDING PHASE 9 (ยังไม่เปิดใช้งาน)
+              สถานะ Backtest Engine: Batch D — D2C รอการยืนยันอิสระ, D3-D7 ยังไม่ได้รับอนุญาต
             </h3>
           </div>
 
@@ -49,12 +44,12 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
             data-testid="backtest-status-badge"
             className="px-3 py-1 text-xs font-mono font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 w-fit"
           >
-            NOT IMPLEMENTED · PHASE 9 PENDING
+            NOT IMPLEMENTED · BATCH D GATED
           </span>
         </div>
 
         <p className="text-xs text-gray-300 leading-relaxed">
-          ระบบ Strategy Engine ในปัจจุบันทำหน้าที่วิเคราะห์สัญญาณแบบ <strong>Deterministic Point-in-Time</strong> และบันทึก Snapshot ในประวัติการประเมิน แต่ <strong>ยังไม่มีโมดูลจำลองการจับคู่คำสั่ง (Trade Simulator), การคิดต้นทุนค่าคอมมิชชัน/สเปรด, การคำนวณกำไรขาดทุนย้อนหลัง (Historical P&amp;L) หรือการสร้าง Equity Curve</strong> ซึ่งเป็นขอบเขตงานของ Phase 9
+          ระบบ Strategy Engine ในปัจจุบันทำหน้าที่วิเคราะห์สัญญาณแบบ <strong>Deterministic Point-in-Time</strong> และบันทึก Snapshot ในประวัติการประเมิน แต่ <strong>ยังไม่มีโมดูลจำลองการจับคู่คำสั่ง (Trade Simulator), การคิดต้นทุนค่าคอมมิชชัน/สเปรด, การคำนวณกำไรขาดทุนย้อนหลัง (Historical P&amp;L) หรือการสร้าง Equity Curve</strong> ซึ่งเป็นขอบเขตงานของ Batch D (D3-D6) ที่ยังไม่ได้รับอนุญาต
         </p>
 
         {/* Data Truthfulness Guarantees */}
@@ -91,7 +86,7 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
               แบบจำลองพารามิเตอร์ Backtest ในอนาคต (Preparation Inputs)
             </h4>
             <p className="text-xs text-gray-400">
-              ฟอร์มเตรียมตัวกรองสำหรับการทดสอบย้อนหลังใน Phase 9 (ยังไม่สามารถรันได้จริง)
+              ฟอร์มเตรียมตัวกรองสำหรับการทดสอบย้อนหลังใน Batch D (ยังไม่สามารถรันได้จริง)
             </p>
           </div>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">
@@ -188,9 +183,9 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
             disabled
             data-testid="run-backtest-btn"
             className="px-5 py-2.5 rounded-xl bg-gray-800 text-gray-400 font-bold text-xs cursor-not-allowed border border-gray-700"
-            title="ฟังก์ชัน Backtest Engine จะถูกพัฒนาและเปิดใช้งานใน Phase 9"
+            title="ฟังก์ชัน Backtest Engine อยู่ภายใต้ Batch D governance gate"
           >
-            Backtest Engine ยังไม่เปิดใช้งาน (Pending Phase 9)
+            Backtest Engine ยังไม่เปิดใช้งาน (Batch D: D3-D7 Not Authorized)
           </button>
 
           <span className="text-[11px] text-gray-400 italic">
@@ -238,32 +233,32 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">5. Historical Trade Fill Simulator:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Phase 9)</span>
+            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">6. Realistic Spread &amp; Commission Model:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Phase 9)</span>
+            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">7. Order Slippage Simulation Model:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Phase 9)</span>
+            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">8. Position Lifecycle &amp; P&amp;L Calculator:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Phase 9)</span>
+            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">9. Quantitative Performance Metrics (Sharpe/DD):</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Phase 9)</span>
+            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">10. Walk-Forward Analysis &amp; Optimization:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Phase 9)</span>
+            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
           </div>
         </div>
       </section>
@@ -284,6 +279,11 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
           </span>
         </div>
 
+        {Object.keys(frameCoverage).length === 0 ? (
+          <p data-testid="coverage-unavailable" className="text-xs font-mono text-amber-300">
+            UNAVAILABLE — ไม่มีข้อมูล context ที่เชื่อถือได้ในขณะนี้ ระบบจะไม่แสดงตัวเลขครอบคลุมที่ประดิษฐ์ขึ้น
+          </p>
+        ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs font-mono text-center">
           {Object.entries(frameCoverage).map(([tf, cov]) => {
             const isPartial = cov.status === 'PARTIAL';
@@ -314,9 +314,10 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
             );
           })}
         </div>
+        )}
 
         <p className="text-[11px] text-gray-400 italic">
-          * ข้อสังเกตแท่งเทียน W1: ประวัติแท่งเทียน W1 ปัจจุบันมี 231 แท่งจาก 300 แท่งที่ร้องขอ ระบบแสดงสถานะเป็น <strong>PARTIAL HISTORY</strong> ตามจริง โดยไม่มีการสังเคราะห์หรือแต่งเติมแท่งเทียนปลอมเพื่อหลอกระบบ
+          * ตัวเลขครอบคลุมทั้งหมดมาจาก context จริงเท่านั้น หาก timeframe ใดมีแท่งน้อยกว่าที่ร้องขอ ระบบแสดงสถานะ <strong>PARTIAL HISTORY</strong> ตามจริง โดยไม่มีการสังเคราะห์หรือแต่งเติมแท่งเทียนปลอม
         </p>
       </section>
     </div>

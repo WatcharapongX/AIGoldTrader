@@ -49,16 +49,23 @@ export function RiskWorkspace() {
   const [expandedDecisionId, setExpandedDecisionId] = useState<string | null>(null);
 
   const [refresh, setRefresh] = useState(0);
+  const inFlightRef = React.useRef<AbortController | null>(null);
 
   const fetchResources = useCallback(async () => {
+    // In-flight guard + abort: a slow stale response must never overwrite
+    // fresher Kill Switch state on this safety-critical screen.
+    if (inFlightRef.current) return;
+    const controller = new AbortController();
+    inFlightRef.current = controller;
     const errors: string[] = [];
-
+    try {
     const [policyRes, portfolioRes, killSwitchRes, decisionsRes] = await Promise.allSettled([
-      api.get('/risk/policy'),
-      api.get('/risk/portfolio'),
-      api.get('/risk/kill-switch'),
-      api.get('/risk/decisions?limit=20'),
+      api.get('/risk/policy', { signal: controller.signal }),
+      api.get('/risk/portfolio', { signal: controller.signal }),
+      api.get('/risk/kill-switch', { signal: controller.signal }),
+      api.get('/risk/decisions?limit=20', { signal: controller.signal }),
     ]);
+    if (controller.signal.aborted) return;
 
     // 1. Policy
     if (policyRes.status === 'fulfilled') {
@@ -129,13 +136,21 @@ export function RiskWorkspace() {
     } else {
       setError(null);
     }
+    } finally {
+      if (inFlightRef.current === controller) inFlightRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       setRefresh((v) => v + 1);
-    }, 5000);
-    return () => clearInterval(timer);
+    }, 15000);
+    return () => {
+      clearInterval(timer);
+      inFlightRef.current?.abort();
+      inFlightRef.current = null;
+    };
   }, []);
 
   const loadData = useCallback(async () => {

@@ -4,7 +4,7 @@ export default function PaperTradingPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-100">Paper Trading</h1>
         <span className="px-3 py-1 bg-amber-500/20 text-amber-500 text-xs font-semibold rounded-full border border-amber-500/30">
-          Coming in Phase 7
+          Not Implemented — Paper Execution ยังไม่ได้รับอนุญาต
         </span>
       </div>
       

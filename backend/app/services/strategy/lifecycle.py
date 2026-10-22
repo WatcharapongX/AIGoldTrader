@@ -4,7 +4,7 @@ import datetime as dt
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
@@ -55,20 +55,28 @@ async def resolve_candidate_current_lifecycle(
 
     candidate = SetupCandidate.model_validate(cand_row.payload)
 
-    # Query all transitions for this candidate
-    trans_stmt = (
+    # Only the latest transition and the total count are consumed; avoid
+    # materializing the full transition history (perf hardening).
+    transition_count = (
+        await session.scalar(
+            select(func.count()).select_from(CandidateTransitionRecord).where(
+                CandidateTransitionRecord.candidate_id == candidate_id
+            )
+        )
+        or 0
+    )
+    latest_row = await session.scalar(
         select(CandidateTransitionRecord)
         .where(CandidateTransitionRecord.candidate_id == candidate_id)
-        .order_by(CandidateTransitionRecord.as_of.asc(), CandidateTransitionRecord.id.asc())
+        .order_by(CandidateTransitionRecord.as_of.desc(), CandidateTransitionRecord.id.desc())
+        .limit(1)
     )
-    trans_rows = (await session.scalars(trans_stmt)).all()
 
     current_status: State = candidate.status
     latest_trans: Transition | None = None
     reason_th = ""
 
-    if trans_rows:
-        latest_row = trans_rows[-1]
+    if latest_row is not None:
         latest_trans = Transition.model_validate(latest_row.payload)
         current_status = latest_trans.to_status
         reason_th = latest_trans.reason_th or ""
@@ -79,7 +87,7 @@ async def resolve_candidate_current_lifecycle(
         candidate_id=candidate_id,
         current_status=current_status,
         is_terminal=is_term,
-        transition_count=len(trans_rows),
+        transition_count=transition_count,
         latest_transition=latest_trans,
         reason_th=reason_th,
         candidate=candidate,

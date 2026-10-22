@@ -10,11 +10,11 @@ export default function RiskPage() {
             <span>Risk Management & Kill Switch</span>
           </h1>
           <p className="text-sm text-gray-400 mt-1">
-            ระบบบริหารจัดการความเสี่ยงระดับพอร์ตโฟลิโอ Fail-Closed Protection และสวิตช์ฉุกเฉิน (Phase 5)
+            ระบบบริหารจัดการความเสี่ยงระดับพอร์ตโฟลิโอ Fail-Closed Protection และสวิตช์ฉุกเฉิน (Batch B/D — Risk Engine ปิด gate แล้ว)
           </p>
         </div>
         <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-full border border-emerald-500/30">
-          Phase 5 Active
+          Risk Engine Active · PAPER
         </span>
       </div>
 

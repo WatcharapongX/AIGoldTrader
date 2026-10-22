@@ -462,11 +462,11 @@ test('Backtest tab truthfully displays NOT IMPLEMENTED, disabled action, and W1 
   );
 
   // Status
-  assert.ok(html.includes('PENDING PHASE 9 (ยังไม่เปิดใช้งาน)'));
-  assert.ok(html.includes('NOT IMPLEMENTED · PHASE 9 PENDING'));
+  assert.ok(html.includes('D3-D7 ยังไม่ได้รับอนุญาต'));
+  assert.ok(html.includes('NOT IMPLEMENTED · BATCH D GATED'));
 
   // Disabled button
-  assert.ok(html.includes('Backtest Engine ยังไม่เปิดใช้งาน (Pending Phase 9)'));
+  assert.ok(html.includes('Backtest Engine ยังไม่เปิดใช้งาน (Batch D: D3-D7 Not Authorized)'));
   assert.ok(html.includes('disabled=""') || html.includes('disabled'));
 
   // Truthfulness Badges

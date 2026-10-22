@@ -15,6 +15,7 @@ from app.core.config import configure_ai_provider_runtime, get_settings
 from app.core.correlation import CorrelationMiddleware, get_correlation_id
 from app.core.errors import AppError
 from app.core.logging import safe_exception, setup_logging
+from app.core.rate_limit import RateLimiter
 from app.db.session import dispose_engine
 from app.services.redis_client import close_redis
 
@@ -74,6 +75,34 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "X-Correlation-ID", "Idempotency-Key"],
     )
+
+    api_limiter = RateLimiter(settings.rate_limit_api_per_minute, max_keys=settings.rate_limit_max_keys)
+
+    @app.middleware("http")
+    async def security_and_rate_limit(request: Request, call_next):
+        if request.url.path.startswith("/api/"):
+            try:
+                api_limiter.check(f"api:{request.client.host if request.client else 'unknown'}")
+            except Exception:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": {
+                            "code": "RATE_LIMITED",
+                            "message": "Too many requests, try again later",
+                            "details": {},
+                            "correlation_id": get_correlation_id(),
+                        }
+                    },
+                )
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+        if settings.app_env in {"PROD", "UAT"}:
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
 
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:

@@ -1,3 +1,4 @@
+import asyncio
 import datetime as dt
 import logging
 import uuid
@@ -122,7 +123,7 @@ async def get_authoritative_symbol_spec(
     # If provider is supplied and can fetch live spec, refresh and persist
     if provider is not None and hasattr(provider, "get_symbol_spec"):
         try:
-            live_spec = provider.get_symbol_spec(symbol)
+            live_spec = await asyncio.to_thread(provider.get_symbol_spec, symbol)
             if live_spec is not None:
                 if expected_server and not getattr(live_spec, "broker_server", None):
                     live_spec = live_spec.model_copy(update={"broker_server": expected_server})
