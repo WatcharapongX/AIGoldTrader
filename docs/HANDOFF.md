@@ -26,3 +26,9 @@
 - Review/merge [#18](https://github.com/WatcharapongX/AIGoldTrader/pull/18) independently.
 - Recover PR3: on the Windows clone that still has local `main` ahead commits, cherry-pick or recreate `scripts/load-smoke.py` onto `cursor/pr3-load-smoke-script` and open the PR.
 - Do not stub broker/OMS/live execution. Independent verification gate is **done** for this D2C fix; next gate is only required after D7 or if D2C is reopened.
+
+## Local login note (2026-10-22)
+- `admin@example.com` / `admin-pass-123` exist only in pytest fixtures (`backend/tests/conftest.py`); they are **not** seeded into the app DB. Login placeholder `admin@aigoldtrader.com` is UI-only.
+- Official create-if-missing seed: from `backend`, `python -m app.db.seed` (see `docs/18-devops.md`). Re-seed does **not** reset an existing user's password.
+- Ignored host credentials (if present): `data/local/task020-browser/credentials.json` — not in this cloud workspace; do not invent or commit secrets.
+- This cloud VM had no Postgres/backend on :8000; seed/login must be run on the Windows host where the app DB runs.
