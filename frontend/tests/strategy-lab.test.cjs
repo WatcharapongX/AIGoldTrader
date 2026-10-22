@@ -454,7 +454,7 @@ test('Candidate Descriptive Statistics show frequency counts without inferring p
   assert.ok(html.includes('ไม่ใช่อัตราความแม่นยำ (Win Rate)'));
 });
 
-test('Backtest tab truthfully displays NOT IMPLEMENTED, disabled action, and W1 partial history', () => {
+test('Backtest tab truthfully displays simulation status, disabled action, and W1 partial history', () => {
   const html = renderToStaticMarkup(
     React.createElement(BacktestReadinessTab, {
       context: SAMPLE_CURRENT_EVAL.evaluation.context,
@@ -462,11 +462,11 @@ test('Backtest tab truthfully displays NOT IMPLEMENTED, disabled action, and W1 
   );
 
   // Status
-  assert.ok(html.includes('D3-D7 ยังไม่ได้รับอนุญาต'));
-  assert.ok(html.includes('NOT IMPLEMENTED · BATCH D GATED'));
+  assert.ok(html.includes('D3-D6 พร้อมใช้งาน'));
+  assert.ok(html.includes('DETERMINISTIC SIMULATION · PAPER ONLY'));
 
-  // Disabled button
-  assert.ok(html.includes('Backtest Engine ยังไม่เปิดใช้งาน (Batch D: D3-D7 Not Authorized)'));
+  // Disabled button (run creation happens via governed API, not this form)
+  assert.ok(html.includes('สร้าง Run ผ่าน API ที่มีการกำกับดูแล'));
   assert.ok(html.includes('disabled=""') || html.includes('disabled'));
 
   // Truthfulness Badges
