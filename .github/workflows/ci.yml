@@ -61,7 +61,7 @@ jobs:
         run: alembic check
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: backend/coverage.xml
@@ -88,7 +88,7 @@ jobs:
         run: npm test 2>&1 | tee frontend-test.log
       - name: Upload frontend test log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-test-log
           path: frontend/frontend-test.log
