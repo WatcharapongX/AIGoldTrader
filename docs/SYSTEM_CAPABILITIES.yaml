@@ -24,8 +24,8 @@ governance:
   d2c_identity_clarified_at: "2026-10-10"
   d2c_account_identity_seed: "integration version + symbol + initial balance + Risk configuration fingerprint; excludes complete source/run-input identity and cutoff"
   d2c_identity_verification: "local end-to-end prefix/future-source invariance tests implemented; independent verification pending"
-  d2c_status: implemented_pending_independent_verification
-  d2c_closed: false
+  d2c_status: closed_independent_reverification_pass_2026_10_22
+  d2c_closed: true
   d2c_local_tests: "299 passed: D2C 82, D1 80, D2A 59, pure Risk/architecture 78; Ruff/format/diff PASS"
   d2c_verification_blocker: "live/pure parity rerun blocked at Windows asyncio local socketpair fixture before Risk evaluation; three attempts stopped; see HANDOFF.md"
   d2b1_requested_risk_clarification: resolved

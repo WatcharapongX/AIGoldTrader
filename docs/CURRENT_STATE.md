@@ -4,7 +4,7 @@
 - **D2C Local Implementation Date**: 2026-10-10 (not an independent verification date)
 - **Authoritative Branch**: `main`
 - **Current Milestone**: Batch D remains OPEN; D1, D2A, D2B1, and D2B2 are CLOSED.
-- **Current Active Gate**: D2C Stateless Pure Risk Replay Integration is IMPLEMENTED; first independent verification FAILED (D2C-IV-P2-001), remediated locally 2026-10-22, fresh independent re-verification is PENDING.
+- **Current Active Gate**: D2C Stateless Pure Risk Replay Integration is CLOSED (independent re-verification PASS 2026-10-22; D2C-IV-P2-001 and D2C-IV-P2-002 closed).
 - **Next Permitted Activity**: Fresh independent GPT-5.6 Sol / High D2C verification; D2C is not CLOSED.
 - **Prohibited Progression**: D3–D7 remain NOT AUTHORIZED; D2C authorization does not include fills, state evolution, persistence, API, or UI.
 
@@ -87,7 +87,7 @@
   balance, and Risk configuration fingerprint. Snapshot identity additionally binds the causal source event and
   event time. Complete historical-source/run-input identity must not enter causal pure inputs through IDs; it
   remains at run-input level. An account-ID-only pure-core probe reproduced the earlier fingerprint conflict.
-  End-to-end D2C local tests now exercise prefix/future invariance. First independent verification FAILED (D2C-IV-P2-001); remediation applied locally 2026-10-22 and fresh re-verification remains pending.
+  End-to-end D2C local tests now exercise prefix/future invariance. Independent re-verification PASSED 2026-10-22 after remediation of D2C-IV-P2-001 and D2C-IV-P2-002 (347 tests, Ruff clean).
 - **D2C local implementation**: additive immutable contracts, deterministic fingerprints, private D2A replay and
   direct pure-Risk orchestration exist in `backend/app/services/backtesting/risk_replay*.py`. Focused tests cover
   direct-pure parity, requested-risk and BLOCKED paths, time/news/quote authority, resource bounds, private input
@@ -143,7 +143,7 @@ The approved staged data flow is:
   **CLOSED**.
 - D2B1 requested-risk semantic clarification: **RESOLVED**.
 - D2B2 Live Risk Wrapper Migration and Parity Closure: **CLOSED — FINAL INDEPENDENT RE-VERIFICATION PASS**.
-- D2C: **IMPLEMENTED LOCALLY — FIRST INDEPENDENT VERIFICATION FAILED (D2C-IV-P2-001, REMEDIATED LOCALLY 2026-10-22); FRESH RE-VERIFICATION PENDING; NOT CLOSED**.
+- D2C: **CLOSED — INDEPENDENT RE-VERIFICATION PASS 2026-10-22 (347 tests; D2C-IV-P2-001/D2C-IV-P2-002 closed)**.
 - D3–D7: **NOT AUTHORIZED**.
 - Backtesting: **CAUSAL REPLAY VERIFIED; STATELESS RISK REPLAY IMPLEMENTED LOCALLY; FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
