@@ -1,4 +1,4 @@
-"""Structural proof that D1 has no operational imports, writes, or later-batch modules."""
+"""D1/D2A/D2C authorized package boundary: no live effects or D3+ modules."""
 
 import ast
 from pathlib import Path
@@ -12,6 +12,9 @@ EXPECTED_FILES = {
     "policy.py",
     "replay.py",
     "replay_domain.py",
+    "risk_replay.py",
+    "risk_replay_domain.py",
+    "risk_replay_fingerprint.py",
 }
 FORBIDDEN_IMPORT_PREFIXES = (
     "app.services.risk.engine",
@@ -69,7 +72,7 @@ def call_name(node: ast.Call) -> str | None:
     return None
 
 
-def test_backtesting_package_contains_only_authorized_d1_d2a_modules():
+def test_backtesting_package_contains_only_authorized_d1_d2a_d2c_modules():
     names = {path.name for path in PACKAGE.glob("*.py")}
     assert names == EXPECTED_FILES
     assert not names & FORBIDDEN_MODULES

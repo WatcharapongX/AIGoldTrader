@@ -1,4 +1,4 @@
-"""Pure D1 contracts and D2A causal replay; no risk or execution behavior."""
+"""D1/D2A version exports; stateless D2C Risk replay requires an explicit module import."""
 
 from app.services.backtesting.domain import (
     BACKTEST_CONTRACT_VERSION,

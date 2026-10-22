@@ -1,10 +1,11 @@
 # Canonical Current Operational State — AIGoldTrader
 
 - **Last Verified Date**: 2026-09-28
+- **D2C Local Implementation Date**: 2026-10-10 (not an independent verification date)
 - **Authoritative Branch**: `main`
 - **Current Milestone**: Batch D remains OPEN; D1, D2A, D2B1, and D2B2 are CLOSED.
-- **Current Active Gate**: D2C Verified Pure Risk Replay Integration is AUTHORIZED FOR IMPLEMENTATION under the bounded stateless-baseline contract below.
-- **Next Permitted Activity**: Implement D2C only, then stop for an independent GPT-5.6 Sol / High verification gate.
+- **Current Active Gate**: D2C Stateless Pure Risk Replay Integration is IMPLEMENTED; first independent verification FAILED (D2C-IV-P2-001), remediated locally 2026-10-22, fresh independent re-verification is PENDING.
+- **Next Permitted Activity**: Fresh independent GPT-5.6 Sol / High D2C verification; D2C is not CLOSED.
 - **Prohibited Progression**: D3–D7 remain NOT AUTHORIZED; D2C authorization does not include fills, state evolution, persistence, API, or UI.
 
 ---
@@ -47,8 +48,9 @@
   canonical replay snapshot with complete configuration/input identity. Selected-strategy evaluation preserves
   canonical Strategy candidate and TradePlan parity, deterministic event ordering, output fingerprints, and
   repeat-run determinism without DB, Risk, AI, broker/MT5, network, or filesystem-write dependencies.
-- **Backtesting Engine**: NOT COMPLETE. No Risk replay integration, fill simulation, trade lifecycle, PnL,
-  equity curve, metrics engine, persistence, Backtesting API, or results UI exists.
+- **Backtesting Engine**: NOT COMPLETE. D2C stateless pure Risk replay integration is implemented locally but is
+  not independently verified. No fill simulation, trade lifecycle, PnL, equity curve, metrics engine, persistence,
+  Backtesting API, or results UI exists.
 - **D2B governance**: PLAN REQUIRES SPLIT. D2B1 implemented, remediated, and independently verified an
   infrastructure-free pure Risk input/result contract and deterministic policy kernel with characterization,
   parity, determinism, authority, and isolation tests; D2B1 is CLOSED.
@@ -81,6 +83,17 @@
   broker observation. With news Risk enabled, causal non-fixture historical news coverage is required for every
   strategy. Quotes are selected only when both market timestamp and `observed_at` are at or before event time;
   absence produces `PureQuoteState.UNAVAILABLE` and an ordinary pure Risk BLOCK.
+- **D2C identity clarification (2026-10-10)**: account identity binds only integration version, symbol, initial
+  balance, and Risk configuration fingerprint. Snapshot identity additionally binds the causal source event and
+  event time. Complete historical-source/run-input identity must not enter causal pure inputs through IDs; it
+  remains at run-input level. An account-ID-only pure-core probe reproduced the earlier fingerprint conflict.
+  End-to-end D2C local tests now exercise prefix/future invariance. First independent verification FAILED (D2C-IV-P2-001); remediation applied locally 2026-10-22 and fresh re-verification remains pending.
+- **D2C local implementation**: additive immutable contracts, deterministic fingerprints, private D2A replay and
+  direct pure-Risk orchestration exist in `backend/app/services/backtesting/risk_replay*.py`. Focused tests cover
+  direct-pure parity, requested-risk and BLOCKED paths, time/news/quote authority, resource bounds, private input
+  reconstruction, determinism, and isolation. Exact local evidence is in `docs/HANDOFF.md`; no closure is claimed.
+  The live/pure parity regression rerun is blocked before evaluation by Windows asyncio local socketpair setup;
+  three attempts were stopped without changing D2B or its test fixture. This does not invalidate its prior gate.
 - **D2A identity model**: `historical_data_fingerprint` identifies the complete historical source snapshot;
   `run_input_fingerprint` identifies the governed D1 manifest; `replay_input_fingerprint` identifies that manifest
   plus complete D2A replay configuration; `replay_fingerprint` identifies causal output through the effective
@@ -107,7 +120,7 @@ side-effect-free policy seam and isolated simulation state; no live table or aut
 Governance therefore split D2 into independently gated units. D2A owns only the causal replay foundation
 through existing Analysis, Strategy, and suggestion-only TradePlan output. D2B is further split: D2B1 extracted
 and proved the pure Risk contracts/kernel, while D2B2 migrated and independently verified the live wrapper with
-exact public parity. D2C will later integrate replay with the verified seam. This prevents replay
+exact public parity. D2C now integrates replay with that verified seam, pending its own independent gate. This prevents replay
 causality work from being coupled to a safety-critical live Risk refactor.
 
 The approved staged data flow is:
@@ -130,9 +143,9 @@ The approved staged data flow is:
   **CLOSED**.
 - D2B1 requested-risk semantic clarification: **RESOLVED**.
 - D2B2 Live Risk Wrapper Migration and Parity Closure: **CLOSED — FINAL INDEPENDENT RE-VERIFICATION PASS**.
-- D2C: **AUTHORIZED FOR IMPLEMENTATION — STATELESS VERIFIED PURE RISK REPLAY INTEGRATION ONLY**.
+- D2C: **IMPLEMENTED LOCALLY — FIRST INDEPENDENT VERIFICATION FAILED (D2C-IV-P2-001, REMEDIATED LOCALLY 2026-10-22); FRESH RE-VERIFICATION PENDING; NOT CLOSED**.
 - D3–D7: **NOT AUTHORIZED**.
-- Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
+- Backtesting: **CAUSAL REPLAY VERIFIED; STATELESS RISK REPLAY IMPLEMENTED LOCALLY; FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
 - Paper Trading: **NOT AUTHORIZED**.
 - Broker Execution: **NOT AUTHORIZED**.

@@ -1,77 +1,79 @@
 # Rolling Agent Handoff — AIGoldTrader
 
 ## Session Result
-- Date: 2026-09-28.
-- Branch: `main`.
-- Starting HEAD/origin-main: `885258738aecbb594213dc1f9d20457de3c4830d`.
-- Starting worktree: clean.
-- Activity: D2C governance/architecture/no-lookahead/Risk-state boundary review only.
-- Governance result: **PLAN APPROVED WITH CONDITIONS**.
-- Exactly one next implementation unit is authorized: D2C stateless verified pure-Risk replay integration.
-- D2C was not implemented in this session and remains not yet verified.
-- D1, D2A, D2B1, and D2B2 remain **CLOSED**; D3–D7 remain **NOT AUTHORIZED**.
-- Backtesting Engine remains **NOT COMPLETE**.
-- No production code, tests, database, migration, dependency, runtime, frontend, or trading configuration changed.
+- Date: 2026-10-10; branch: `main`; independent verifier chat: `01a1241b-be39-7931-8bcb-e0a98a5f1a1d`.
+- Scope: fresh GPT-5.6 Sol / High independent verification of D2C only; no implementation authorization.
+- Result: **FAIL — one reproducible P2 contract finding remains open**.
+- D2C is **IMPLEMENTED LOCALLY; INDEPENDENT VERIFICATION FAILED; NOT CLOSED**.
+- D1, D2A, D2B1, and D2B2 remain closed; this review did not reopen or modify their semantics.
+- D3–D7 remain **NOT AUTHORIZED**; Backtesting Engine remains incomplete.
+- No commit, push, branch, schema, dependency, configuration, production source, or canonical test change was made.
+- The only verifier-owned persistent edit is this required rolling handoff update.
+- A bounded temporary adversarial probe was created under `backend`, executed, and removed.
 
-## Verified Foundations and Architecture
-- D2A supplies canonical causal replay, hard `coverage.usable_end`, deterministic Strategy/optional TradePlan
-  events, stable ordering, private input reconstruction, and separate complete-input/causal-output identities.
-- D2B1 supplies immutable pure inputs/results, deterministic `evaluate_pure_risk()`, sizing, explicit authority,
-  and semantic identity. D2B2 retains all live locks, persistence, idempotency, and reservations.
-- D2C must privately canonicalize with `make_replay_inputs()`, invoke `replay()`, then call
-  `evaluate_pure_risk()` directly. It must not import or call the D2B2 live adapter or engine.
-- Every D2A event yields one D2C event: `EVALUATED` when a TradePlan exists or
-  `NOT_EVALUATED_NO_PLAN` without a fabricated plan or Risk decision.
-- Pure APPROVED/REDUCED/BLOCKED results are analysis evidence only. No reservation, fill, position, trade, PnL,
-  equity, metric, persistence, API, or UI is authorized.
+## Open Finding
+- ID: **D2C-IV-P2-001 — raw validation exception escapes the stable failure boundary on event-order corruption**.
+- Severity: P2; no live-trading or persistence effect, but it violates an explicit D2C failure contract and gate test.
+- `RiskReplayResult.consistent_events()` correctly rejects noncanonical or duplicate ordered events at
+  `backend/app/services/backtesting/risk_replay_domain.py:125-137`.
+- `_replay_risk()` constructs that result without a guarding translation at
+  `backend/app/services/backtesting/risk_replay.py:355-361`.
+- Independent probe replaced only the returned D2A result at the public seam with `events[::-1]` and then with
+  `(events[0],) + events`, retaining otherwise valid D2A event objects.
+- Reproduced output: `reversed: RAW ValidationError value_error` and
+  `duplicate: RAW ValidationError value_error`.
+- Expected contract outcome is a stable D2C failure such as `RISK_CAUSALITY_VIOLATION`, never a raw Pydantic
+  validation payload/stack trace.
+- Reproduction: create a normal three-event D2A `ReplayResult`, use `model_copy(update={"events": ...})` to
+  perturb order or duplicate one event, patch the imported `risk_replay.replay` seam to return it, and call
+  `replay_risk()`; raw `ValidationError` escapes during final result construction.
+- Recommended correction: validate the D2A event stream/order after `replay()` and translate event/result
+  contract-construction failures to a stable D2C causality code; add order and duplicate regressions.
+- Do not modify D2A/D2B semantics or weaken the result validator to close this finding.
+- After remediation, D2C requires a fresh independent re-verification gate; this session does not close it.
 
-## Stateless Baseline
-- Each plan is evaluated independently; no event consumes another event's capacity.
-- Balance/equity/peak equity/free margin equal D1 `initial_balance`; daily/weekly/floating PnL, exposure,
-  reservations, positions, and consecutive losses are zero. Account/state/observation time equals event T.
-- Account and snapshot IDs are deterministic. Use existing `source="CONFIGURED_TEST"` with
-  `trading_mode="BACKTEST"`, explicitly labeled non-live configured scenario evidence.
-- Portfolio open/reserved/symbol/directional risk and counts are zero; integrity is `OK`.
-- Kill Switch is isolated `INACTIVE` with `BACKTEST_NO_EXTERNAL_KILL_SWITCH` provenance.
-- Data health is isolated `HEALTHY` with `BACKTEST_CAUSAL_DATA_ADMISSION` provenance.
-- Candidate status comes from the D2A event; transition count is explicitly zero because no causal ledger exists.
+## Independent Test Evidence
+- D2C focused + architecture: **82 passed**, 0 failed, 0 skipped, 2 dependency deprecation warnings; 39.85s.
+- D1 regression + architecture allowlist: **80 passed**, 0 failed, 0 skipped, 2 warnings; 0.41s.
+- D2A regression + architecture: **59 passed**, 0 failed, 0 skipped, 2 warnings; 50.12s.
+- Pure Risk core + architecture: **78 passed**, 0 failed, 0 skipped, 2 warnings; 0.30s.
+- Live/pure parity: **41 passed**, 0 failed, 0 skipped, 3 warnings; 3.02s.
+- Total current independent suites: **340 passed**, 0 failed, 0 skipped; 93.70s summed test time.
+- Ruff targeted check: PASS; Ruff format check: PASS (`7 files already formatted`).
+- `git diff --check`: PASS; only existing Windows LF/CRLF conversion warnings were emitted.
+- The 41-test parity blocker from the implementation session is resolved as an execution-permission issue.
+- Bounded out-of-sandbox diagnostic produced `ProactorEventLoop` and `LOOP_OK` in 0.70s.
+- The existing parity suite then ran outside the restricted sandbox and passed 41/41; no fixture or D2B edit.
+- Warning limitations are the existing FastAPI/Starlette deprecations plus one pytest-asyncio custom-loop warning.
 
-## Risk Configuration and Symbol Authority
-- Add a frozen separate `RiskReplayConfig`; do not alter D1 `BacktestRunConfig`.
-- It contains the complete offline `RiskPolicy`, exact caller-requested risk, and full XAUUSD symbol-spec
-  assumption. Policy version must equal manifest provenance and every policy field is fingerprinted.
-- Requested risk defaults to `None`, is finite/non-negative/bounded, and passes unchanged to the pure core. None
-  and explicit zero keep verified normalization while remaining different audit identities.
-- Symbol economics are a `BACKTEST_ASSUMPTION`, never historical broker truth. At T, the projected pure spec uses
-  `observed_at=T` only to mean scenario-effective at T, with deterministic identity and no broker server.
+## Contract Coverage Confirmed
+- Entry accepts `ReplayInputs`, privately reconstructs them with `make_replay_inputs()`, then calls `replay()`.
+- External `ReplayResult` admission is rejected; no D2A private preparation API is imported or invoked.
+- Every normal D2A strategy event yields one ordered D2C record.
+- A plan-bearing event invokes `evaluate_pure_risk()` once; no-plan events retain explicit
+  `NOT_EVALUATED_NO_PLAN` evidence and do not fabricate a plan or decision.
+- Direct-pure results, requested-risk layers, APPROVED/REDUCED/BLOCKED behavior, and pure fingerprints match.
+- Every evaluation resets account/equity/free margin to initial balance and portfolio/exposure/counts to zero.
+- Account identity excludes complete source/run identity, requested end, and cutoff; snapshot identity binds the
+  account, causal source event, and event T.
+- Candidate/context/plan/account/spec use event T; terminal candidates remain evidence and ordinary BLOCKED is output.
+- Full policy/version, exact requested risk, full scenario spec, balance, and integration semantics bind identity.
+- Symbol specification is `BACKTEST_ASSUMPTION`, effective at T, with no broker server or broker-truth claim.
+- News-enabled replay requires complete matching LIVE non-fixture vintage coverage for every strategy.
+- News projection reuses `latest_known()` by `available_at`; future revisions preserve earlier causal output.
+- Quote selection requires both market timestamp and `observed_at <= T`; no candle quote fallback exists.
+- Full/prefix, shorter requested end, all event cutoffs, future candle/news/quote/source suffix, caller mutation,
+  factory bypass, malformed config/source, usable-end, output/event bounds, and Decimal isolation passed tests.
+- Output/resource limits are 100,000 events and actual 128 MiB serialized envelope; D2A limits remain authoritative.
+- Architecture inspection/tests found no DB, SQLAlchemy, live Risk adapter/engine, Kill Switch persistence, AI,
+  filesystem write, network, random UUID, broker/MT5, order, fill, position, PnL, equity, or later-batch effect.
+- The sole failed contract is stable translation of adversarially perturbed/duplicate D2A event ordering.
 
-## Historical News and Quote Authority
-- With news Risk enabled, every strategy requires complete causal non-fixture historical news: matching vintage
-  source, requested-period coverage, available calendar, and `news_mode="LIVE"`.
-- Missing/unavailable/fixture news fails admission closed; it is never normalized to CALM. With news Risk disabled,
-  Risk replay may proceed without news while D1/D2A Strategy-news rules remain unchanged.
-- Reuse `news.engine.latest_known()` for point-in-time revisions; the pure core owns Risk news-window rules.
-- Select the greatest-timestamp quote whose timestamp and `observed_at` are both at or before T.
-- No quote becomes pure `UNAVAILABLE`; stale quotes remain available for pure freshness evaluation. Candles never
-  supply fabricated bid/ask/spread.
-
-## Identity and Failure Contract
-- Configuration identity binds integration version, full policy, requested risk, spec, baseline/safety state, and
-  causal projection semantics. Risk input identity binds D2A replay input identity plus that configuration.
-- Evaluated-event input identity additionally binds canonical pure input, quote `observed_at`, source D2A event,
-  and version. Event identity binds disposition and exact pure semantic fingerprint when evaluated.
-- Output identity binds cutoff, D2A causal replay fingerprint, counters, and ordered D2C events. Future-only
-  source suffix may change complete input identity but must not alter earlier causal output identity.
-- Stable integration failures cover input, configuration, news, spec, causality, resource, and pure-policy
-  evaluation errors. An ordinary pure Risk BLOCKED result is valid output, not a run failure.
-
-## Next Activity and Safety
-- Implement only backtest-local D2C contracts, fingerprints, adapter/orchestrator, and focused tests; a small
-  backtesting package export is allowed. D2A and D2B production semantics must remain unchanged.
-- Test D2A linkage, pure parity, same-T authority, causal news/quotes, baselines, requested risk, identity,
-  ordering, prefix/future invariance, mutation attacks, bounds, determinism, and architecture isolation.
-- Run D2A and D2B1 regressions. D2C closure requires a fresh independent GPT-5.6 Sol / High verification gate.
-- After D2C implementation, stop; do not begin D3. D3–D7, fills, lifecycle, PnL/equity/metrics, persistence/API/UI,
-  Model Routing, Paper Trading, OMS, broker execution, and Live Trading remain not authorized.
-- Preserve `TRADING_MODE=PAPER`, `LIVE_AUTO_TRADING=false`, broker execution NONE, advisory-only AI, and the
-  authority order Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
+## Safety and Next Action
+- Preserve `TRADING_MODE=PAPER`, `LIVE_AUTO_TRADING=false`, advisory-only AI, and no broker execution.
+- Authority remains Kill Switch > Risk Engine > Strategy Engine > AI Advisory > Human Operator.
+- Remediate only D2C-IV-P2-001 within the three authorized D2C modules and focused tests.
+- Run D2C, D1, D2A, pure Risk/architecture, and live/pure parity again after remediation.
+- Obtain a new independent GPT-5.6 Sol / High D2C verification before any closure decision.
+- Do not start D3–D7, fills, simulation state, PnL/equity/metrics, persistence/API/UI, Paper execution, OMS,
+  broker/MT5 `order_send`, Live Trading, or Model Routing.

@@ -1,6 +1,7 @@
 # Machine-Readable Capability Registry — AIGoldTrader
 version: "1.0"
 last_verified: "2026-09-28"
+d2c_local_implementation_date: "2026-10-10"
 repository: "WatcharapongX/AIGoldTrader"
 branch: "main"
 
@@ -13,13 +14,20 @@ governance:
     - "D2B1"
     - "D2B2"
   active_sub_batch: "D2C"
-  active_scope: "D2C stateless verified pure Risk replay integration authorized for implementation; not yet implemented or verified"
-  next_authorized_activity: "Implement D2C only, then stop for independent GPT-5.6 Sol / High verification"
+  active_scope: "D2C stateless pure Risk replay integration implemented locally; independent verification pending; not closed"
+  next_authorized_activity: "Fresh independent GPT-5.6 Sol / High D2C verification only"
   d2c_governance_decision: plan_approved_with_conditions
   d2c_authorized_unit: "private D2A canonical replay -> exact-time isolated PureRiskEvaluationInput -> evaluate_pure_risk -> immutable backtest Risk evidence; no state evolution or execution"
   d2c_state_model: "each plan-bearing event evaluates independently against initial_balance account and zero-exposure portfolio baselines; no event consumes another event's capacity"
   d2c_news_authority: "when RiskPolicy.news_risk_enabled is true, complete causal non-fixture historical news is required for every strategy"
   d2c_symbol_spec_authority: "immutable BACKTEST_ASSUMPTION scenario economics projected effective at event T; not historical broker observation"
+  d2c_identity_clarified_at: "2026-10-10"
+  d2c_account_identity_seed: "integration version + symbol + initial balance + Risk configuration fingerprint; excludes complete source/run-input identity and cutoff"
+  d2c_identity_verification: "local end-to-end prefix/future-source invariance tests implemented; independent verification pending"
+  d2c_status: implemented_pending_independent_verification
+  d2c_closed: false
+  d2c_local_tests: "299 passed: D2C 82, D1 80, D2A 59, pure Risk/architecture 78; Ruff/format/diff PASS"
+  d2c_verification_blocker: "live/pure parity rerun blocked at Windows asyncio local socketpair fixture before Risk evaluation; three attempts stopped; see HANDOFF.md"
   d2b1_requested_risk_clarification: resolved
   d2b1_requested_risk_semantics: "exact caller value -> live-compatible normalized request (None/zero to policy max) -> post-modifier target -> final approved risk; BLOCKED pure results retain semantic truth while legacy live RiskDecision projection remains unchanged"
   d2b1_verification_findings:
@@ -69,11 +77,11 @@ capabilities:
     status: implemented_verified
     details: "Batch B independently closed"
   backtesting:
-    status: causal_replay_foundation_verified_risk_fill_not_implemented
-    governance: split_program_d1_d2a_d2b1_d2b2_closed_d2c_authorized_for_implementation
+    status: causal_replay_verified_stateless_risk_replay_implemented_fill_not_implemented
+    governance: split_program_d1_d2a_d2b1_d2b2_closed_d2c_pending_independent_verification
     symbol_scope: [XAUUSD]
     deterministic_core_requires_external_ai: false
-    details: "D1, D2A, D2B1, and D2B2 are independently verified and closed; D2C stateless pure-Risk replay integration is authorized but not implemented or verified; D3-D7 remain not authorized; no Risk replay integration, fill simulation, trade lifecycle, PnL, equity, metrics, persistence, Backtesting API, or results UI exists"
+    details: "D1, D2A, D2B1, and D2B2 are independently verified and closed; D2C stateless pure-Risk replay integration is implemented locally but not independently verified; D3-D7 remain not authorized; no fill simulation, trade lifecycle, PnL, equity, metrics, persistence, Backtesting API, or results UI exists"
   paper_trading:
     status: not_implemented_not_authorized
   oms_execution:

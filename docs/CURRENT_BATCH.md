@@ -6,7 +6,7 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2C — VERIFIED PURE RISK REPLAY INTEGRATION — AUTHORIZED FOR IMPLEMENTATION.**
+**Current gate: D2C — STATELESS PURE RISK REPLAY INTEGRATION — IMPLEMENTED; FIRST VERIFICATION FAILED (D2C-IV-P2-001) REMEDIATED 2026-10-22; FRESH RE-VERIFICATION PENDING.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
 D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. The D2A deterministic causal
@@ -22,13 +22,13 @@ automatically progress.
 - Batch B: **CLOSED**.
 - Batch C: **CLOSED**.
 - External AI: **HARDENING**; deterministic fixture mode remains the default.
-- Backtesting: **CAUSAL REPLAY FOUNDATION IMPLEMENTED AND VERIFIED; RISK/FILL ENGINE NOT IMPLEMENTED**.
+- Backtesting: **CAUSAL REPLAY VERIFIED; STATELESS RISK REPLAY IMPLEMENTED LOCALLY; FILL ENGINE NOT IMPLEMENTED**.
 - D2A causal replay is implemented, independently verified, and closed; this does not make
   the Backtesting Engine complete.
 - D2B1 pure Risk contracts/kernel is independently verified and closed.
 - D2B2 live-wrapper migration is independently verified and closed.
-- D2C stateless pure-Risk replay integration is authorized for implementation under the exact governance contract
-  below; it is not implemented or verified yet.
+- D2C stateless pure-Risk replay integration is implemented under the governance contract below. Local verification
+  is recorded in HANDOFF.md; independent verification is pending and D2C remains OPEN.
 - D2B1 requested-risk semantic clarification is **RESOLVED**; the four-layer pure contract below is authoritative.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
@@ -189,7 +189,7 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
    automatic Kill Switch persistence, persistent data-health tracking, idempotency, existing-decision
    reconciliation, reservation atomicity, transactions, and exact public `RiskDecision` compatibility. Independent
    GPT-5.6 Sol / High re-verification passed; the separate D2C governance authorization is recorded below.
-5. **D2C — AUTHORIZED FOR IMPLEMENTATION / NOT YET IMPLEMENTED**: one bounded, stateless integration unit that
+5. **D2C — IMPLEMENTED / FIRST VERIFICATION FAILED, REMEDIATED; FRESH RE-VERIFICATION PENDING**: one bounded, stateless integration unit that
    privately canonicalizes D2A inputs, consumes D2A `ReplayStrategyEvent` output, builds exact-time isolated
    `PureRiskEvaluationInput` values, calls `evaluate_pure_risk()` directly, and emits immutable backtest-specific
    Risk evidence with deterministic identity. No fills, state evolution, trade lifecycle, PnL, or persistence.
@@ -230,8 +230,11 @@ SQLAlchemy, or `AsyncSession`. No D2A private preparation API or D2B production 
   `manifest.config.initial_balance`; daily/weekly realized PnL and floating PnL are zero; open/reserved risk are
   zero; consecutive losses and open-position count are zero; loss/cooldown timestamps are absent; state version is
   one; and `state_updated_at`, `observed_at`, and `as_of` equal `T`.
-- Account identity is deterministic from the governed Risk replay input. Snapshot identity is deterministic from
-  that account identity, source event fingerprint, and `T`. No random UUID or live account identity is permitted.
+- Account identity is deterministic from a versioned baseline seed containing only integration version,
+  `manifest.config.symbol`, `manifest.config.initial_balance`, and `risk_configuration_fingerprint`.
+  Complete source/run-input fingerprints, requested end, cutoff, and future source content are excluded from this
+  seed. Snapshot identity is deterministic from that account identity, source event fingerprint, and `T`.
+  No random UUID or live account identity is permitted.
 - Use existing `AccountSnapshot.source="CONFIGURED_TEST"` with `trading_mode="BACKTEST"`. This is explicitly a
   configured non-live scenario snapshot, not historical live-account evidence; no additive shared Risk source
   value or D2B production edit is authorized.
@@ -245,6 +248,9 @@ SQLAlchemy, or `AsyncSession`. No D2A private preparation API or D2B production 
 - `caller_requested_risk_pct` defaults to `None`, accepts only finite non-negative bounded percentages, and is
   passed unchanged to the pure core. `None` and explicit zero therefore retain D2B1 compatibility normalization to
   policy maximum while remaining distinct audit/configuration identities. D1 `BacktestRunConfig` is unchanged.
+- Implemented bounds are 0–100 inclusive, at most 12 decimal digits and 8 fractional places. Symbol economics
+  use positive finite values with at most 20 digits and 8 fractional places. Offline policy canonical expansion
+  has a conservative 64 KiB admission budget before hash allocation. No shared RiskPolicy semantics changed.
 - The complete canonical `RiskPolicy` is supplied offline in the D2C configuration; no DB or live-policy lookup is
   allowed. Its `version` must equal `manifest.provenance.risk_policy_version` or admission fails closed. Every
   policy field is bound into the Risk configuration fingerprint.
@@ -292,6 +298,9 @@ SQLAlchemy, or `AsyncSession`. No D2A private preparation API or D2B production 
   event-eligibility, quote-selection, and news-admission/projection semantics.
 - `risk_replay_input_fingerprint` binds the D2A `replay_input_fingerprint` and Risk configuration fingerprint. It
   identifies complete executable inputs and changes when a future-only source suffix changes.
+- Complete Risk replay input identity must not be embedded in account/spec/snapshot IDs or other causal pure
+  inputs. Otherwise a future-only source change propagates through the pure input fingerprint into earlier Risk
+  events. Account identity uses the baseline seed above; complete source identity remains at run-input level.
 - Each evaluated `risk_input_fingerprint` binds the canonical `PureRiskEvaluationInput`, source quote
   `observed_at`, source D2A event fingerprint, and integration version. Each Risk event fingerprint binds source
   event identity, disposition, Risk-input identity when present, exact pure semantic fingerprint when present,
@@ -321,6 +330,29 @@ SQLAlchemy, or `AsyncSession`. No D2A private preparation API or D2B production 
   suffix, wrong/changed spec, changed policy/balance/requested risk, missing news, no-plan and terminal candidates,
   ordinary BLOCKED results, caller mutation, and event-order perturbation. D2C remains open until an independent
   GPT-5.6 Sol / High gate passes. Completion does not authorize D3.
+- Identity clarification reviewed on 2026-10-10: a controlled D2B1 probe reproduced different pure fingerprints
+  from account-ID-only changes with identical decision and sizing. Future D2C tests must prove that source-suffix
+  changes preserve account/snapshot IDs, exact pure results, event fingerprints, and causal output through T,
+  while changing complete replay input identity. Changed balance or Risk configuration must change the seed.
+
+### D2C Implementation Status (2026-10-10)
+- Public entry point: `app.services.backtesting.risk_replay.replay_risk(inputs, config, stop_at=...)`.
+- Additive files: `risk_replay_domain.py`, `risk_replay_fingerprint.py`, and `risk_replay.py`. The package retains
+  lazy, explicit D2C imports; no D1/D2A/D2B production semantics were changed.
+- Focused acceptance and isolation suites are `tests/test_backtesting_d2c.py` and
+  `tests/test_backtesting_d2c_architecture.py`. The existing D1 architecture allowlist adds exactly the three
+  authorized D2C modules; all live-effect and D3+ prohibitions remain intact.
+- Every source event receives one record; only a real plan invokes the verified pure core. Entire orchestration
+  uses an owned Decimal context. Output is bounded by the existing 100,000-event and actual 128 MiB wire limits.
+- Direct-pure parity, same-T baselines, full/prefix equality, future-source mutation, causal news/quotes,
+  requested-risk layers, malformed input/config, resource failures, and architecture isolation are exercised.
+- Existing D2A source limits remain authoritative. Its news-context 200-item guard may reject the replay before
+  D2C projection; this is a stable causal replay failure, not an unavailable-to-CALM fallback.
+- Local test results are in `docs/HANDOFF.md`. These results are not an independent verification gate and do not
+  close D2C. Next activity is a fresh independent GPT-5.6 Sol / High D2C verification session only.
+- Final local suite: 299 passed (D2C 82, D1 80, D2A 59, pure Risk/architecture 78); Ruff/format/diff checks PASS.
+  The 41 live/pure parity tests could not start in this environment: Windows asyncio local socketpair setup
+  hung before Risk evaluation. Three attempts stopped; exact diagnostic and runner recommendation are in HANDOFF.
 
 ## D2B Governance Decision
 **PLAN REQUIRES SPLIT.** The current `RiskEngine.evaluate_candidate()` interleaves deterministic policy with
@@ -504,7 +536,7 @@ authorize D2B2 or D2C.
 - Final independent evidence: HEAD-oracle complete public decision parity 5/5 passed; targeted Risk matrix 182/182
   passed; real PostgreSQL Risk concurrency/idempotency/lifecycle suite 8/8 passed with no skips; Ruff and
   `git diff --check` passed; no P0/P1/P2/P3 finding remains.
-- D2B2 is **CLOSED**. D2C remains not authorized.
+- D2B2 is **CLOSED**. D2C is separately authorized under the governance contract above.
 
 ## Required Test Program
 - Same code/config/data/request produces byte-equivalent canonical results and fingerprints.
@@ -535,8 +567,8 @@ authorize D2B2 or D2C.
 - D1-IV-001 through D1-IV-006 are **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT**; D2A passed independent GPT-5.6 Sol / High verification and is **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT** for D2B.
-- D2C governance result: **PLAN APPROVED WITH CONDITIONS**. Exactly one D2C stateless pure-Risk replay integration
-  unit is **AUTHORIZED FOR IMPLEMENTATION**. D3–D7 remain **NOT AUTHORIZED**.
+- D2C governance result: **PLAN APPROVED WITH CONDITIONS**. The single authorized D2C stateless pure-Risk replay
+  integration unit is **IMPLEMENTED; FIRST VERIFICATION FAILED (D2C-IV-P2-001) REMEDIATED 2026-10-22; FRESH RE-VERIFICATION PENDING**. D3–D7 remain **NOT AUTHORIZED**.
 
 ## D2A Final Closure Status
 - NEW-D2A-RV-001: **CLOSED**.
@@ -556,6 +588,5 @@ authorize D2B2 or D2C.
 - No reproducible P0/P1/P2/P3 finding remains within D2A scope.
 - D2B1 final independent re-verification: **PASS; CLOSED**.
 - D2B2 final independent re-verification: **PASS; CLOSED**.
-- D2C stateless pure-Risk replay integration is the only permitted implementation activity. It requires a fresh
-  independent GPT-5.6 Sol / High verification gate before closure. D3–D7 remain not authorized; do not begin the
-  next sub-batch automatically.
+- D2C requires a fresh independent GPT-5.6 Sol / High verification gate before closure; that gate is the next
+  permitted activity. D3–D7 remain not authorized; do not begin the next sub-batch automatically.
