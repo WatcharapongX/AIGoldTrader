@@ -36,7 +36,7 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
           <div className="flex items-center gap-2.5">
             <span className="w-3 h-3 rounded-full bg-amber-400 animate-pulse" />
             <h3 className="text-base font-bold text-white tracking-wide">
-              สถานะ Backtest Engine: Batch D — D2C รอการยืนยันอิสระ, D3-D7 ยังไม่ได้รับอนุญาต
+              สถานะ Backtest Engine: Batch D — D2C ปิดแล้ว, D3-D6 พร้อมใช้งาน (D7 closure gate เหลือ)
             </h3>
           </div>
 
@@ -44,7 +44,7 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
             data-testid="backtest-status-badge"
             className="px-3 py-1 text-xs font-mono font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 w-fit"
           >
-            NOT IMPLEMENTED · BATCH D GATED
+            DETERMINISTIC SIMULATION · PAPER ONLY
           </span>
         </div>
 
@@ -185,7 +185,7 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
             className="px-5 py-2.5 rounded-xl bg-gray-800 text-gray-400 font-bold text-xs cursor-not-allowed border border-gray-700"
             title="ฟังก์ชัน Backtest Engine อยู่ภายใต้ Batch D governance gate"
           >
-            Backtest Engine ยังไม่เปิดใช้งาน (Batch D: D3-D7 Not Authorized)
+            สร้าง Run ผ่าน API ที่มีการกำกับดูแล (ฟอร์มนี้เป็นข้อมูลเตรียมการ)
           </button>
 
           <span className="text-[11px] text-gray-400 italic">
@@ -233,32 +233,32 @@ export function BacktestReadinessTab({ context }: BacktestReadinessTabProps) {
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">5. Historical Trade Fill Simulator:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
+            <span className="text-amber-400 font-bold">IMPLEMENTED (Batch D3/D4)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">6. Realistic Spread &amp; Commission Model:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
+            <span className="text-amber-400 font-bold">IMPLEMENTED (Batch D3/D4)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">7. Order Slippage Simulation Model:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
+            <span className="text-amber-400 font-bold">IMPLEMENTED (Batch D3/D4)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">8. Position Lifecycle &amp; P&amp;L Calculator:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
+            <span className="text-amber-400 font-bold">IMPLEMENTED (Batch D3/D4)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">9. Quantitative Performance Metrics (Sharpe/DD):</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
+            <span className="text-amber-400 font-bold">IMPLEMENTED (Batch D3/D4)</span>
           </div>
 
           <div className="p-3 bg-black/30 rounded-lg border border-white/5 flex items-center justify-between">
             <span className="text-gray-400">10. Walk-Forward Analysis &amp; Optimization:</span>
-            <span className="text-amber-400 font-bold">NOT IMPLEMENTED (Batch D)</span>
+            <span className="text-amber-400 font-bold">IMPLEMENTED (Batch D3/D4)</span>
           </div>
         </div>
       </section>
