@@ -289,9 +289,20 @@ def _validate_source_events(source) -> None:
     bypass that via ``model_copy``; D2C must never let the raw ``ValidationError``
     from final result construction escape (D2C-IV-P2-001).
     """
-    keys = [(e.as_of, e.profile_id, e.strategy_id, e.candidate_id) for e in source.events]
-    if keys != sorted(keys) or len(keys) != len(set(keys)) or any(e.as_of > source.cutoff for e in source.events):
-        raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION)
+    try:
+        timestamps = [source.cutoff, *(e.as_of for e in source.events)]
+        if any(
+            not isinstance(value, dt.datetime) or value.tzinfo is None or value.utcoffset() is None
+            for value in timestamps
+        ):
+            raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION)
+        keys = [(e.as_of, e.profile_id, e.strategy_id, e.candidate_id) for e in source.events]
+        if keys != sorted(keys) or len(keys) != len(set(keys)) or any(e.as_of > source.cutoff for e in source.events):
+            raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION)
+    except RiskReplayError:
+        raise
+    except (TypeError, ValueError, AttributeError) as error:
+        raise RiskReplayError(RiskReplayFailureCode.CAUSALITY_VIOLATION) from error
 
 
 def _replay_risk(inputs: ReplayInputs, config: RiskReplayConfig, stop_at: dt.datetime | None) -> RiskReplayResult:

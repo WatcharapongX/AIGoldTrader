@@ -636,25 +636,36 @@ def test_contracts_are_frozen_and_reject_counter_order_and_evidence_mismatch():
         ReplayRiskEvent.model_validate({**no_plan.model_dump(mode="python"), "risk_evaluation_status": "EVALUATED"})
 
 
-@pytest.mark.parametrize("perturb", ["reversed", "duplicate", "beyond_cutoff"])
+@pytest.mark.parametrize(
+    "perturb", ["reversed", "duplicate", "beyond_cutoff", "naive_event_as_of", "naive_cutoff", "non_event"]
+)
 def test_perturbed_d2a_event_order_fails_with_stable_causality_code(monkeypatch, perturb):
-    """D2C-IV-P2-001: model_copy-perturbed D2A streams must not leak raw ValidationError."""
+    """D2C-IV-P2-001/D2C-IV-P3-001: perturbed D2A streams must not leak raw errors."""
     source_inputs = inputs()
     source = replay(source_inputs, stop_at=START + dt.timedelta(minutes=10))
     assert len(source.events) >= 2
     if perturb == "reversed":
         perturbed_events = source.events[::-1]
+        forged = source.model_copy(update={"events": perturbed_events})
     elif perturb == "duplicate":
         perturbed_events = (source.events[0],) + source.events
+        forged = source.model_copy(update={"events": perturbed_events})
+    elif perturb == "naive_event_as_of":
+        naive = source.events[-1].model_copy(update={"as_of": source.events[-1].as_of.replace(tzinfo=None)})
+        forged = source.model_copy(update={"events": source.events[:-1] + (naive,)})
+    elif perturb == "naive_cutoff":
+        forged = source.model_copy(update={"cutoff": source.cutoff.replace(tzinfo=None)})
+    elif perturb == "non_event":
+        forged = source.model_copy(update={"events": (None,) + source.events})
     else:
         late = source.events[-1].model_copy(update={"as_of": source.cutoff + dt.timedelta(minutes=1)})
         perturbed_events = source.events[:-1] + (late,)
-    forged = source.model_copy(update={"events": perturbed_events})
+        forged = source.model_copy(update={"events": perturbed_events})
     # raising=True (string form): fail loudly if the seam is ever renamed.
     monkeypatch.setattr(integration, "replay", lambda *args, **kwargs: forged, raising=True)
     with pytest.raises(RiskReplayError) as error:
         replay_risk(source_inputs, config(), stop_at=source.cutoff)
-    assert not isinstance(error.value, ValidationError)
+    assert not isinstance(error.value, (TypeError, ValidationError))
     assert error.value.code is RiskReplayFailureCode.CAUSALITY_VIOLATION
     assert str(error.value) == RiskReplayFailureCode.CAUSALITY_VIOLATION.value
 
