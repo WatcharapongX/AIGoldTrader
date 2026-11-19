@@ -80,6 +80,8 @@ def test_0016_refresh_family_migration_and_legacy_cutover(isolated_postgres):  #
         row[0] for row in conn.execute("SELECT indexname FROM pg_indexes WHERE schemaname=%s", (schema,)).fetchall()
     }
     assert "ix_sessions_family_id" in indexes
+    # Head moved to 0017 (backtest tables); bring the schema to head before the model/migration drift check.
+    _alembic("upgrade", "head")
     _alembic("check")
 
 
