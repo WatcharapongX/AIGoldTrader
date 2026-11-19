@@ -24,6 +24,11 @@ __all__ = [
     "User",
 ]
 
+from app.models.backtest import (  # noqa: F401, E402
+    BacktestEquityPointRecord,
+    BacktestRunRecord,
+    BacktestTradeRecord,
+)
 from app.models.risk import (  # noqa: F401, E402
     AccountSnapshotRecord,
     KillSwitchRecord,
@@ -37,9 +42,4 @@ from app.models.strategy import (  # noqa: F401, E402
     StrategyEvaluationRecord,
     TradeCandidateRecord,
     TraderProfileRecord,
-)
-from app.models.backtest import (  # noqa: F401, E402
-    BacktestEquityPointRecord,
-    BacktestRunRecord,
-    BacktestTradeRecord,
 )
