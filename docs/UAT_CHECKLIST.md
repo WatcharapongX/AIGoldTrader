@@ -1,6 +1,7 @@
 # UAT Readiness Checklist (PAPER-only)
 
 Sign-off requires every box checked on the exact commit SHA being promoted.
+Promotion artifact: a pinned tag `uat-YYYY-MM-DD` on `main` (see `docs/CURRENT_STATE.md`, Environment & Promotion Policy). The UAT server checks out only that tag.
 
 ## Safety
 - [ ] `TRADING_MODE=PAPER`, `LIVE_AUTO_TRADING=false` verified in target env
