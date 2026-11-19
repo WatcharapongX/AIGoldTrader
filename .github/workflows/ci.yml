@@ -36,6 +36,8 @@ jobs:
       SECRET_KEY: ci-secret-key-at-least-32-bytes-long!!
       DATABASE_URL: postgresql://ci:ci-test-only@localhost:5432/aigold_ci
       TEST_DATABASE_URL: postgresql://ci:ci-test-only@localhost:5432/aigold_ci
+      # Dedicated, ephemeral service container: safe to mark disposable (see docs/17-testing.md).
+      TEST_DATABASE_DISPOSABLE: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
