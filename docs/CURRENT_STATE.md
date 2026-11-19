@@ -3,6 +3,7 @@
 - **Last Verified Date**: 2026-09-28
 - **D2C Local Implementation Date**: 2026-10-10 (not an independent verification date)
 - **Authoritative Branch**: `main`
+- **Environment & Promotion Policy (approved 2026-11-19)**: `main` is the only long-lived branch; no `uat` branch is maintained. UAT is an environment, not a branch: the UAT server runs a pinned tag (`uat-YYYY-MM-DD` or commit SHA) created on `main` after CI is green and the UAT checklist is signed off. Feature work uses short-lived branches merged into `main`. Environment configuration stays in per-environment `.env` files (never committed). Avoid squash-merge drift between local and GitHub `main`.
 - **Current Milestone**: Batch D remains OPEN; D1, D2A, D2B1, and D2B2 are CLOSED.
 - **Current Active Gate**: D2C Stateless Pure Risk Replay Integration is CLOSED (independent re-verification PASS 2026-10-22; D2C-IV-P2-001 and D2C-IV-P2-002 closed).
 - **Next Permitted Activity**: Fresh independent GPT-5.6 Sol / High D2C verification; D2C is not CLOSED.
