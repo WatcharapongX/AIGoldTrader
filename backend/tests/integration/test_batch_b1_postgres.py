@@ -13,6 +13,7 @@ from sqlalchemy.engine import make_url
 from test_postgres import _alembic, isolated_postgres  # noqa: F401
 
 from app.api import auth
+from app.core.config import get_settings
 from app.core.event_loop import new_event_loop
 from app.core.rate_limit import RateLimiter
 from app.db.seed import seed_admin
@@ -165,6 +166,9 @@ def test_atomic_refresh_http_concurrency_100_iterations(isolated_postgres, monke
     _conn, _schema = isolated_postgres
     _alembic("upgrade", "head")
     monkeypatch.setattr(auth, "_auth_limiter", RateLimiter(per_minute=10000, max_keys=10000))
+    # Test-only: the global API limiter (default 120/min per IP) would reject 100 concurrent requests.
+    monkeypatch.setenv("RATE_LIMIT_API_PER_MINUTE", "10000")
+    get_settings.cache_clear()
     try:
         asyncio.run(_verify_100_atomic_refresh_races(), loop_factory=new_event_loop)
     finally:
