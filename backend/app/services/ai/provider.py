@@ -635,6 +635,9 @@ class FixtureAIProvider(SpawnSafeTestProvider):
                     cand = ctx.get("strategy_candidate") or ctx.get("strategy")
                     if isinstance(cand, dict) and cand.get("direction"):
                         direction = str(cand["direction"])
+                    # TradeThesisAgent.extract_context emits a flat key at trusted_context level.
+                    if ctx.get("strategy_direction") in ("LONG", "SHORT"):
+                        direction = str(ctx["strategy_direction"])
                     if ctx.get("symbol"):
                         symbol = str(ctx["symbol"])
         except (json.JSONDecodeError, TypeError, KeyError) as exc:
