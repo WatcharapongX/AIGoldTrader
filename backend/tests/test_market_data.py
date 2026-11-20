@@ -130,7 +130,8 @@ async def test_ingestion_db_publication_quality_and_stale(db_session):
     market.symbol_id = symbol.id
     queue = market.bus.subscribe()
     assert await market.ingest(tick(), NOW)
-    assert len(await asyncio.wait_for(queue.get(), 1)) == 9
+    _sequence, published = await asyncio.wait_for(queue.get(), 1)
+    assert len(published) == 9
     assert await session.scalar(select(func.count()).select_from(MarketTick)) == 1
     assert await session.scalar(select(func.count()).select_from(MarketCandle)) == 9
     assert not await market.ingest(tick(), NOW)
