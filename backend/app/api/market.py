@@ -173,6 +173,11 @@ async def market_candles(
     return CandlePage(candles=candles, next_cursor=candles[0].open_time if len(candles) == limit else None)
 
 
+def is_fresh_update(subscribed: bool, update_sequence: int, last_sent_sequence: int) -> bool:
+    """An update is delivered only to a subscribed socket and only if newer than what was already sent."""
+    return subscribed and update_sequence > last_sent_sequence
+
+
 def message(current, kind, command, candles=None, error=None, sequence=None):
     return MarketMessage(
         type=kind,
@@ -265,7 +270,7 @@ async def market_socket(ws: WebSocket):
                     return
                 update_sequence, rows = update
                 # Drop updates produced at or before the last delivered sequence (e.g. queued before the snapshot).
-                if subscribed and update_sequence > last_sent_sequence:
+                if is_fresh_update(subscribed, update_sequence, last_sent_sequence):
                     await ws.send_json(
                         message(
                             current,

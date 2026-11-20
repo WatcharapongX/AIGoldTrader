@@ -121,6 +121,29 @@ def test_bus_bounds_and_slow_consumer():
         bus.unsubscribe(queue)
 
 
+def test_bus_items_carry_publish_sequence():
+    bus = LocalMarketBus()
+    queue = bus.subscribe()
+    bus.publish(["a"], 7)
+    bus.publish(["b"], 8)
+    bus.publish(None)
+    assert queue.get_nowait() == (7, ["a"])
+    assert queue.get_nowait() == (8, ["b"])
+    assert queue.get_nowait() is None
+    bus.unsubscribe(queue)
+
+
+def test_stale_updates_are_not_delivered_after_snapshot():
+    from app.api.market import is_fresh_update
+
+    # Snapshot delivered at sequence 2; an update queued before it (sequence 2) must be dropped.
+    assert not is_fresh_update(True, 2, 2)
+    assert not is_fresh_update(True, 1, 2)
+    assert is_fresh_update(True, 3, 2)
+    # Unsubscribed sockets never receive updates, even when newer.
+    assert not is_fresh_update(False, 3, 2)
+
+
 async def test_ingestion_db_publication_quality_and_stale(db_session):
     session, factory = db_session
     symbol = Symbol(name="XAUUSD")
