@@ -249,7 +249,8 @@ async def test_service_real_persistence_and_source_isolation(configured, db_sess
     await session.commit()
     queue = market.bus.subscribe()
     assert await market.ingest(provider.get_quote("XAUUSD"), NOW)
-    assert len(await queue.get()) == 18
+    _sequence, published = await queue.get()
+    assert len(published) == 18
     # Real ticks do not accumulate without an explicit operator archival policy.
     assert await session.scalar(select(func.count()).select_from(MarketTick)) == 0
     real = await candles_query(session, symbol.id, "XAUUSD", Timeframe.M5, source=provider.source)
