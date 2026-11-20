@@ -511,7 +511,8 @@ async def test_input_byte_budget_prevents_provider_call(payload_size: int) -> No
         ModelConfig(max_retries=5),
     )
     assert result.status == "DEGRADED"
-    assert "budget exceeded" in result.warnings_th[0]
+    # Failure is surfaced as a stable safe code (commit 4ee8acd), not free-text.
+    assert result.warnings_th[0] == "PROVIDER_BUDGET_EXCEEDED"
 
 
 @pytest.mark.asyncio
@@ -528,7 +529,8 @@ async def test_output_budgets_degrade_without_retry(mode: str) -> None:
         ModelConfig(max_output_tokens=1024, max_retries=5),
     )
     assert result.status == "DEGRADED"
-    assert "budget exceeded" in result.warnings_th[0]
+    # Failure is surfaced as a stable safe code (commit 4ee8acd), not free-text.
+    assert result.warnings_th[0] == "PROVIDER_BUDGET_EXCEEDED"
 
 
 class TransientOnceProvider(SpawnSafeTestProvider):

@@ -122,6 +122,9 @@ def test_postgresql_migrations_auth_and_audit(isolated_postgres, capfd):
         "kill_switch_records",
         "data_health_records",
         "paper_account_states",
+        "backtest_runs",
+        "backtest_trades",
+        "backtest_equity_points",
     }
     for action, target in (("upgrade", "head"), ("downgrade", "base"), ("upgrade", "head")):
         if target == "base":
@@ -295,6 +298,7 @@ def _verify_schema(conn, schema, expected):
         ("0014_batch_a2_account_authority",),
         ("0015_batch_a3_risk_account_fk",),
         ("0016_batch_b_refresh_families",),
+        ("0017_backtest_runs",),
     )
     indexes = {
         row[0]: row[1]
@@ -328,6 +332,8 @@ def _verify_schema(conn, schema, expected):
         "candidate_transitions",
         "risk_reservations",
         "risk_decisions",
+        "backtest_trades",
+        "backtest_equity_points",
     }
 
 
