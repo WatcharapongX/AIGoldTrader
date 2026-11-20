@@ -280,8 +280,11 @@ async def test_slow_calendar_does_not_pause_market_quote_collection(monkeypatch)
     from app.core.config import Settings
     from app.services.news.service import NewsService
 
-    def quote():
-        return SimpleNamespace(timestamp=dt.datetime.now(dt.UTC), bid=D(100), ask=D("100.02"), source="simulated")
+    def quote(offset_seconds=0):
+        # Explicit offset: the run loop only appends a quote with a strictly newer timestamp, and
+        # datetime.now() can repeat on Windows (coarse clock), which made this test flaky.
+        stamp = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=offset_seconds)
+        return SimpleNamespace(timestamp=stamp, bid=D(100), ask=D("100.02"), source="simulated")
 
     market = SimpleNamespace(quote=quote())
     service = NewsService(None, Settings(_env_file=None), market)
@@ -299,7 +302,7 @@ async def test_slow_calendar_does_not_pause_market_quote_collection(monkeypatch)
     service.task = asyncio.create_task(service.run())
     try:
         await asyncio.wait_for(entered.wait(), 2)
-        market.quote = quote()
+        market.quote = quote(offset_seconds=1)
         # Wait for the next collection tick (run loop period is 1s) with a generous deadline,
         # instead of a fixed 1.1s sleep that leaves ~0.1s margin on loaded CI runners.
         loop = asyncio.get_running_loop()
