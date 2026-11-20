@@ -173,12 +173,17 @@ async def market_candles(
     return CandlePage(candles=candles, next_cursor=candles[0].open_time if len(candles) == limit else None)
 
 
-def message(current, kind, command, candles=None, error=None):
+def is_fresh_update(subscribed: bool, update_sequence: int, last_sent_sequence: int) -> bool:
+    """An update is delivered only to a subscribed socket and only if newer than what was already sent."""
+    return subscribed and update_sequence > last_sent_sequence
+
+
+def message(current, kind, command, candles=None, error=None, sequence=None):
     return MarketMessage(
         type=kind,
         symbol=command.symbol,
         timeframe=command.timeframe,
-        sequence=current.sequence,
+        sequence=current.sequence if sequence is None else sequence,
         quote=current.quote,
         candles=candles or [],
         status=current.status(),
@@ -213,6 +218,7 @@ async def market_socket(ws: WebSocket):
         subscribed = False
         window, messages = time.monotonic(), 0
         auth_checked = time.monotonic()
+        last_sent_sequence = -1  # Highest sequence delivered on this socket; older queued updates are stale.
         receiver = asyncio.create_task(ws.receive_text())
         consumer = asyncio.create_task(queue.get())
         while True:
@@ -240,6 +246,8 @@ async def market_socket(ws: WebSocket):
                 if incoming.type != "ping":
                     command = incoming
                 if incoming.type == "subscribe":
+                    # Read the sequence BEFORE the candle query: every tick <= this value is committed to the DB.
+                    snapshot_sequence = current.sequence
                     async with current.factory() as session:
                         symbol = await find_symbol(session, command.symbol)
                         if symbol.name != "XAUUSD":
@@ -248,7 +256,8 @@ async def market_socket(ws: WebSocket):
                             session, symbol.id, symbol.name, command.timeframe, source=current.provider.source
                         )
                     subscribed = True
-                    await ws.send_json(message(current, "snapshot", command, candles))
+                    last_sent_sequence = snapshot_sequence
+                    await ws.send_json(message(current, "snapshot", command, candles, sequence=snapshot_sequence))
                 elif incoming.type == "unsubscribe":
                     subscribed = False
                 else:
@@ -259,15 +268,19 @@ async def market_socket(ws: WebSocket):
                 if update is None:
                     await ws.close(code=1013)
                     return
-                if subscribed:
+                update_sequence, rows = update
+                # Drop updates produced at or before the last delivered sequence (e.g. queued before the snapshot).
+                if is_fresh_update(subscribed, update_sequence, last_sent_sequence):
                     await ws.send_json(
                         message(
                             current,
                             "update",
                             command,
-                            [c for c in update if c.symbol == command.symbol and c.timeframe == command.timeframe],
+                            [c for c in rows if c.symbol == command.symbol and c.timeframe == command.timeframe],
+                            sequence=update_sequence,
                         )
                     )
+                    last_sent_sequence = update_sequence
                 consumer = asyncio.create_task(queue.get())
             if not done:
                 async with current.factory() as session:

@@ -207,9 +207,9 @@ def test_0012_normalizer_alias_and_uuid_same_account_safe_upgrade(isolated_postg
     # 3. Now run alembic upgrade head (runs 0013 through 0016)
     _alembic("upgrade", "head")
 
-    # Verify migration completed to 0016 head
+    # Verify migration completed to current head (0017 backtest runs)
     current_rev = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert current_rev == "0016_batch_b_refresh_families"
+    assert current_rev == "0017_backtest_runs"
 
     # Verify decision got reconciled to canonical UUID
     dec_acc = conn.execute("SELECT account_id FROM risk_decisions WHERE id = 'dec_norm_01'").fetchone()[0]
@@ -811,9 +811,9 @@ def test_safe_db_upgrade_cli_e2e(isolated_postgres):  # noqa: F811
     assert proc.returncode == 0, f"safe_db_upgrade failed: {combined_output}"
     assert "Safe database upgrade completed successfully" in combined_output
 
-    # Verify migration completed to 0016
+    # Verify migration completed to current head (0017 backtest runs)
     current_rev = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-    assert current_rev == "0016_batch_b_refresh_families"
+    assert current_rev == "0017_backtest_runs"
 
     # Verify snapshot was normalized to canonical UUID
     snap_acc = conn.execute("SELECT account_id FROM account_snapshots WHERE id = 'snap_cli_01'").fetchone()[0]
