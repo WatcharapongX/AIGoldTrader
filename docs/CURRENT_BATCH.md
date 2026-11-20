@@ -6,7 +6,7 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2C — CLOSED (independent re-verification PASS 2026-10-22; D2C-IV-P2-001/P2-002 closed; 347 tests). Owner authorized continuation to D3–D7 on 2026-10-22 via approval of the Enterprise Improvement Roadmap execution; each sub-batch still requires its own tests and, at D7, an independent closure gate. No paper execution, OMS, broker, or live capability is authorized by that continuation.**
+**Current gate: D2C — CLOSED (independent re-verification PASS 2026-10-22; D2C-IV-P2-001/P2-002 closed; 347 tests). D3–D7 are NOT AUTHORIZED (owner decision recorded 2026-11-20; supersedes any earlier reading of the 2026-10-22 Enterprise Improvement Roadmap approval). No paper execution, OMS, broker, or live capability is authorized.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
 D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. The D2A deterministic causal
