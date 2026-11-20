@@ -2,7 +2,20 @@
 
 from fastapi import APIRouter
 
-from app.api import ai, analysis, auth, backtests, configuration, dashboard, health, market, news, risk, strategy, system
+from app.api import (
+    ai,
+    analysis,
+    auth,
+    backtests,
+    configuration,
+    dashboard,
+    health,
+    market,
+    news,
+    risk,
+    strategy,
+    system,
+)
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router)
