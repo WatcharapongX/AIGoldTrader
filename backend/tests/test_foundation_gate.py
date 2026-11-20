@@ -38,6 +38,9 @@ def test_migration_upgrade_downgrade_upgrade(tmp_path):
         "kill_switch_records",
         "data_health_records",
         "paper_account_states",
+        "backtest_runs",
+        "backtest_trades",
+        "backtest_equity_points",
     }
     try:
         for target in ("head", "base", "head"):
