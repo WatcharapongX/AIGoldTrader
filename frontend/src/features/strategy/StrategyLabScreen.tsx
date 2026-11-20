@@ -16,6 +16,7 @@ import { StrategyCatalogTab } from './StrategyCatalogTab';
 import { TraderProfilesTab } from './TraderProfilesTab';
 import { EvaluationsTab } from './EvaluationsTab';
 import { BacktestReadinessTab } from './BacktestReadinessTab';
+import { BacktestRunsPanel } from '../backtesting/BacktestRunsPanel';
 
 type TabKey = 'STRATEGIES' | 'PROFILES' | 'EVALUATIONS' | 'BACKTEST';
 
@@ -387,7 +388,10 @@ export function StrategyLabScreen() {
         )}
 
         {activeTab === 'BACKTEST' && (
-          <BacktestReadinessTab context={currentEval?.evaluation?.context} />
+          <div className="space-y-6">
+            <BacktestRunsPanel />
+            <BacktestReadinessTab context={currentEval?.evaluation?.context} />
+          </div>
         )}
       </div>
     </div>

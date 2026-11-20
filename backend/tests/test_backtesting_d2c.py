@@ -2,6 +2,7 @@
 
 import datetime as dt
 from decimal import ROUND_DOWN, ROUND_UP, Decimal, localcontext
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -636,18 +637,102 @@ def test_contracts_are_frozen_and_reject_counter_order_and_evidence_mismatch():
         ReplayRiskEvent.model_validate({**no_plan.model_dump(mode="python"), "risk_evaluation_status": "EVALUATED"})
 
 
-@pytest.mark.parametrize("perturb", ["reversed", "duplicate"])
+@pytest.mark.parametrize(
+    "perturb", ["reversed", "duplicate", "beyond_cutoff", "naive_event_as_of", "naive_cutoff", "non_event"]
+)
 def test_perturbed_d2a_event_order_fails_with_stable_causality_code(monkeypatch, perturb):
-    """D2C-IV-P2-001: model_copy-perturbed D2A streams must not leak raw ValidationError."""
+    """D2C-IV-P2-001/D2C-IV-P3-001: perturbed D2A streams must not leak raw errors."""
     source_inputs = inputs()
     source = replay(source_inputs, stop_at=START + dt.timedelta(minutes=10))
     assert len(source.events) >= 2
-    perturbed_events = source.events[::-1] if perturb == "reversed" else (source.events[0],) + source.events
-    forged = source.model_copy(update={"events": perturbed_events})
-    monkeypatch.setattr(integration, "replay", lambda *args, **kwargs: forged)
-    assert_failure(
-        RiskReplayFailureCode.CAUSALITY_VIOLATION, lambda: replay_risk(source_inputs, config(), stop_at=source.cutoff)
+    if perturb == "reversed":
+        perturbed_events = source.events[::-1]
+        forged = source.model_copy(update={"events": perturbed_events})
+    elif perturb == "duplicate":
+        perturbed_events = (source.events[0],) + source.events
+        forged = source.model_copy(update={"events": perturbed_events})
+    elif perturb == "naive_event_as_of":
+        naive = source.events[-1].model_copy(update={"as_of": source.events[-1].as_of.replace(tzinfo=None)})
+        forged = source.model_copy(update={"events": source.events[:-1] + (naive,)})
+    elif perturb == "naive_cutoff":
+        forged = source.model_copy(update={"cutoff": source.cutoff.replace(tzinfo=None)})
+    elif perturb == "non_event":
+        forged = source.model_copy(update={"events": (None,) + source.events})
+    else:
+        late = source.events[-1].model_copy(update={"as_of": source.cutoff + dt.timedelta(minutes=1)})
+        perturbed_events = source.events[:-1] + (late,)
+        forged = source.model_copy(update={"events": perturbed_events})
+    # raising=True (string form): fail loudly if the seam is ever renamed.
+    monkeypatch.setattr(integration, "replay", lambda *args, **kwargs: forged, raising=True)
+    with pytest.raises(RiskReplayError) as error:
+        replay_risk(source_inputs, config(), stop_at=source.cutoff)
+    assert not isinstance(error.value, (TypeError, ValidationError))
+    assert error.value.code is RiskReplayFailureCode.CAUSALITY_VIOLATION
+    assert str(error.value) == RiskReplayFailureCode.CAUSALITY_VIOLATION.value
+
+
+def _plan_bearing_source():
+    source_inputs = inputs(quotes=fresh_quotes())
+    source = replay(source_inputs, stop_at=START)
+    assert source.events and source.events[0].trade_plan is not None
+    return source_inputs, source
+
+
+def test_forged_plain_object_event(plan_strategy, captured, monkeypatch):
+    """D2C-IV-P2-003: a duck-typed copy of a real plan event must not be evaluated."""
+    source_inputs, source = _plan_bearing_source()
+    real = source.events[0]
+    forged_event = SimpleNamespace(
+        as_of=real.as_of,
+        profile_id=real.profile_id,
+        strategy_id=real.strategy_id,
+        context_id=real.context_id,
+        candidate_id=real.candidate_id,
+        candidate_status=real.candidate_status,
+        context=real.context,
+        candidate=real.candidate,
+        trade_plan=real.trade_plan,
+        event_fingerprint=real.event_fingerprint,
     )
+    forged = source.model_copy(update={"events": (forged_event,)})
+    monkeypatch.setattr(integration, "replay", lambda *args, **kwargs: forged, raising=True)
+    assert_failure(
+        RiskReplayFailureCode.CAUSALITY_VIOLATION,
+        lambda: replay_risk(source_inputs, config(), stop_at=source.cutoff),
+    )
+    assert captured == []
+
+
+def test_partial_object_event(plan_strategy, captured, monkeypatch):
+    """D2C-IV-P3-002a: an object with only sort keys must fail stably, not AttributeError."""
+    source_inputs, source = _plan_bearing_source()
+    real = source.events[0]
+    partial_event = SimpleNamespace(
+        as_of=real.as_of,
+        profile_id=real.profile_id,
+        strategy_id=real.strategy_id,
+        candidate_id=real.candidate_id,
+    )
+    forged = source.model_copy(update={"events": (partial_event,)})
+    monkeypatch.setattr(integration, "replay", lambda *args, **kwargs: forged, raising=True)
+    assert_failure(
+        RiskReplayFailureCode.CAUSALITY_VIOLATION,
+        lambda: replay_risk(source_inputs, config(), stop_at=source.cutoff),
+    )
+    assert captured == []
+
+
+def test_bogus_trade_plan_object(plan_strategy, captured, monkeypatch):
+    """D2C-IV-P3-002b: trade_plan=object() must fail stably, not AttributeError."""
+    source_inputs, source = _plan_bearing_source()
+    bogus_event = source.events[0].model_copy(update={"trade_plan": object()})
+    forged = source.model_copy(update={"events": (bogus_event,)})
+    monkeypatch.setattr(integration, "replay", lambda *args, **kwargs: forged, raising=True)
+    assert_failure(
+        RiskReplayFailureCode.CAUSALITY_VIOLATION,
+        lambda: replay_risk(source_inputs, config(), stop_at=source.cutoff),
+    )
+    assert captured == []
 
 
 def test_adapter_accepts_inputs_not_external_replay_results():
