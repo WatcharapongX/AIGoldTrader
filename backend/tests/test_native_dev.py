@@ -153,7 +153,7 @@ def test_postgresql_offline_migration_handles_percent_encoded_password():
         cwd=str(backend_dir),
         env=env,
         capture_output=True,
-        text=True,
+        encoding="utf-8",  # explicit: default locale codec (cp1252 on Windows) cannot decode alembic output
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
