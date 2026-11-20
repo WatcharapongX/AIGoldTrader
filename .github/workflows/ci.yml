@@ -46,7 +46,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/pyproject.toml
       - name: Install
-        run: pip install -e ".[dev]"
+        # Pinned set verified against CI: see backend/constraints.txt (update deliberately).
+        run: pip install -e ".[dev]" -c constraints.txt
       - name: Ruff
         # Lint is enforced repo-wide. `ruff format --check` is not: the legacy
         # tree carries pre-existing format debt (40+ files); format is enforced
