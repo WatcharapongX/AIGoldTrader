@@ -44,8 +44,23 @@ export function BacktestRunsPanel() {
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    let active = true;
+    api
+      .get('/backtests?limit=50')
+      .then((data) => {
+        if (!active) return;
+        setRuns(data as BacktestRun[]);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (!active) return;
+        setRuns([]);
+        setError((e as Error).message);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const openRun = async (run: BacktestRun) => {
     setSelected(run);
