@@ -60,6 +60,11 @@ jobs:
           python -m pytest tests -q
           --cov=app --cov-report=term-missing --cov-report=xml
           --cov-fail-under=0
+      - name: Migrate ephemeral CI database to head
+        # The PG service container starts empty; migrate it so `alembic check`
+        # compares models against the real head schema (same sequence the
+        # integration suite already verifies).
+        run: alembic upgrade head
       - name: Alembic head matches models
         run: alembic check
       - name: Upload coverage
