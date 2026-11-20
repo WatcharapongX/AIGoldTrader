@@ -6,7 +6,7 @@
 ## Governance Decision
 **PLAN REQUIRES SPLIT.** Batch D is authorized only as the gated program below.
 
-**Current gate: D2C — CLOSED (independent re-verification PASS 2026-10-22; D2C-IV-P2-001/P2-002 closed; 347 tests). Owner authorized continuation to D3–D7 on 2026-10-22 via approval of the Enterprise Improvement Roadmap execution; each sub-batch still requires its own tests and, at D7, an independent closure gate. No paper execution, OMS, broker, or live capability is authorized by that continuation.**
+**Current gate: D2C — CLOSED (independent re-verification PASS 2026-10-22; D2C-IV-P2-001/P2-002 closed; 347 tests). D3–D7 are NOT AUTHORIZED (owner decision recorded 2026-11-20; supersedes any earlier reading of the 2026-10-22 Enterprise Improvement Roadmap approval). No paper execution, OMS, broker, or live capability is authorized.**
 
 The D2 governance review determined that D2 is too broad to implement safely as one unit. It is split into
 D2A causal replay, D2B shared pure Risk policy, and D2C replay/Risk integration. The D2A deterministic causal
@@ -28,7 +28,7 @@ automatically progress.
 - D2B1 pure Risk contracts/kernel is independently verified and closed.
 - D2B2 live-wrapper migration is independently verified and closed.
 - D2C stateless pure-Risk replay integration is implemented under the governance contract below. Local verification
-  is recorded in HANDOFF.md; independent verification is pending and D2C remains OPEN.
+  is recorded in HANDOFF.md; independent re-verification PASSED 2026-10-22 and D2C is CLOSED (PR #17).
 - D2B1 requested-risk semantic clarification is **RESOLVED**; the four-layer pure contract below is authoritative.
 - The `/backtesting` page currently renders Strategy Lab historical evaluation snapshots only.
   Those snapshots are not a backtest engine and must not be described as one.
@@ -189,7 +189,7 @@ trade list, and strategy/direction filters. Backend truth and provenance badges 
    automatic Kill Switch persistence, persistent data-health tracking, idempotency, existing-decision
    reconciliation, reservation atomicity, transactions, and exact public `RiskDecision` compatibility. Independent
    GPT-5.6 Sol / High re-verification passed; the separate D2C governance authorization is recorded below.
-5. **D2C — IMPLEMENTED / FIRST VERIFICATION FAILED, REMEDIATED; FRESH RE-VERIFICATION PENDING**: one bounded, stateless integration unit that
+5. **D2C — CLOSED (independent re-verification PASS 2026-10-22; PR #17)**: one bounded, stateless integration unit that
    privately canonicalizes D2A inputs, consumes D2A `ReplayStrategyEvent` output, builds exact-time isolated
    `PureRiskEvaluationInput` values, calls `evaluate_pure_risk()` directly, and emits immutable backtest-specific
    Risk evidence with deterministic identity. No fills, state evolution, trade lifecycle, PnL, or persistence.
@@ -335,7 +335,7 @@ SQLAlchemy, or `AsyncSession`. No D2A private preparation API or D2B production 
   changes preserve account/snapshot IDs, exact pure results, event fingerprints, and causal output through T,
   while changing complete replay input identity. Changed balance or Risk configuration must change the seed.
 
-### D2C Implementation Status (2026-10-10)
+### D2C Implementation Status (2026-10-10) — historical; superseded by closure on 2026-10-22
 - Public entry point: `app.services.backtesting.risk_replay.replay_risk(inputs, config, stop_at=...)`.
 - Additive files: `risk_replay_domain.py`, `risk_replay_fingerprint.py`, and `risk_replay.py`. The package retains
   lazy, explicit D2C imports; no D1/D2A/D2B production semantics were changed.
@@ -568,7 +568,7 @@ authorize D2B2 or D2C.
 - Governance result: **PLAN REQUIRES SPLIT**; D2A passed independent GPT-5.6 Sol / High verification and is **CLOSED**.
 - Governance result: **PLAN REQUIRES SPLIT** for D2B.
 - D2C governance result: **PLAN APPROVED WITH CONDITIONS**. The single authorized D2C stateless pure-Risk replay
-  integration unit is **IMPLEMENTED; FIRST VERIFICATION FAILED (D2C-IV-P2-001) REMEDIATED 2026-10-22; FRESH RE-VERIFICATION PENDING**. D3–D7 remain **NOT AUTHORIZED**.
+  integration unit is **CLOSED; independent re-verification PASS 2026-10-22 (D2C-IV-P2-001/P2-002/P2-003 and P3-002 closed; PR #17)**. D3–D7 remain **NOT AUTHORIZED**.
 
 ## D2A Final Closure Status
 - NEW-D2A-RV-001: **CLOSED**.
@@ -588,5 +588,5 @@ authorize D2B2 or D2C.
 - No reproducible P0/P1/P2/P3 finding remains within D2A scope.
 - D2B1 final independent re-verification: **PASS; CLOSED**.
 - D2B2 final independent re-verification: **PASS; CLOSED**.
-- D2C requires a fresh independent GPT-5.6 Sol / High verification gate before closure; that gate is the next
-  permitted activity. D3–D7 remain not authorized; do not begin the next sub-batch automatically.
+- D2C fresh independent GPT-5.6 Sol / High verification gate: **PASS 2026-10-22; CLOSED** (PR #17, merge `84203b4`).
+  D3–D7 remain not authorized; do not begin the next sub-batch automatically.

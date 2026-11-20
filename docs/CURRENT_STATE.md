@@ -6,7 +6,7 @@
 - **Environment & Promotion Policy (approved 2026-11-19)**: `main` is the only long-lived branch; no `uat` branch is maintained. UAT is an environment, not a branch: the UAT server runs a pinned tag (`uat-YYYY-MM-DD` or commit SHA) created on `main` after CI is green and the UAT checklist is signed off. Feature work uses short-lived branches merged into `main`. Environment configuration stays in per-environment `.env` files (never committed). Avoid squash-merge drift between local and GitHub `main`.
 - **Current Milestone**: Batch D remains OPEN; D1, D2A, D2B1, and D2B2 are CLOSED.
 - **Current Active Gate**: D2C Stateless Pure Risk Replay Integration is CLOSED (independent re-verification PASS 2026-10-22; D2C-IV-P2-001 and D2C-IV-P2-002 closed).
-- **Next Permitted Activity**: Fresh independent GPT-5.6 Sol / High D2C verification; D2C is not CLOSED.
+- **Next Permitted Activity**: owner decision on the next gate only; no D3+ work without explicit authorization. D2C is CLOSED (PR #17 merged `84203b4`; independent re-verification PASS 2026-10-22).
 - **Prohibited Progression**: D3–D7 remain NOT AUTHORIZED; D2C authorization does not include fills, state evolution, persistence, API, or UI.
 
 ---
@@ -49,8 +49,8 @@
   canonical replay snapshot with complete configuration/input identity. Selected-strategy evaluation preserves
   canonical Strategy candidate and TradePlan parity, deterministic event ordering, output fingerprints, and
   repeat-run determinism without DB, Risk, AI, broker/MT5, network, or filesystem-write dependencies.
-- **Backtesting Engine**: NOT COMPLETE. D2C stateless pure Risk replay integration is implemented locally but is
-  not independently verified. No fill simulation, trade lifecycle, PnL, equity curve, metrics engine, persistence,
+- **Backtesting Engine**: NOT COMPLETE. D2C stateless pure Risk replay integration is implemented and CLOSED
+  (independent re-verification PASS 2026-10-22). No fill simulation, trade lifecycle, PnL, equity curve, metrics engine, persistence,
   Backtesting API, or results UI exists.
 - **D2B governance**: PLAN REQUIRES SPLIT. D2B1 implemented, remediated, and independently verified an
   infrastructure-free pure Risk input/result contract and deterministic policy kernel with characterization,
@@ -121,7 +121,7 @@ side-effect-free policy seam and isolated simulation state; no live table or aut
 Governance therefore split D2 into independently gated units. D2A owns only the causal replay foundation
 through existing Analysis, Strategy, and suggestion-only TradePlan output. D2B is further split: D2B1 extracted
 and proved the pure Risk contracts/kernel, while D2B2 migrated and independently verified the live wrapper with
-exact public parity. D2C now integrates replay with that verified seam, pending its own independent gate. This prevents replay
+exact public parity. D2C integrates replay with that verified seam and passed its own independent gate on 2026-10-22. This prevents replay
 causality work from being coupled to a safety-critical live Risk refactor.
 
 The approved staged data flow is:
@@ -146,7 +146,7 @@ The approved staged data flow is:
 - D2B2 Live Risk Wrapper Migration and Parity Closure: **CLOSED — FINAL INDEPENDENT RE-VERIFICATION PASS**.
 - D2C: **CLOSED — INDEPENDENT RE-VERIFICATION PASS 2026-10-22 (347 tests; D2C-IV-P2-001/D2C-IV-P2-002 closed)**.
 - D3–D7: **NOT AUTHORIZED**.
-- Backtesting: **CAUSAL REPLAY VERIFIED; STATELESS RISK REPLAY IMPLEMENTED LOCALLY; FILL ENGINE NOT IMPLEMENTED**.
+- Backtesting: **CAUSAL REPLAY AND STATELESS RISK REPLAY VERIFIED (D2C CLOSED); FILL ENGINE NOT IMPLEMENTED**.
 - Model Routing: **NOT AUTHORIZED**.
 - Paper Trading: **NOT AUTHORIZED**.
 - Broker Execution: **NOT AUTHORIZED**.
