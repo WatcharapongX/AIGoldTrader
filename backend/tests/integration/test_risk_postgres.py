@@ -12,6 +12,7 @@ from psycopg import sql
 from sqlalchemy import text
 from test_postgres import _alembic, isolated_postgres  # noqa: F401
 
+from app.core.config import get_settings
 from app.core.event_loop import new_event_loop
 from app.db.session import dispose_engine, get_session_factory
 from app.services.market_data.domain import Quote
@@ -715,7 +716,7 @@ def test_paper_account_state_postgresql_concurrency_semantics(isolated_postgres)
     ).fetchone()[0] == 1
 
 
-def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  # noqa: F811
+def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres, monkeypatch):  # noqa: F811
     """P1-031 & P2-035:
     Real FastAPI HTTP API concurrency gate:
     1. Five rounds of 10 concurrent POST /api/risk/evaluate calls for the same
@@ -733,6 +734,9 @@ def test_fastapi_http_evaluate_concurrency_and_idempotency(isolated_postgres):  
     conn, schema = isolated_postgres
     conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
     _alembic("upgrade", "head")
+    # Test-only: the global API limiter (default 120/min per IP) would reject the 100+ calls below.
+    monkeypatch.setenv("RATE_LIMIT_API_PER_MINUTE", "10000")
+    get_settings.cache_clear()
 
     user_id = str(uuid.uuid4())
     other_user_id = str(uuid.uuid4())
