@@ -300,7 +300,12 @@ async def test_slow_calendar_does_not_pause_market_quote_collection(monkeypatch)
     try:
         await asyncio.wait_for(entered.wait(), 2)
         market.quote = quote()
-        await asyncio.sleep(1.1)
+        # Wait for the next collection tick (run loop period is 1s) with a generous deadline,
+        # instead of a fixed 1.1s sleep that leaves ~0.1s margin on loaded CI runners.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while len(service.quotes) < 2 and loop.time() < deadline:
+            await asyncio.sleep(0.05)
         assert len(service.quotes) == 2 and calls == 1
         assert service.quotes[-1].timestamp == market.quote.timestamp
     finally:
