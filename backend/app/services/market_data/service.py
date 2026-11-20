@@ -39,7 +39,10 @@ class LocalMarketBus:
     def unsubscribe(self, queue) -> None:
         self.queues.discard(queue)
 
-    def publish(self, value) -> None:
+    def publish(self, value, sequence: int = 0) -> None:
+        # Items are (sequence_at_publish, candles). The sequence is bound to the event that produced it,
+        # so consumers can drop updates that predate their snapshot. None remains the close/reconnect signal.
+        item = None if value is None else (sequence, value)
         for queue in tuple(self.queues):
             if queue.full():
                 while not queue.empty():
@@ -47,7 +50,7 @@ class LocalMarketBus:
                 queue.put_nowait(None)
                 self.queues.discard(queue)
             else:
-                queue.put_nowait(value)
+                queue.put_nowait(item)
 
 
 class MarketService:
@@ -213,7 +216,7 @@ class MarketService:
         if candles:
             self.last_candle = max(c.open_time for c in candles)
         self.sequence += 1
-        self.bus.publish(candles)
+        self.bus.publish(candles, self.sequence)
         return True
 
     async def run(self) -> None:
