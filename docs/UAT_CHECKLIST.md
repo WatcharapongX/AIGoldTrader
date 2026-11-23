@@ -31,9 +31,9 @@ Paper execution, OMS, broker routing, and live trading require a separate
 governance authorization and are NOT approved by this checklist.
 
 ## Sign-off Record
-- Promotion SHA: 7acbda6562e3a8f69b1c196f3981118ab4f9b4fb (main, merge of PR #37)
-- Tag: uat-2026-11-20 (annotated; points at the SHA above)
-- Date: 2026-11-20
-- Signed by: owner (confirmed in chat; all 15 items reviewed by the owner)
-- Batch D quality gate basis: D2C independent re-verification PASS (2026-10-22), per owner decision
+- Promotion SHA: 397e955490403efcf1df30dd1da0b55760672874 (main tip; merge of PR #40)
+- Tag: uat-2026-11-23 (annotated; points at the SHA above)
+- Date: 2026-11-23
+- Signed by: owner (confirmed in chat; NEW UAT checklist sign-off approved)
+- Basis: prior UAT (`uat-2026-11-20` @ `7acbda6`) plus CI green on this tip; Dependabot/constraints landed on `main` since previous tag; D2C `bc6716c` NOT included
 - CI on SHA: backend, frontend, and security all success
